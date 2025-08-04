@@ -96,7 +96,7 @@ Il est obligatoire de s'enregistrer au challenge pour pouvoir accéder aux donn�
 
 Ce projet utilise des données propriétaires de Rakuten, mises à disposition uniquement à des fins de formation et de compétition. Toute réutilisation est interdite sans autorisation.
 
-**Streamlit Application**
+**Streamlit Application** (prochaines étapes)
 
 Une application Streamlit est proposée pour visualiser les résultats :
 
