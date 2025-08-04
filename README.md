@@ -1,48 +1,119 @@
-# ProjectTemplate
+# Rakuten Product Classification – DataScientest x Mines Paris
 
-## Explanations and Instructions
-
-This repository contains the files needed to initialize a project for your [DataScientest](https://datascientest.com/) training.
-
-It contains mainly the present README.md file and an application template [Streamlit](https://streamlit.io/).
-
-**README**
-
-The README.md file is a central element of any git repository. It allows you to present your project, its objectives, and to explain how to install and launch the project, or even how to contribute to it.
-
-You will have to modify different sections of this README.md to include the necessary informations.
-
-- Complete the sections (`## Presentation and Installation` `## Streamlit App`) following the instructions in these sections.
-- Delete this section (`## Explanations and Instructions`)
-
-**Streamlit Application**
-
-A [Streamlit] application template (https://streamlit.io/) is available in the [streamlit_app](streamlit_app) folder. You can use this template to start with your project.
 
 ## Presentation and Installation
 
-Complete this section with a brief description of your project, the context (including a link to the DataScientest course), and the objectives.
 
-You can also add a brief presentation of the team members with links to your respective networks (GitHub and/or LinkedIn for example).
+Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Paris** et du challenge proposé par **Rakuten Institute of Technology** via la plateforme Challenge Data en partenariat avec le **Collège de France**. Il vise à **automatiser la classification des produits vendus sur la marketplace Rakuten** France en s’appuyant à la fois sur des **données textuelles** (titres, descriptions) et **visuelles** (images produits).
 
-**Example:**
 
-This repository contains the code for our project **PROJECT_NAME**, developed during our [Data Scientist training](https://datascientest.com/en/data-scientist-course) at [DataScientest](https://datascientest.com/).
+## Objectifs
 
-The goal of this project is to **...**
+- Construire un modèle de classification supervisée multimodal (texte + image) pour prédire la catégorie prdtypecode des produits.
 
-This project was developed by the following team :
+- Traiter les défis liés au déséquilibre des classes, à la diversité linguistique et à l’hétérogénéité des visuels.
 
-- John Doe ([GitHub](https://github.com/) / [LinkedIn](http://linkedin.com/))
-- Martin Dupont ([GitHub](https://github.com/) / [LinkedIn](http://linkedin.com/))
+- Proposer une structuration sémantique des catégories pour faciliter l'expérience utilisateur et optimiser la navigation.
 
-You can browse and run the [notebooks](./notebooks). 
+## Methodologie
 
-You will need to install the dependencies (in a dedicated environment) :
+### Exploration et Préprocessing
 
-```
+- Fusion des données texte et visuelles via imageid et productid
+
+- Traitement des valeurs manquantes (35% de description manquantes)
+
+- Construction d’un dictionnaire de mots vagues multilingues pour améliorer les visualisations
+
+- Création de colonnes auxiliaires (ex. image_name) pour faciliter les jointures
+
+#### Visualisation
+
+- Nuages de mots bruts et nettoyés
+
+- Affichage d’images par catégorie
+
+- Diagrammes de distribution des classes (déséquilibrées)
+
+- Arborescence thématique (ex. : Jeux & gaming > Accessoires gaming)
+
+#### Observations et résultats de l'étape EDA
+
+- 27 catégories identifiées dans Y_train, très déséquilibrées (de 764 à 10 209 produits)
+
+- Définition d’un nom standardisé des catégories inspiré des marketplaces
+
+- Structuration de 8 thématiques principales (Jeux & Gaming, Livres & Presse, Maison & Jardin, etc.)
+
+- Mise en place d’un pipeline pour visualiser, nettoyer, et interpréter les données
+
+#### Prochaines étapes
+
+- Entraînement d’un modèle de classification multimodale (texte + image)
+
+- Mise en place d’un modèle en cascade : d’abord prédiction de la thématique, puis de la catégorie
+
+- Évaluation via F1-score pondéré pour gérer le déséquilibre des classes
+
+- Déploiement en démonstration Streamlit
+
+### Feature Engineering (prochaine étapes dont voici les orientations principales)
+
+- Vectorisation des textes (designation et description)
+
+- Traitement d’images (normalisation, redimensionnement, encodage)
+
+- Réduction de dimension (PCA envisagé)
+
+- Approche multimodale : fusion des embeddings texte et image
+
+## Installation
+
+### Cloner ce dépôt :
+
+git clone https://github.com/ghjulia01/Rakuten.git
+cd rakuten_product_classification
+
+### Créer un environnement virtuel
+
+python -m venv env
+source env/bin/activate
+
+### Installer les dépendances :
+
 pip install -r requirements.txt
-```
+
+### Télécharger les données (fournies dans le cadre du challenge Rakuten) :
+
+Il est obligatoire de s'enregistrer au challenge pour pouvoir accéder aux données.
+
+- X_train.csv, Y_train.csv, X_test.csv
+
+- images.zip à extraire dans ./data/images/
+
+
+## Licence
+
+Ce projet utilise des données propriétaires de Rakuten, mises à disposition uniquement à des fins de formation et de compétition. Toute réutilisation est interdite sans autorisation.
+
+**Streamlit Application**
+
+Une application Streamlit est proposée pour visualiser les résultats :
+
+## Presentation and Installation
+
+Fonctionnalités qui seront disponibles :
+
+- Visualisation d’images par catégorie
+
+- Analyse des mots-clés par catégorie
+
+- Nuages de mots (avec ou sans nettoyage)
+
+- Statistiques descriptives
+
+- Arborescence thématique des catégories
+
 
 ## Streamlit App
 
