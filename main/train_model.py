@@ -111,7 +111,11 @@ def create_combined_pipeline(image_dir, image_size=(64, 64),
     voit des features normalisées
     et que l'échantillonnage se fait dans l'espace standardisé.
     """
-    text_branch = create_text_pipeline()
+    text_branch = create_text_pipeline(
+    max_features=20000,
+    translate_map_path=os.path.join("config", "translate_map_starter_from_cleaned.json"),
+    use_stem=True
+)
     image_branch = create_image_pipeline(image_dir=image_dir, image_size=image_size)
 
     features = FeatureUnion([
