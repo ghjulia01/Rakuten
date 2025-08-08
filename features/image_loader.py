@@ -15,8 +15,13 @@ from sklearn.base import BaseEstimator, TransformerMixin
 class ImageLoader(BaseEstimator, TransformerMixin):
     def __init__(self, image_dir, image_size=(64, 64)):
         self.image_dir = image_dir
+        # Définit le répertoire où les images sont stockées
         self.image_size = image_size
+        # Définit la taille des images à redimensionner
         self.pattern = re.compile(r"image_(\d+)_product_(\d+)\.jpg")
+        # Compile le pattern pour matcher les noms de fichiers d'images
+        self.index = {}
+        # Dictionnaire pour indexer les images par product_id
 
 # Cette méthode est obligatoire pour les objets scikit-learn.
 # Elle ne fait rien ici (pas d’apprentissage à faire), 
@@ -24,6 +29,13 @@ class ImageLoader(BaseEstimator, TransformerMixin):
 # X est la liste des product_id.
 
     def fit(self, X, y=None):
+        """Construit un index productid -> chemin image pour gagner 
+        du temps lors de la transformation."""
+        for filename in os.listdir(self.image_dir):
+            match = self.pattern.match(filename)
+            if match:
+                product_id = match.group(2)
+                self.index[product_id] = os.path.join(self.image_dir, filename)
         return self
 
 
@@ -34,22 +46,19 @@ class ImageLoader(BaseEstimator, TransformerMixin):
 # # (n_samples, height, width, channels)
 
     def transform(self, X):
-        images = []
-        for product_id in X:
-            img_array = self._load_image_for_product(product_id)
-            images.append(img_array)
-        return np.array(images)
+        """
+        Charge et transforme les images pour chaque product_id.
+        Retourne un tableau numpy de forme (n_samples, height, width, channels),
+        avec les pixels normalisés dans [0, 1].
+        Si l'image est manquante, retourne une image noire.
+        """
+        return np.array([
+            self._process_image(self.index[str(pid)])
+            if str(pid) in self.index
+            else np.zeros((*self.image_size, 3), dtype=np.float32)
+            for pid in X
+        ])
 
-# Cette méthode charge l'image pour un product_id donné
-# Si l'image n'est pas trouvée, elle retourne une image vide (noire)
-#  (np.zeros) si aucune image ne correspond à product_id.
-    def _load_image_for_product(self, product_id):
-        for filename in os.listdir(self.image_dir):
-            match = self.pattern.match(filename)
-            if match and match.group(2) == str(product_id):
-                path = os.path.join(self.image_dir, filename)
-                return self._process_image(path)
-        return np.zeros((*self.image_size, 3), dtype=np.uint8)  # Si image absente
 
 # Cette méthode traite l'image : redimensionnement et normalisation
 # Ouvre l’image et la convertit en couleur et la redimensionne
@@ -59,4 +68,5 @@ class ImageLoader(BaseEstimator, TransformerMixin):
         with Image.open(image_path) as img:
             img = img.convert("RGB")  # Assure que l'image est en RGB
             img = img.resize(self.image_size) # Redimensionne à (64, 64)
-            return np.array(img) / 255.0  #  Normalise les pixels dans [0, 1]
+            return np.array(img, dtype=np.float32) / 255.0  
+        #  Normalise les pixels dans [0, 1]
