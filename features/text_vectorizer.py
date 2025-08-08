@@ -1,35 +1,71 @@
-# **Pre-processing et feature engineering - TextTfidfVectorizer**
-
-# Dans cette étape, text_vectorizer.py contient la classe TextTfidfVectorizer, 
-# un wrapper autour de TfidfVectorizer.
-# Il sert à apprendre un vocabulaire sur les textes nettoyés et transformer 
-# ces textes en vecteurs numériques utilisables par un modèle.
-
-#Le TfidfVectorizer est utilisé pour transformer le texte en vecteurs de 
-# caractéristiques numérique, en tenant compte de la fréquence 
-# des mots dans le corpus.
+# -----------------------------------------------------------------------------
+# Vectorisation TF-IDF pour textes déjà nettoyés par TextCleaner.
+# - Pas de prétraitement lourd ici : le nettoyage est fait en amont.
+# - Paramètres utiles exposés (ngrammes, min_df, max_df, strip accents, etc.)
+# - dtype=float32 pour alléger la mémoire.
+# -----------------------------------------------------------------------------
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
-    def __init__(self, max_features=5000):
-        self.max_features = max_features
-        self.vectorizer = TfidfVectorizer(max_features=self.max_features)
+    def __init__(self,
+                 max_features: int = 5000,
+                 ngram_range=(1, 2),
+                 min_df=2,
+                 max_df=0.95,
+                 sublinear_tf=True,
+                 norm="l2",
+                 strip_accents="unicode",
+                 lowercase=False,
+                 token_pattern=r"(?u)\b\w+\b",
+                 dtype="float32"):
+        """
+        Paramètres principaux
+        ---------------------
+        max_features : nb max de features conservées (par fréquence TF-IDF).
+        ngram_range : (1,2) => unigrams + bigrams (bien pour le e-commerce).
+        min_df : ignorer les termes très rares (ex. 2 documents mini).
+        max_df : ignorer les termes trop fréquents (ex. présents dans >95% des docs).
+        sublinear_tf : log-scaling des TF pour limiter l’influence des répétitions.
+        norm : normalisation des vecteurs ('l2' par défaut).
+        strip_accents : 'unicode' => supprime les accents pour harmoniser.
+        lowercase : False car TextCleaner passe déjà en minuscules.
+        token_pattern : pattern simple (mots alphanumériques) – le texte est déjà propre.
+        dtype : float32 pour réduire la mémoire sans perte notable.
+        """
+        self.params = dict(
+            max_features=max_features,
+            ngram_range=ngram_range,
+            min_df=min_df,
+            max_df=max_df,
+            sublinear_tf=sublinear_tf,
+            norm=norm,
+            strip_accents=strip_accents,
+            lowercase=lowercase,
+            token_pattern=token_pattern,
+            dtype=dtype
+        )
+        self.vectorizer = TfidfVectorizer(**self.params)
 
-# Apprentissage du vocabulaire et des poids TF-IDF
-    # Fit est nécessaire même vide, pour permettre l’intégration dans un pipeline
-    # X est une série de textes propres (ex. désignation + description nettoyées).
-    # Elle ne retourne pas de données, mais elle met en mémoire le vocabulaire.
-    # On retourne self pour permettre le chaînage (pipeline.fit().transform()).
     def fit(self, X, y=None):
+        # X : série de textes déjà nettoyés (TextCleaner)
         self.vectorizer.fit(X)
         return self
-# Utilise le vocabulaire appris pour transformer chaque texte en vecteur de scores TF-IDF.
-# Résultat : une matrice sparse de dimensions (n_texts, n_features)
-# Cette méthode ne modifie pas le vocabulaire : elle applique celui appris au fit.
+
     def transform(self, X):
+        # Retourne une matrice sparse (n_docs, n_features)
         return self.vectorizer.transform(X)
-    
-# Comme TextTfidfVectorizer ne peut pas gérer plusieurs colonnes,
-# on crée un transformateur qui combine les colonnes de texte.
+
+    # Utiles si tu veux sérialiser / recharger proprement
+    def get_feature_names_out(self):
+        return self.vectorizer.get_feature_names_out()
+
+    def get_params(self, deep=True):
+        return {"max_features": self.params["max_features"], **self.params}
+
+    def set_params(self, **kwargs):
+        # Permet d’ajuster les hyperparams via GridSearchCV si besoin
+        self.params.update(kwargs)
+        self.vectorizer = TfidfVectorizer(**self.params)
+        return self
