@@ -2,36 +2,19 @@
 import os
 import argparse
 import joblib
-import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline, FeatureUnion
-from sklearn.preprocessing import FunctionTransformer, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, f1_score
 
-# --- Nos bloques réutilisables ---
 from models.text_pipeline import create_text_pipeline
-from models.image_pipeline import create_image_pipeline
-from features.image_loader import ImageLoader  
+from models.image_pipeline import create_image_pipeline  # DataFrame -> (select_pid+loader+flatten+to_sparse)
 
-# Image loader a une version indexée pour charger les images
-# et les redimensionner en (h, w, 3) pour les images RGB 
-# plus rapidement
-
-
-# ---------------------------------------
-# 1) Pipeline combiné (texte + image)
-# ---------------------------------------
+# --------------------------
+# Pipeline combiné
+# --------------------------
 def create_combined_pipeline(image_dir, image_size=(64, 64)):
-    """
-    - Branche texte : create_text_pipeline() (TextCleaner combine déjà designation+description)
-    - Branche image : productid -> ImageLoader -> flatten
-    - Concat via FeatureUnion
-    - StandardScaler (with_mean=False) adapté aux matrices clairsemées
-    - LogisticRegression équilibrée
-    """
     text_branch = create_text_pipeline()
     image_branch = create_image_pipeline(image_dir=image_dir, image_size=image_size)
 
@@ -52,108 +35,81 @@ def create_combined_pipeline(image_dir, image_size=(64, 64)):
         ("model", model),
     ])
 
-# ---------------------------------------
-# 2) Entraînement + évaluation
-# ---------------------------------------
-def train_and_evaluate(X_train: pd.DataFrame, y_train: pd.Series,
-                       X_test: pd.DataFrame, y_test: pd.Series,
-                       image_train_dir: str, image_test_dir: str,
-                       image_size=(64, 64)):
-    """
-    Entraîne sur X_train / y_train et évalue sur X_test / y_test.
-    Les répertoires d'images sont séparés (train / test).
-    """
-    # Création du pipeline avec le dossier images d'entraînement
+# --------------------------
+# Entraîner sur train, prédire sur test (sans y_test)
+# --------------------------
+def train_and_predict_on_test(X_train, y_train, X_test,
+                              image_train_dir, image_test_dir,
+                              image_size=(64, 64)):
+    # 1) pipeline avec dossier images d'entraînement
     pipe = create_combined_pipeline(image_dir=image_train_dir, image_size=image_size)
 
-    print(">> Entraînement...")
+    print(">> Entraînement sur X_train…")
     pipe.fit(X_train, y_train)
 
-    print(">> Évaluation sur test...")
-    # Changer le dossier images dans la branche image avant prédiction
+    print(">> Prédiction sur X_test…")
+    # 2) on remplace la branche image pour pointer vers le dossier test (pas de refit)
     pipe.named_steps["features"].transformer_list = [
         ("text", pipe.named_steps["features"].transformer_list[0][1]),
-        ("image", create_image_pipeline(image_dir=image_test_dir, 
-                                        image_size=image_size)),
+        ("image", create_image_pipeline(image_dir=image_test_dir, image_size=image_size)),
     ]
     y_pred = pipe.predict(X_test)
+    return pipe, y_pred
 
-    print(classification_report(y_test, y_pred))
-    print("F1 pondéré :", f1_score(y_test, y_pred, average="weighted"))
-
-    return pipe
-
-# ---------------------------------------
-# 3) CLI / Point d’entrée
-# ---------------------------------------
+# --------------------------
+# CLI
+# --------------------------
 def parse_args():
+    p = argparse.ArgumentParser(description="Train (text+image) and predict on test set without y_test")
+    # Tes fichiers
     p.add_argument("--x_train_csv", default=os.path.join("data", "X_train_update.csv"))
     p.add_argument("--y_train_csv", default=os.path.join("data", "Y_train_CVw08PX.csv"))
     p.add_argument("--x_test_csv",  default=os.path.join("data", "X_test_update.csv"))
-    p.add_argument("--y_test_csv",  default="")  # optional: leave empty if you don't have labels
-
+    # Dossiers images
     p.add_argument("--image_train_dir", default=os.path.join("data", "images", "images", "image_train"))
     p.add_argument("--image_test_dir",  default=os.path.join("data", "images", "images", "image_test"))
+    # Taille des images
     p.add_argument("--image_size", type=int, nargs=2, default=[64, 64])
-
+    # Sorties
     p.add_argument("--model_out", default=os.path.join("models", "text_image_logreg.joblib"))
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--val_size", type=float, default=0.2)
+    p.add_argument("--pred_out", default=os.path.join("models", "y_test_pred.csv"))
     return p.parse_args()
 
 def main():
     args = parse_args()
 
-    # Chargement
     print(">> Chargement des données…")
     X_train = pd.read_csv(args.x_train_csv, index_col=0)
     y_train = pd.read_csv(args.y_train_csv, index_col=0).squeeze()
+    X_test  = pd.read_csv(args.x_test_csv, index_col=0)
 
-    # Petite vérification pour s'assurer que les colonnes attendues sont présentes
-    for col in ["designation", "description", "productid"]:
+    needed = ["designation", "description", "productid"]
+    for col in needed:
         if col not in X_train.columns:
-            raise ValueError(f"Missing column in X_train: '{col}'")
-
-    # Entraînement
-    use_real_test = False
-    X_test, y_test = None, None
-    if os.path.isfile(args.x_test_csv) and len(args.x_test_csv) > 0:
-        X_test = pd.read_csv(args.x_test_csv, index_col=0)
-        missing = [c for c in ["designation", "description", "productid"] if c not in X_test.columns]
-        if missing:
-            raise ValueError(f"Missing columns in X_test: {missing}")
-
-        if args.y_test_csv and os.path.isfile(args.y_test_csv) and os.path.getsize(args.y_test_csv) > 0:
-            y_test = pd.read_csv(args.y_test_csv, index_col=0).squeeze()
-            use_real_test = True
+            raise ValueError(f"Colonne manquante dans X_train : '{col}'")
+        if col not in X_test.columns:
+            raise ValueError(f"Colonne manquante dans X_test : '{col}'")
 
     image_size = tuple(args.image_size)
 
-    if use_real_test:
-        pipe = train_and_eval_on_test(
-            X_train[["designation", "description", "productid"]],
-            y_train,
-            X_test[["designation", "description", "productid"]],
-            y_test,
-            image_train_dir=args.image_train_dir,
-            image_test_dir=args.image_test_dir,
-            image_size=image_size
-        )
-    else:
-        print(">> No y_test provided — using a validation split on training data.")
-        pipe = train_and_eval_with_split(
-            X_train[["designation", "description", "productid"]],
-            y_train,
-            image_train_dir=args.image_train_dir,
-            image_size=image_size,
-            test_size=args.val_size,
-            seed=args.seed
-        )
+    # Train + Predict
+    pipe, y_pred = train_and_predict_on_test(
+        X_train[needed], y_train,
+        X_test[needed],
+        image_train_dir=args.image_train_dir,
+        image_test_dir=args.image_test_dir,
+        image_size=image_size
+    )
 
-    # Sauvegarde
+    # Sauvegardes
     os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
     joblib.dump(pipe, args.model_out)
-    print(f">> Modèle sauvegardé: {args.model_out}")
+    print(f">> Modèle sauvegardé : {args.model_out}")
+
+    # CSV de prédictions (index aligné à X_test)
+    pred_df = pd.DataFrame(y_pred, index=X_test.index, columns=["predicted_label"])
+    pred_df.to_csv(args.pred_out)
+    print(f">> Prédictions sauvegardées : {args.pred_out}")
 
 if __name__ == "__main__":
     main()
