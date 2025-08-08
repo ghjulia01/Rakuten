@@ -36,7 +36,7 @@ def create_combined_pipeline(image_dir, image_size=(64, 64)):
     ])
 
 # --------------------------
-# Entraîner sur train, prédire sur test (sans y_test)
+# Entraîner sur train, prédire sur test 
 # --------------------------
 def train_and_predict_on_test(X_train, y_train, X_test,
                               image_train_dir, image_test_dir,
@@ -48,7 +48,7 @@ def train_and_predict_on_test(X_train, y_train, X_test,
     pipe.fit(X_train, y_train)
 
     print(">> Prédiction sur X_test…")
-    # 2) on remplace la branche image pour pointer vers le dossier test (pas de refit)
+    # 2) on remplace la branche image pour pointer vers le dossier test 
     pipe.named_steps["features"].transformer_list = [
         ("text", pipe.named_steps["features"].transformer_list[0][1]),
         ("image", create_image_pipeline(image_dir=image_test_dir, image_size=image_size)),
@@ -61,7 +61,7 @@ def train_and_predict_on_test(X_train, y_train, X_test,
 # --------------------------
 def parse_args():
     p = argparse.ArgumentParser(description="Train (text+image) and predict on test set without y_test")
-    # Tes fichiers
+    # Les fichiers
     p.add_argument("--x_train_csv", default=os.path.join("data", "X_train_update.csv"))
     p.add_argument("--y_train_csv", default=os.path.join("data", "Y_train_CVw08PX.csv"))
     p.add_argument("--x_test_csv",  default=os.path.join("data", "X_test_update.csv"))
