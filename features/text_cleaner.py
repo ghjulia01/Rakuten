@@ -182,3 +182,19 @@ class HasDescriptionFlag(BaseEstimator, TransformerMixin):
             raise ValueError(f"Colonne '{self.col_name}' absente de X")
         series = X[self.col_name].notna().astype(int)
         return pd.DataFrame({self.out_name: series}, index=X.index)
+class DesignationLength(BaseEstimator, TransformerMixin):
+    """
+    Transformateur qui calcule la longueur de la désignation en caractères.
+    Retourne un DataFrame (n, 1) avec le nom 'designation_length'.
+    """
+    def __init__(self, col_name: str = "designation"):
+        self.col_name = col_name
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X: pd.DataFrame):
+        if self.col_name not in X.columns:
+            raise ValueError(f"Colonne '{self.col_name}' absente de X")
+        lengths = X[self.col_name].astype(str).str.len()
+        return pd.DataFrame({"designation_length": lengths}, index=X.index)
