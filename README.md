@@ -1,7 +1,7 @@
 # Rakuten Product Classification – DataScientest x Mines Paris
 
 
-## Presentation and Installation
+## <span style="color:RoyalBlue">Presentation and Installation </span>
 
 
 Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Paris** et du challenge proposé par **Rakuten Institute of Technology** via la plateforme Challenge Data en partenariat avec le **Collège de France**. Il vise à **automatiser la classification des produits vendus sur la marketplace Rakuten** France en s’appuyant à la fois sur des **données textuelles** (titres, descriptions) et **visuelles** (images produits).
