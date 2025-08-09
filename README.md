@@ -59,7 +59,7 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 ### Feature Engineering (prochaine étapes dont voici les orientations principales)
 
-#### Traitement du texte – Pipeline Rakuten
+#### A- Traitement du texte – Pipeline Rakuten
 
 ##### 1. Objectif
 
@@ -123,11 +123,11 @@ Après nettoyage, les textes passent par une vectorisation TF-IDF :
     - lowercase=False : déjà fait en amont
     - dtype='float32' : mémoire optimisée
 
-- Traitement d’images (normalisation, redimensionnement, encodage)
+#### B-  Traitement d’images (normalisation, redimensionnement, encodage)
 
-- Réduction de dimension (PCA envisagé)
+#### C-  Réduction de dimension (PCA envisagé)
 
-- Approche multimodale : fusion des embeddings texte et image
+#### D-  Approche multimodale : fusion des embeddings texte et image
 
 ## Installation
 
