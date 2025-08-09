@@ -118,6 +118,14 @@ Le TextCleaner applique, dans cet ordre :
 Après nettoyage, les textes passent par une vectorisation TF-IDF :
     - max_features = 5 000 (paramétrable)
     - ngram_range = (1, 2) → unigrams + bigrams
+        - Unigram = un seul mot
+            - Ex. : “chaussure”, “cuir”, “homme”
+        - Bigram = séquence de 2 mots consécutifs
+            - Ex. : “chaussure cuir”, “cuir homme”
+        - Les unigrams capturent le vocabulaire général.
+        - Les bigrams capturent des expressions significatives qui ont un sens particulier dans un contexte produit.
+            - Par ex., “acier inox” ≠ “acier” + “inox” séparés.
+            - “coque iphone” ≠ “coque” + “iphone” de manière indépendante.
     - min_df=2 / max_df=0.95 : suppression des termes trop rares ou trop fréquents
     - sublinear_tf=True : pondération logarithmique pour limiter l’impact des répétitions - strip_accents='unicode' : harmonise les variantes accentuées
     - lowercase=False : déjà fait en amont
