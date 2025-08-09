@@ -5,6 +5,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 # Ensure NLTK stopwords are available for tests that rely on them
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_nltk_stopwords():
