@@ -31,8 +31,10 @@ from typing import Optional, Dict
 
 from sklearn.pipeline import make_pipeline, FeatureUnion
 
-from features.text_cleaner import TextCleaner, HasDescriptionFlag  # stemming only
-from features.text_vectorizer import TextTfidfVectorizer          # TF-IDF propre
+from features.text_cleaner import TextCleaner, HasDescriptionFlag, DesignationLength 
+# stemming only
+from features.text_vectorizer import TextTfidfVectorizer          
+# TF-IDF propre
 
 
 def _load_translate_map(path: Optional[str]) -> Dict[str, str]:
