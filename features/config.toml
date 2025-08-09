@@ -23,6 +23,22 @@ test_dir  = "data/images/images/image_test"
 # Taille cible des images avant vectorisation (hauteur, largeur)
 size = [64, 64]
 
+# --- Statistiques des images ---
+# Features width/height/occupancy (hors blanc/noir)
+[images.stats]
+enabled = true              # true = on ajoute la branche de features automatiques
+white_threshold = 230       # pixels >= 230 -> fond (blanc)
+black_threshold = 25        # pixels <= 25  -> fond (noir)
+min_area = 16               # surface min pour éviter le bruit
+out_prefix = "img_w230_b25_"# préfixe des noms de features (traçabilité)
+
+# --- Réglages branche texte
+[text]
+max_features = 20000
+use_stem = true
+# si fichier de traduction :
+translate_map_path = "config/translate_map_starter_from_cleaned.json"
+
 # --- Stratégies de rééchantillonnage ---
 [sampling]
 # Identifiant de la classe la plus fréquente

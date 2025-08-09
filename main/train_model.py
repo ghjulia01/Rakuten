@@ -19,6 +19,12 @@ chemins & hyperparams.
 X_test pour la prédiction finale.
 - Dossiers images séparés train/test.
 """
+"""
+Pipeline texte + image (pixels + stats objet) avec under/over-sampling.
+- Lecture d'un config TOML (chemins, hyperparams, seuils image, etc.)
+- Option --compare : CV stratifiée pour LR vs LinearSVC (F1-macro)
+- Respect strict du split Rakuten proposé (X_train/Y_train vs X_test)
+"""
 
 import os
 import argparse
@@ -35,364 +41,224 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
 
-# TOML: compatibilité py>=3.11 (tomllib) et py<3.11 (tomli)
+# TOML: py>=3.11 (tomllib) ; py<3.11 (tomli)
 try:
-    import tomllib as tomli  # py311+ si py<3.11 tomli
-except Exception:  # pragma: no cover
-    import tomli  # type: ignore
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # pip install tomli
+
+# Chemin vers le config.toml
+config_path = Path(__file__).parent.parent / "features" / "config.toml"
+config = toml.load(config_path)
 
 from models.text_pipeline import create_text_pipeline
 from models.image_pipeline import create_image_pipeline  
-# DataFrame -> select_pid + loader + flatten + to_sparse
+# pixels (resize->flatten->sparse)
+from features.image_stats import ImageStatsFeaturizer     
+# stats objet: width/height/occ AVANT resize
 
 
-# ---------------------------------------------------------------------
-# Stratégies de rééchantillonnage
-# ---------------------------------------------------------------------
-def make_sampling_strategies(y_train: pd.Series, major_class=2583, major_cap=6000, tail_min=1500):
+# ---------------------------- Sampling ----------------------------
+def make_sampling_strategies(y_train: pd.Series, 
+                             major_class=2583, 
+                             major_cap=6000, 
+                             tail_min=1500):
     """
-    Construit deux stratégies de rééquilibrage à passer à imblearn :
-      - under : seule la classe major_class est réduite à major_cap 
-      si besoin (les autres inchangées)
-      - over  : toutes les classes avec effectif < tail_min sont remontées à tail_min
+    Construit deux stratégies pour imblearn:
+      - under: seule la classe major_class plafonnée à major_cap
+      - over : toutes classes avec effectif < tail_min remontées à tail_min
     """
     vc = y_train.value_counts()
-
-    # undersampling ciblé: seule la classe major_class est potentiellement réduite
     under = {
-        int(cls): (min(int(cnt), int(major_cap)) if int(cls) == int(major_class) else int(cnt))
+        int(cls): (min(int(cnt), 
+                       int(major_cap)) if int(cls) == int(major_class) else int(cnt))
         for cls, cnt in vc.items()
     }
-
-    # oversampling des petites classes: toute classe < tail_min -> tail_min
-    over = {int(cls): int(tail_min) for cls, cnt in vc.items() if int(cnt) < int(tail_min)}
-
+    over = {int(cls): int(tail_min) for cls, 
+            cnt in vc.items() if int(cnt) < int(tail_min)}
     return under, over
 
 
-# ---------------------------------------------------------------------
-# Fabrique du modèle (LR ou SVC)
-# ---------------------------------------------------------------------
-def build_classifier(model_name: str, use_class_weight: bool):
-    """
-    Retourne un estimateur sklearn selon --model.
-    - 'lr'  -> LogisticRegression(max_iter=1000, solver='lbfgs', 
-    class_weight='balanced' optionnel)
-    - 'svc' -> LinearSVC(class_weight='balanced' optionnel)
-    """
+# ------------------------- Classifier factory ---------------------
+def build_classifier(name: str, use_class_weight: bool):
     cw = "balanced" if use_class_weight else None
-
-    if model_name.lower() == "svc":
-        # LinearSVC : efficace en haute dimension, adapté aux matrices 
-        # creuses TF-IDF + pixels aplatis
+    name = (name or "lr").lower()
+    if name == "svc":
         return LinearSVC(class_weight=cw)
-    # par défaut : LR
-    return LogisticRegression(max_iter=1000, solver="lbfgs", class_weight=cw, n_jobs=None)
+    return LogisticRegression(max_iter=1000, solver="lbfgs", 
+                              class_weight=cw)
 
 
-# ---------------------------------------------------------------------
-# Pipeline combiné (texte + image) avec under + over sampling
-# ---------------------------------------------------------------------
-def create_combined_pipeline(image_dir, image_size=(64, 64),
-                             under_strategy=None, over_strategy=None,
-                             model_name: str = "lr", use_class_weight: bool = True):
-    """
-    - Texte : create_text_pipeline() 
-    (nettoyage + vectorisation de designation+description)
-    - Image : create_image_pipeline(image_dir) 
-    (productid -> ImageLoader -> resize -> flatten -> sparse)
-    - Concat : FeatureUnion
-    - Scale : StandardScaler(with_mean=False pour sparse)
-    - Under : RandomUnderSampler (pour 2583 seulement)
-    - Over  : RandomOverSampler  (pour toutes classes < seuil)
-    - Modèle : LR ou LinearSVC (class_weight='balanced' optionnel)
-
-    NB : L'ordre scaler -> under -> over garantit que le modèle 
-    voit des features normalisées
-    et que l'échantillonnage se fait dans l'espace standardisé.
-    """
+# ---------------------- Pipeline construction ---------------------
+def create_combined_pipeline(cfg: dict, under_strategy: dict, 
+                             over_strategy: dict):
+    # --- TEXT ---
     text_branch = create_text_pipeline(
-    max_features=20000,
-    translate_map_path=os.path.join("config", "translate_map_starter_from_cleaned.json"),
-    use_stem=True
-)
-    image_branch = create_image_pipeline(image_dir=image_dir, image_size=image_size)
+        max_features=cfg.get("text", {}).get("max_features", 5000),
+        translate_map_path=cfg.get("text", {}).get("translate_map_path", None),
+        use_stem=bool(cfg.get("text", {}).get("use_stem", True)),
+    )
 
-    features = FeatureUnion([
-        ("text", text_branch),
-        ("image", image_branch),
-    ])
+    # --- IMAGES: pixels (64x64 -> flatten -> sparse) ---
+    image_dir = cfg["images"]["train_dir"]
+    image_size = tuple(cfg["images"].get("size", [64, 64]))
+    image_pixels = create_image_pipeline(image_dir=image_dir, image_size=image_size)
 
-    model = build_classifier(model_name, use_class_weight)
+    # --- IMAGES: stats (width/height/occupancy hors blanc/noir, 
+    # AVANT resize), 
+    # activable via TOML ---
+    transformers = [("text", text_branch), ("image_pixels", image_pixels)]
+    stats_cfg = cfg.get("images", {}).get("stats", {})
+    if bool(stats_cfg.get("enabled", False)):
+        image_stats = ImageStatsFeaturizer(
+            image_dir=image_dir,
+            imgid_col="imageid",
+            pid_col="productid",
+            white_threshold=int(stats_cfg.get("white_threshold", 230)),
+            black_threshold=int(stats_cfg.get("black_threshold", 25)),
+            min_area=int(stats_cfg.get("min_area", 16)),
+            out_prefix=str(stats_cfg.get("out_prefix", "img_w230_b25_")),
+        )
+        transformers.append(("image_stats", image_stats))
 
-    return ImbPipeline(steps=[
+    features = FeatureUnion(transformer_list=transformers)
+
+    model = build_classifier(
+        name=cfg.get("model", {}).get("name", "lr"),
+        use_class_weight=bool(cfg.get("model", {}).get("use_class_weight", True)),
+    )
+
+    pipe = ImbPipeline(steps=[
         ("features", features),
         ("scaler", StandardScaler(with_mean=False)),
-        ("under",  RandomUnderSampler(sampling_strategy=under_strategy, random_state=42)),
-        ("over",   RandomOverSampler(sampling_strategy=over_strategy,  random_state=42)),
-        ("model",  model),
+        ("under", RandomUnderSampler(sampling_strategy=under_strategy, 
+                                     random_state=42)),
+        ("over", RandomOverSampler(sampling_strategy=over_strategy, 
+                                   random_state=42)),
+        ("model", model),
     ])
+    return pipe
 
 
-# ---------------------------------------------------------------------
-# Entraîner sur train + prédire sur test (Rakuten split respecté)
-# ---------------------------------------------------------------------
-def train_and_predict_on_test(X_train, y_train, X_test,
-                              image_train_dir, image_test_dir,
-                              image_size=(64, 64),
-                              major_class=2583, major_cap=6000, tail_min=1500,
-                              use_class_weight=True,
-                              model_name: str = "lr"):
-    # 1) Construire les stratégies dynamiques depuis y_train
+# ---------------- Train on train, predict on test -----------------
+def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
     under, over = make_sampling_strategies(
-        y_train, major_class=major_class, major_cap=major_cap, tail_min=tail_min
+        y_train,
+        major_class=cfg["sampling"]["major_class"],
+        major_cap=cfg["sampling"]["major_cap"],
+        tail_min=cfg["sampling"]["tail_min"],
     )
+    pipe = create_combined_pipeline(cfg, under, over)
 
-    # 2) Pipeline configuré sur le dossier d'images d'entraînement
-    pipe = create_combined_pipeline(
-        image_dir=image_train_dir,
-        image_size=image_size,
-        under_strategy=under,
-        over_strategy=over,
-        model_name=model_name,
-        use_class_weight=use_class_weight
-    )
-
-    print(f">> Entraînement sur X_train avec modèle = {model_name.upper()} …")
+    print(">> Entraînement…")
     pipe.fit(X_train, y_train)
 
-    print(">> Prédiction sur X_test …")
-    # 3) Re-pointer la branche image vers le dossier test (sans refit global)
-    #    On modifie uniquement la sous-branche image de la FeatureUnion
-    text_step_name, text_pipe = pipe.named_steps["features"].transformer_list[0]
-    image_step_name, _ = pipe.named_steps["features"].transformer_list[1]
-    pipe.named_steps["features"].transformer_list = [
-        (text_step_name, text_pipe),
-        (image_step_name, create_image_pipeline(image_dir=image_test_dir, 
-                                                image_size=image_size)),
-    ]
+    print(">> Prédiction sur X_test…")
+    # Repointer les branches images vers dossier TEST (pixels + stats)
+    feat_union = pipe.named_steps["features"]
+    new_list = []
+    image_test_dir = cfg["images"]["test_dir"]
+    image_size = tuple(cfg["images"].get("size", [64, 64]))
+    for name, sub in feat_union.transformer_list:
+        if name == "image_pixels":
+            new_list.append((name, 
+                             create_image_pipeline(image_dir=image_test_dir, 
+                                                   image_size=image_size)))
+        elif name == "image_stats":
+            sub.set_image_dir(image_test_dir)  # méthode prévue dans le featurizer
+            new_list.append((name, sub))
+        else:
+            new_list.append((name, sub))
+    feat_union.transformer_list = new_list
+
     y_pred = pipe.predict(X_test)
     return pipe, y_pred
 
 
-# ---------------------------------------------------------------------
-# Évaluation optionnelle : comparaison LR vs SVC par CV sur X_train/Y_train
-# ---------------------------------------------------------------------
-def compare_models_cv(X_train, y_train,
-                      image_train_dir, image_size,
-                      major_class, major_cap, tail_min,
-                      use_class_weight=True, cv_splits=3, random_state=42):
+# ----------------------- CV comparison (opt) ----------------------
+def compare_models_cv(X_train, y_train, cfg: dict, cv_splits=3, random_state=42):
     """
-    Construit deux pipelines identiques (sauf le classifieur), 
-    puis évalue F1-macro en CV stratifiée.
-    On ne touche pas à X_test. Sert à informer le choix de --model 
-    pour l'entraînement final.
+    Évalue LR et LinearSVC avec exactement la même pipeline (sauf le classifieur),
+    CV stratifiée (F1-macro). On ne touche pas à X_test.
     """
-    print(">> Comparaison LR vs SVC par validation croisée (F1-macro) …")
-
-    # Stratégies de sampling fixées à partir du y_train complet (cohérent pour les folds)
+    print(">> Comparaison LR vs SVC (CV F1-macro)…")
     under, over = make_sampling_strategies(
-        y_train, major_class=major_class, major_cap=major_cap, tail_min=tail_min
+        y_train,
+        major_class=cfg["sampling"]["major_class"],
+        major_cap=cfg["sampling"]["major_cap"],
+        tail_min=cfg["sampling"]["tail_min"],
     )
+    cv = StratifiedKFold(n_splits=int(cv_splits), 
+                         shuffle=True, 
+                         random_state=random_state)
 
-    cv = StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=random_state)
-
-    results = []
-    for model_name in ["lr", "svc"]:
-        pipe = create_combined_pipeline(
-            image_dir=image_train_dir,
-            image_size=image_size,
-            under_strategy=under,
-            over_strategy=over,
-            model_name=model_name,
-            use_class_weight=use_class_weight
-        )
-        scores = cross_val_score(
-            pipe, X_train, y_train, scoring="f1_macro", cv=cv, n_jobs=1
-        )
-        results.append({
-            "model": model_name.upper(),
-            "cv_mean_f1_macro": scores.mean(),
-            "cv_std": scores.std(),
-            "cv_scores": scores.tolist(),
-        })
-        print(f"   - {model_name.upper():>3} | F1-macro (moy ± std) = {scores.mean():.4f} ± {scores.std():.4f} | scores = {scores}")
-
-    return pd.DataFrame(results)
+    res = []
+    for name in ["lr", "svc"]:
+        cfg_local = {**cfg, "model": {**cfg.get("model", {}), "name": name}}
+        pipe = create_combined_pipeline(cfg_local, under, over)
+        scores = cross_val_score(pipe, X_train, 
+                                 y_train, scoring="f1_macro", cv=cv, n_jobs=1)
+        print(f"   - {name.upper()} | F1-macro = {scores.mean():.4f} ± {scores.std():.4f} | {scores}")
+        res.append({"model": name.upper(), 
+                    "cv_mean_f1_macro": scores.mean(), 
+                    "cv_std": scores.std(), 
+                    "cv_scores": scores.tolist()})
+    return pd.DataFrame(res)
 
 
-# ---------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------
+# ------------------------------ CLI ------------------------------
 def parse_args():
-    p = argparse.ArgumentParser(
-        description="Train (text+image) with targeted under/over-sampling, " \
-        "optionally compare LR vs SVC on X_train"
-    )
-    # Config
-    p.add_argument("--config", default=None, help="Chemin vers un fichier TOML (optionnel)")
-    # CSVs
-    p.add_argument("--x_train_csv", default=os.path.join("data", "X_train_update.csv"))
-    p.add_argument("--y_train_csv", default=os.path.join("data", "Y_train_CVw08PX.csv"))
-    p.add_argument("--x_test_csv",  default=os.path.join("data", "X_test_update.csv"))
-    # Images
-    p.add_argument("--image_train_dir", 
-                   default=os.path.join("data", 
-                                        "images", "images", "image_train"))
-    p.add_argument("--image_test_dir",  
-                   default=os.path.join("data", "images", "images", "image_test"))
-    p.add_argument("--image_size", type=int, nargs=2, default=[64, 64])
-    # Règles de rééquilibrage
-    p.add_argument("--major_class", type=int, default=2583, 
-                   help="Classe majoritaire à réduire")
-    p.add_argument("--major_cap",   type=int, default=6000, 
-                   help="Taille cible pour la classe majoritaire")
-    p.add_argument("--tail_min",    type=int, default=1500, 
-                   help="Seuil minimum pour oversampler les petites classes")
-    p.add_argument("--no_class_weight", action="store_true", 
-                   help="Désactive class_weight='balanced'")
-    # Modèle et comparaison
-    p.add_argument("--model", choices=["lr", "svc"], 
-                   default="lr", help="Choix du classifieur final")
-    p.add_argument("--compare", action="store_true", 
-                   help="Compare LR vs SVC via CV sur X_train (F1-macro)")
-    p.add_argument("--cv_splits", type=int, default=3, 
-                   help="Nombre de folds pour la CV")
-    # Sorties
-    p.add_argument("--model_out", default=os.path.join("models", 
-                                                       "text_image_classifier.joblib"))
-    p.add_argument("--pred_out",  default=os.path.join("models", 
-                                                       "y_test_pred.csv"))
-    p.add_argument("--compare_out", default=os.path.join("models", 
-                                                         "compare_cv_results.csv"))
+    p = argparse.ArgumentParser(description="Train (text+image) with sampling; optional LR vs SVC comparison")
+    p.add_argument("--config", default="config.toml", help="Chemin vers le TOML (défaut: config.toml)")
+    p.add_argument("--compare", action="store_true", help="Compare LR vs SVC via CV sur X_train (F1-macro)")
     return p.parse_args()
 
 
-def load_config(path: str | None):
-    """Charge un fichier TOML s'il est présent. Retourne un dict ."""
-    if path is None:
-        # essai auto sur 'config.toml' à côté du script
-        auto = os.path.join(os.path.dirname(__file__), "config.toml")
-        if os.path.isfile(auto):
-            path = auto
-    if path and os.path.isfile(path):
-        with open(path, "rb") as f:
-            return tomli.load(f)
-    return {}  # aucun fichier
-
-
-def override_from_cfg(args, cfg: dict):
-    """
-    Ecrase les valeurs d'args si présentes dans le TOML.
-    Sections attendues :
-      [paths]   x_train_csv, y_train_csv, x_test_csv
-      [images]  train_dir, test_dir, size
-      [sampling] major_class, major_cap, tail_min
-      [model]   name ('lr'|'svc'), use_class_weight (bool)
-      [cv]      splits (int)
-      [outputs] model_out, pred_out, compare_out
-    """
-    # Paths
-    paths = cfg.get("paths", {})
-    setattr(args, "x_train_csv", paths.get("x_train_csv", args.x_train_csv))
-    setattr(args, "y_train_csv", paths.get("y_train_csv", args.y_train_csv))
-    setattr(args, "x_test_csv",  paths.get("x_test_csv",  args.x_test_csv))
-
-    # Images
-    images = cfg.get("images", {})
-    setattr(args, "image_train_dir", images.get("train_dir", args.image_train_dir))
-    setattr(args, "image_test_dir",  images.get("test_dir",  args.image_test_dir))
-    if "size" in images and isinstance(images["size"], (list, tuple)) and len(images["size"]) == 2:
-        setattr(args, "image_size", images["size"])
-
-    # Sampling
-    sampling = cfg.get("sampling", {})
-    setattr(args, "major_class", sampling.get("major_class", args.major_class))
-    setattr(args, "major_cap",   sampling.get("major_cap",   args.major_cap))
-    setattr(args, "tail_min",    sampling.get("tail_min",    args.tail_min))
-
-    # Model
-    model_cfg = cfg.get("model", {})
-    setattr(args, "model", model_cfg.get("name", args.model))
-    if "use_class_weight" in model_cfg:
-        # Si le TOML dit False -> activer --no_class_weight
-        setattr(args, "no_class_weight", not bool(model_cfg["use_class_weight"]))
-
-    # CV
-    cv_cfg = cfg.get("cv", {})
-    setattr(args, "cv_splits", cv_cfg.get("splits", args.cv_splits))
-
-    # Outputs
-    outs = cfg.get("outputs", {})
-    setattr(args, "model_out",    outs.get("model_out",    args.model_out))
-    setattr(args, "pred_out",     outs.get("pred_out",     args.pred_out))
-    setattr(args, "compare_out",  outs.get("compare_out",  args.compare_out))
-
-    return args
+def load_cfg(path: str) -> dict:
+    with open(path, "rb") as f:
+        return tomllib.load(f)
 
 
 def main():
     args = parse_args()
+    cfg = load_cfg(args.config)
 
-    # Lecture optionnelle du TOML
-    cfg = load_config(args.config)
-    if cfg:
-        print(f">> Chargement de la configuration TOML …")
-        args = override_from_cfg(args, cfg)
+    print(">> Chargement des données…")
+    X_train = pd.read_csv(cfg["paths"]["x_train_csv"], index_col=0)
+    y_train = pd.read_csv(cfg["paths"]["y_train_csv"], index_col=0).squeeze()
+    X_test  = pd.read_csv(cfg["paths"]["x_test_csv"],  index_col=0)
 
-    print(">> Chargement des données …")
-    X_train = pd.read_csv(args.x_train_csv, index_col=0)
-    y_train = pd.read_csv(args.y_train_csv, index_col=0).squeeze()
-    X_test  = pd.read_csv(args.x_test_csv,  index_col=0)
-
-    needed = ["designation", "description", "productid"]
+    # Colonnes requises côté features (respect split Rakuten)
+    needed = ["designation", "description", "productid", "imageid"]
     for col in needed:
         if col not in X_train.columns:
             raise ValueError(f"Colonne manquante dans X_train : '{col}'")
         if col not in X_test.columns:
             raise ValueError(f"Colonne manquante dans X_test : '{col}'")
 
-    image_size = tuple(map(int, args.image_size))
-    use_class_weight = (not args.no_class_weight)
-
-    # Étape optionnelle : comparaison LR vs SVC (CV sur X_train/Y_train)
+    # Option: comparaison LR vs SVC (ne touche pas X_test)
     if args.compare:
-        df_compare = compare_models_cv(
+        df_cmp = compare_models_cv(
             X_train[needed], y_train,
-            image_train_dir=args.image_train_dir,
-            image_size=image_size,
-            major_class=args.major_class,
-            major_cap=args.major_cap,
-            tail_min=args.tail_min,
-            use_class_weight=use_class_weight,
-            cv_splits=int(args.cv_splits)
+            cfg=cfg,
+            cv_splits=cfg.get("cv", {}).get("splits", 3)
         )
-        os.makedirs(os.path.dirname(args.compare_out), exist_ok=True)
-        df_compare.to_csv(args.compare_out, index=False)
-        print(f">> Résultats de comparaison sauvegardés : {args.compare_out}")
+        out_cmp = cfg["outputs"]["compare_out"]
+        os.makedirs(os.path.dirname(out_cmp), exist_ok=True)
+        df_cmp.to_csv(out_cmp, index=False)
+        print(f">> Résultats comparison sauvegardés : {out_cmp}")
 
-    # Entraînement final sur tout X_train / prédiction sur X_test avec le modèle choisi
-    pipe, y_pred = train_and_predict_on_test(
-        X_train[needed], y_train,
-        X_test[needed],
-        image_train_dir=args.image_train_dir,
-        image_test_dir=args.image_test_dir,
-        image_size=image_size,
-        major_class=args.major_class,
-        major_cap=args.major_cap,
-        tail_min=args.tail_min,
-        use_class_weight=use_class_weight,
-        model_name=args.model,
-    )
+    # Entraînement complet + prédiction sur X_test
+    pipe, y_pred = train_and_predict_on_test(X_train[needed], y_train, X_test[needed], cfg)
 
     # Sauvegardes
-    os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
-    joblib.dump(pipe, args.model_out)
-    print(f">> Modèle sauvegardé : {args.model_out}")
+    os.makedirs(os.path.dirname(cfg["outputs"]["model_out"]), exist_ok=True)
+    joblib.dump(pipe, cfg["outputs"]["model_out"])
+    print(f">> Modèle sauvegardé : {cfg['outputs']['model_out']}")
 
     pred_df = pd.DataFrame(y_pred, index=X_test.index, columns=["predicted_label"])
-    pred_df.to_csv(args.pred_out)
-    print(f">> Prédictions sauvegardées : {args.pred_out}")
+    pred_df.to_csv(cfg["outputs"]["pred_out"])
+    print(f">> Prédictions sauvegardées : {cfg['outputs']['pred_out']}")
 
 
 if __name__ == "__main__":
