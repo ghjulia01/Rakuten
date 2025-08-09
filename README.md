@@ -118,6 +118,7 @@ Nous avons préféré garder à ce stade les caractères numériques qui pouvaie
 ###### 3.3. Vectorisation avec TextTfidfVectorizer
 
 Après nettoyage, les textes passent par une vectorisation TF-IDF :
+
     - max_features = 5 000 (paramétrable)
     - ngram_range = (1, 2) → unigrams + bigrams
         - Unigram = un seul mot
@@ -132,8 +133,8 @@ Après nettoyage, les textes passent par une vectorisation TF-IDF :
     - sublinear_tf=True : pondération logarithmique pour limiter l’impact des répétitions 
         - Par défaut, TF-IDF calcule la TF (Term Frequency) = nombre d’occurrences du mot dans le document.
             - Exemple :
-                “chaussure” apparaît 1 fois → TF = 1
-                “chaussure” apparaît 20 fois → TF = 20
+                - “chaussure” apparaît 1 fois → TF = 1
+                - “chaussure” apparaît 20 fois → TF = 20
         - Avec sublinear_tf=True, on applique la transformation logarithmique:
             - 1 occurrence → 1 + log ( 1 ) = 1 
             - 20 occurrenceS → 1 + log ( 20 ) = 4.3
