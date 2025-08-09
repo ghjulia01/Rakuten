@@ -59,7 +59,69 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 ### Feature Engineering (prochaine étapes dont voici les orientations principales)
 
-- Vectorisation des textes (designation et description)
+#### Traitement du texte – Pipeline Rakuten
+
+##### 1. Objectif
+
+Le texte produit (désignation + description) est une source d’information clé pour prédire la catégorie des produits.
+Notre objectif est de :
+    - nettoyer les données textuelles (supprimer le bruit, harmoniser la langue, gérer les formats)
+    - représenter le texte sous forme vectorielle exploitable par les modèles
+    - enrichir avec des signaux simples mais informatifs (présence d’une description)
+
+##### 2. Sources utilisées
+
+- designation : nom du produit
+- description : texte descriptif du produit
+
+Remarque : l’existence même d’une description est un signal potentiel (produits plus formalisés → catégories spécifiques).
+Nous l’avons donc conservée sous forme d’une variable binaire : has_description.
+
+##### 3. Étapes de traitement
+
+###### 3.1. Fusion & indicateur has_description
+
+On fusionne designation et description pour obtenir un texte unique (full_text).
+On ajoute has_description = 1 si description non vide, sinon 0.
+
+Raison :
+La fusion maximise la quantité d’informations lexicales.
+L’indicateur binaire capture la valeur informative de la présence/absence d’une description.
+
+###### 3.2. Nettoyage avec TextCleaner
+
+Le TextCleaner applique, dans cet ordre :
+
+- Suppression HTML
+- Retire les balises <...> et entités (&amp;, &#39;…)
+- Évite que le modèle apprenne sur du bruit syntaxique.
+- Passage en minuscules
+- Uniformise le vocabulaire (iPhone → iphone).
+- Suppression de la ponctuation & caractères non-alphanumériques
+- Nettoie pour se concentrer sur les tokens utiles.
+- Suppression des stopwords
+- Liste FR enrichie pour retirer les “mots vides” (ex. “blanc”, “actuel”, “moderne”)
+- Traduction ciblée (translate_map)
+    - Utilise un dictionnaire EN/DE → FR généré via le script
+    - make_cleaned_frequencies_and_map.py :
+- Extraction des tokens fréquents non français après nettoyage.
+- Construction d’un mapping vers leur traduction française.
+- Ce mapping est chargé automatiquement depuis config/.
+- Stemming (Snowball, FR)
+    - Réduction des mots à leur racine (voitures → voitur).
+    - Choix du stemming plutôt que de la lemmatisation car :
+        - Corpus multilingue → moins dépendant d’un modèle linguistique FR pur.
+        - Plus rapide et robuste aux variantes morphologiques.
+
+###### 3.3. Vectorisation avec TextTfidfVectorizer
+
+Après nettoyage, les textes passent par une vectorisation TF-IDF :
+    - max_features = 5 000 (paramétrable)
+    - ngram_range = (1, 2) → unigrams + bigrams
+    - min_df=2 / max_df=0.95 : suppression des termes trop rares ou trop fréquents
+    - sublinear_tf=True : pondération logarithmique pour limiter l’impact des répétitions - strip_accents='unicode' : harmonise les variantes accentuées
+    - lowercase=False : déjà fait en amont
+    - dtype='float32' : mémoire optimisée
 
 - Traitement d’images (normalisation, redimensionnement, encodage)
 
