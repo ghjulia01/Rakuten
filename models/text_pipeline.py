@@ -111,7 +111,8 @@ def create_text_pipeline(
     # Union : vecteurs TF-IDF + indicateur binaire has_description
     text_branch = FeatureUnion([
         ("tfidf", text_tfidf),
-        ("has_desc", HasDescriptionFlag())
+        ("has_desc", HasDescriptionFlag()),
+        ("title_len", DesignationLength())
     ])
 
     return text_branch
