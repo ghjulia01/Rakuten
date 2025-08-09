@@ -112,6 +112,8 @@ Le TextCleaner applique, dans cet ordre :
     - Choix du stemming plutôt que de la lemmatisation car :
         - Corpus multilingue → moins dépendant d’un modèle linguistique FR pur.
         - Plus rapide et robuste aux variantes morphologiques.
+Nous avons préféré garder à ce stade les caractères numériques qui pouvaient nous aider 
+à caractériser des produits (exemple PS3).
 
 ###### 3.3. Vectorisation avec TextTfidfVectorizer
 
