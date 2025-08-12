@@ -23,6 +23,12 @@ test_dir  = "data/images/images/image_test"
 # Taille cible des images avant vectorisation (hauteur, largeur)
 size = [64, 64]
 
+[images.dim_reduction]
+enabled = true
+method = "svd"          # "svd" (recommandé) ou "pca"
+n_components = 200
+random_state = 42
+
 # --- Statistiques des images ---
 # Features width/height/occupancy (hors blanc/noir)
 [images.stats]
