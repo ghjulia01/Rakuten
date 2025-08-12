@@ -75,7 +75,7 @@ def _load_translate_map(path: Optional[str]) -> Dict[str, str]:
 def create_text_pipeline(
     max_features: int = 5000,
     translate_map_path: Optional[str] = None,
-    use_stem: bool = True
+    use_stem: bool = True,
     min_df: float | int = 0.0,   
     max_df: float | int = 1.0 
 ):
