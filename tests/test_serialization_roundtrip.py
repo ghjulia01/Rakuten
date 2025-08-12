@@ -1,7 +1,7 @@
 
 import joblib
 import numpy as np
-from features.text_pipeline import create_text_pipeline
+from models.text_pipeline import create_text_pipeline
 
 def test_text_pipeline_serialization_roundtrip(tmp_path, mini_df):
     pipe = create_text_pipeline(max_features=50)

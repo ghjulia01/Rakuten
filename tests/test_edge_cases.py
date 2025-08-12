@@ -1,6 +1,6 @@
 
 import pandas as pd
-from features.text_pipeline import create_text_pipeline
+from models.text_pipeline import create_text_pipeline
 
 def test_text_pipeline_empty_inputs():
     pipe = create_text_pipeline(max_features=10)
