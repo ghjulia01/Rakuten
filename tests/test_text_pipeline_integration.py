@@ -1,6 +1,6 @@
 
 import numpy as np
-from features.text_pipeline import create_text_pipeline
+from models.text_pipeline import create_text_pipeline
 
 def test_text_pipeline_feature_union_train_test_consistency(mini_df):
     pipe = create_text_pipeline(max_features=20, translate_map_path=None, use_stem=True)

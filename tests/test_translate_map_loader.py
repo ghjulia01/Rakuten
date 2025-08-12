@@ -1,6 +1,6 @@
 
 import json
-from features.text_pipeline import _load_translate_map
+from models.text_pipeline import _load_translate_map
 
 def test_load_translate_map_file(tmp_path):
     p = tmp_path / "map.json"

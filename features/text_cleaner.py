@@ -196,5 +196,5 @@ class DesignationLength(BaseEstimator, TransformerMixin):
     def transform(self, X: pd.DataFrame):
         if self.col_name not in X.columns:
             raise ValueError(f"Colonne '{self.col_name}' absente de X")
-        lengths = X[self.col_name].astype(str).str.len()
+        lengths = X[self.col_name].fillna("").astype(str).str.len()
         return pd.DataFrame({"designation_length": lengths}, index=X.index)
