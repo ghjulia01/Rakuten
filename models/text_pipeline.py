@@ -93,14 +93,14 @@ def create_text_pipeline(
     text_tfidf = make_pipeline(
         TextCleaner(
             remove_html=True,
-            translate_map=translate_map,  # peut être vide
+            translate_map=translate_map,  
             use_stem=use_stem
         ),
         TextTfidfVectorizer(
             max_features=max_features,
             ngram_range=(1, 2),  # unigrams + bigrams (e-commerce)
-            min_df=0,
-            max_df=1,
+            min_df=0.0,
+            max_df=1.0,
             sublinear_tf=True,
             norm="l2",
             strip_accents="unicode",
