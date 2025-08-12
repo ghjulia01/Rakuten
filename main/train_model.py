@@ -93,10 +93,13 @@ def build_classifier(name: str, use_class_weight: bool):
 def create_combined_pipeline(cfg: dict, under_strategy: dict, 
                              over_strategy: dict):
     # --- TEXT ---
+    text_cfg = cfg.get("text", {}) 
     text_branch = create_text_pipeline(
         max_features=cfg.get("text", {}).get("max_features", 5000),
         translate_map_path=cfg.get("text", {}).get("translate_map_path", None),
         use_stem=bool(cfg.get("text", {}).get("use_stem", True)),
+        min_df=text_cfg.get("min_df", 0.0),   
+        max_df=text_cfg.get("max_df", 1.0)
     )
 
     # --- IMAGES: pixels (64x64 -> flatten -> sparse) ---

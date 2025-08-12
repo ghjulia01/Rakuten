@@ -76,6 +76,8 @@ def create_text_pipeline(
     max_features: int = 5000,
     translate_map_path: Optional[str] = None,
     use_stem: bool = True
+    min_df: float | int = 0.0,   
+    max_df: float | int = 1.0 
 ):
     """
     Construit la branche texte à brancher dans le FeatureUnion global.
@@ -90,6 +92,19 @@ def create_text_pipeline(
     else:
         print(">> Aucun translate_map trouvé : TextCleaner fonctionnera sans traduction.")
 
+    def _coerce_df_param(val, is_max: bool = False):
+        # sklearn accepte: int >=1, ou float entre [0.0, 1.0]
+        if isinstance(val, int):
+            if val == 0:
+                return 0.0
+            if is_max and val == 1:
+                return 1.0
+            return val
+        return float(val)
+
+    min_df = _coerce_df_param(min_df, is_max=False)
+    max_df = _coerce_df_param(max_df, is_max=True)
+
     text_tfidf = make_pipeline(
         TextCleaner(
             remove_html=True,
@@ -99,8 +114,8 @@ def create_text_pipeline(
         TextTfidfVectorizer(
             max_features=max_features,
             ngram_range=(1, 2),  # unigrams + bigrams (e-commerce)
-            min_df=0.0,
-            max_df=1.0,
+            min_df=min_df,          # <-- utilise les valeurs paramétrées
+            max_df=max_df,
             sublinear_tf=True,
             norm="l2",
             strip_accents="unicode",
