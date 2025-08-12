@@ -52,12 +52,15 @@ class ImageLoader(BaseEstimator, TransformerMixin):
         avec les pixels normalisés dans [0, 1].
         Si l'image est manquante, retourne une image noire.
         """
-        return np.array([
-            self._process_image(self.index[str(pid)])
-            if str(pid) in self.index
-            else np.zeros((*self.image_size, 3), dtype=np.float32)
-            for pid in X
-        ])
+        H, W = self.image_size
+        imgs = [
+             self._process_image(self.index[str(pid)])
+             if str(pid) in self.index
+             else np.zeros((H, W, 3), dtype=np.float32)
+             for pid in X
+        ]
+        return np.stack(imgs, axis=0).astype(np.float32)
+        
 
 
 # Cette méthode traite l'image : redimensionnement et normalisation
@@ -65,8 +68,14 @@ class ImageLoader(BaseEstimator, TransformerMixin):
 # la transforme en tableau numpy ((64, 64, 3)) avec des valeurs entre 0 et 1
 
     def _process_image(self, image_path):
+        H, W = self.image_size
         with Image.open(image_path) as img:
-            img = img.convert("RGB")  # Assure que l'image est en RGB
-            img = img.resize(self.image_size) # Redimensionne à (64, 64)
-            return np.array(img, dtype=np.float32) / 255.0  
+            img = img.convert("RGB")
+            # Pillow attend (width, height)
+            img = img.resize((W, H))
+            arr = np.asarray(img, dtype=np.float32) / 255.0
+        # sécurité forme
+        if arr.shape != (H, W, 3):
+            raise ValueError(f"Got {arr.shape}, expected {(H, W, 3)}")
+        return arr
         #  Normalise les pixels dans [0, 1]
