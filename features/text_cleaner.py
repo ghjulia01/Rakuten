@@ -148,6 +148,10 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         if self.use_stem and self._stemmers:
             tokens = [self._stem_token(t) for t in tokens]
 
+        # Si aucun token après nettoyage, jeton de secours si tout est vide
+        if not tokens:
+            return "__empty__"
+
         return " ".join(tokens)
 
     # Fit vide pour compat sklearn
