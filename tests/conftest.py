@@ -81,3 +81,17 @@ def mini_df_image():
         "imageid":   [100,200,300,400]
     }, index=[10,11,12,13])
 
+@pytest.fixture
+def mini_df(request, mini_df_text, mini_df_image):
+    # Heuristique simple basée sur le chemin du fichier de test et le nom du test
+    fpath = str(getattr(request.node, "fspath", "")).lower()
+    fname = os.path.basename(fpath)
+    tname = request.node.name.lower()
+
+    # Si on est dans un test "image", on renvoie la fixture image
+    if "image" in fname or "image" in tname:
+        return mini_df_image
+
+    # Sinon par défaut, on renvoie la version texte
+    return mini_df_text
+
