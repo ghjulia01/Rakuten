@@ -24,3 +24,4 @@ def test_text_cleaner_handles_nan():
     out = tc.fit_transform(X)
     assert isinstance(out.iloc[0], str)
     assert out.iloc[0] in ("", "__empty__")
+    
