@@ -65,7 +65,7 @@ class ImageLoader(BaseEstimator, TransformerMixin):
 
 # Cette méthode traite l'image : redimensionnement et normalisation
 # Ouvre l’image et la convertit en couleur et la redimensionne
-# la transforme en tableau numpy ((64, 64, 3)) avec des valeurs entre 0 et 1
+# la transforme en tableau numpy ((H, W, 3)) avec des valeurs entre 0 et 1
 
     def _process_image(self, image_path):
         H, W = self.image_size
