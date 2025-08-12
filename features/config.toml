@@ -35,8 +35,8 @@ out_prefix = "img_w230_b25_"# préfixe des noms de features (traçabilité)
 # --- Réglages branche texte
 [text]
 max_features = 20000
-min_df = 2        # valeurs “prod”
-max_df = 0.95
+min_df = 0.0        # valeurs “prod” 2, valeurs “test” 0.0,
+max_df = 1.0       # valeurs “prod” 0.95, valeurs “test” 1.0,
 use_stem = true
 # si fichier de traduction :
 translate_map_path = "config/translate_map_starter_from_cleaned.json"
