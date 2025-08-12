@@ -9,7 +9,7 @@ Scan du projet pour générer un requirements.txt minimal :
 
 Usage:
   python tools/generate_requirements.py            # génère requirements.txt à la racine
-  python tools/generate_requirements.py --out reqs.txt --root .
+  pip install -r requirements.txt          # pour installer les paquets
 """
 
 from __future__ import annotations
