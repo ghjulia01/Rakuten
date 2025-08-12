@@ -99,8 +99,8 @@ def create_text_pipeline(
         TextTfidfVectorizer(
             max_features=max_features,
             ngram_range=(1, 2),  # unigrams + bigrams (e-commerce)
-            min_df=1,
-            max_df=0.95,
+            min_df=0,
+            max_df=1,
             sublinear_tf=True,
             norm="l2",
             strip_accents="unicode",
