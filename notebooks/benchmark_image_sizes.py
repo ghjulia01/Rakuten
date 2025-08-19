@@ -19,9 +19,9 @@ from sklearn.pipeline import FeatureUnion
 
 # --- Bootstrapping imports projet quand on lance depuis notebooks/ ---
 
-base_path = os.path.abspath("..")
-if base_path not in sys.path:
-    sys.path.insert(0, base_path)
+base_path = Path(__file__).resolve().parents[1] 
+if str(base_path) not in sys.path:
+    sys.path.insert(0, str(base_path))
 
 from models.image_pipeline import create_image_pipeline  
 
