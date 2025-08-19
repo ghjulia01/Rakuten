@@ -18,11 +18,12 @@ from sklearn.metrics import f1_score
 from sklearn.pipeline import FeatureUnion
 
 # --- Bootstrapping imports projet quand on lance depuis notebooks/ ---
-BASE_PATH = os.path.abspath("..")
-if BASE_PATH not in sys.path:
-    sys.path.insert(0, BASE_PATH)
 
-from models.image_pipeline import create_image_pipeline  # ta branche image
+base_path = os.path.abspath("..")
+if base_path not in sys.path:
+    sys.path.insert(0, base_path)
+
+from models.image_pipeline import create_image_pipeline  
 
 # --- TOML loader (Py>=3.11 tomllib sinon tomli) ---
 try:
@@ -49,8 +50,8 @@ SAMPLE_MAX = None  # ex: 10000
 # 1) Lecture config + données (chemins robustes)
 # =========================
 cfg_candidates = [
-    os.path.join(BASE_PATH, "config.toml"),
-    os.path.join(BASE_PATH, "features", "config.toml"),
+    os.path.join(base_path, "config.toml"),
+    os.path.join(base_path, "features", "config.toml"),
 ]
 cfg = None
 for p in cfg_candidates:
@@ -62,17 +63,17 @@ for p in cfg_candidates:
 if cfg is None:
     raise FileNotFoundError("Aucun config.toml trouvé (racine ou features/).")
 
-paths = cfg.get("paths", {})
+paths      = cfg.get("paths", {})
 images_cfg = cfg.get("images", {})
 
-X_TRAIN_CSV = os.path.join(BASE_PATH, paths.get("x_train_csv", "data/X_train_update.csv"))
-X_TEST_CSV  = os.path.join(BASE_PATH, paths.get("x_test_csv",  "data/X_test_update.csv"))
-Y_TRAIN_CSV = os.path.join(BASE_PATH, paths.get("y_train_csv", "data/Y_train_CVw08PX.csv"))
+X_TRAIN_CSV = os.path.join(base_path, paths.get("x_train_csv", "data/X_train_update.csv"))
+X_TEST_CSV  = os.path.join(base_path, paths.get("x_test_csv",  "data/X_test_update.csv"))
+Y_TRAIN_CSV = os.path.join(base_path, paths.get("y_train_csv", "data/Y_train_CVw08PX.csv"))
 
-IMG_DIR_TRAIN = os.path.join(BASE_PATH, images_cfg.get("train_dir", "data/images/images/image_train"))
-IMG_DIR_TEST  = os.path.join(BASE_PATH, images_cfg.get("test_dir",  "data/images/images/image_test"))
+IMG_DIR_TRAIN = os.path.join(base_path, images_cfg.get("train_dir", "data/images/images/image_train"))
+IMG_DIR_TEST  = os.path.join(base_path, images_cfg.get("test_dir",  "data/images/images/image_test"))
 
-print("[paths] base_path =", BASE_PATH)
+print("[paths] base_path =", base_path)
 print("[paths] X_train  =", X_TRAIN_CSV)
 print("[paths] y_train  =", Y_TRAIN_CSV)
 print("[paths] X_test   =", X_TEST_CSV)
@@ -247,4 +248,4 @@ if len(df):
     plt.show()
     print(f"[ok] Heatmap sauvegardée : {png3}")
 
-print("\nTerminé ✅")
+print("\nTerminé ")
