@@ -40,12 +40,17 @@ out_prefix = "img_w230_b25_"# préfixe des noms de features (traçabilité)
 
 # --- Réglages branche texte
 [text]
-max_features = 20000
+max_features = 40000
 min_df = 0.0        # valeurs “prod” 2, valeurs “test” 0.0,
 max_df = 1.0       # valeurs “prod” 0.95, valeurs “test” 1.0,
 use_stem = true
 # si fichier de traduction :
 translate_map_path = "config/translate_map_starter_from_cleaned.json"
+
+# Paramètres pour la génération de fréquences et translate_map
+[text.vocab_build]
+top_k   = 20000            # ← nombre de tokens candidats triés par fréquence
+max_new = 400              # ← nb max de “placeholders” auto ajoutés (EN/DE)
 
 # --- Stratégies de rééchantillonnage ---
 [sampling]

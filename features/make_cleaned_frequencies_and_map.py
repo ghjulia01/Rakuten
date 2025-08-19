@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Génère les fréquences de tokens NETTOYÉS (après suppression du HTML, filtrage des stopwords,
-# retrait des « mots vagues », et stemming) et construit un translate_map ciblé (EN/DE -> FR)
+# Génère les fréquences de tokens NETTOYÉS 
+# (après suppression du HTML, filtrage des stopwords,
+# retrait des « mots vagues », et stemming) et construit 
+# un translate_map ciblé (EN/DE -> FR)
 # à partir du corpus nettoyé.
 #
 # Utilisation :
@@ -16,6 +18,10 @@
 # - Si les stopwords NLTK ne sont pas présents, le script tentera de les télécharger.
 # - Le stemming utilise Snowball (français) s’il est disponible ; 
 # sinon, on n’applique pas de stemming.
+try:
+    import tomllib  # Py 3.11+
+except Exception:
+    tomllib = None
 
 import argparse
 import json
@@ -136,10 +142,27 @@ def main():
     ap.add_argument("--x_train_csv", required=True)
     ap.add_argument("--out_freq", required=True)
     ap.add_argument("--out_map", required=True)
-    ap.add_argument("--max_new", type=int, default=200)
-    ap.add_argument("--top_k", type=int, default=8000)
+    ap.add_argument("--max_new", type=int, default=None)   # ← None pour laisser le TOML décider
+    ap.add_argument("--top_k", type=int, default=None)     # ← None pour laisser le TOML décider
+    ap.add_argument("--config", type=str, default=None)    # ← chemin vers config.toml
     args = ap.parse_args()
 
+# Charger le TOML si demandé et si tomllib dispo
+    if args.config and tomllib is not None:
+        with open(args.config, "rb") as f:
+            cfg = tomllib.load(f)
+        vb = (cfg.get("text", {}).get("vocab_build", {}) if cfg else {})
+        if args.top_k is None:
+            args.top_k = int(vb.get("top_k", 8000))
+        if args.max_new is None:
+            args.max_new = int(vb.get("max_new", 200))
+    else:
+        # valeurs par défaut si pas de TOML ni d’arguments
+        if args.top_k is None:   args.top_k = 8000
+        if args.max_new is None: args.max_new = 200
+
+    print(f"[cfg] top_k={args.top_k} | max_new={args.max_new}")
+    
     ensure_nltk_stopwords()
     stop_all = load_stopwords_union()
     stemmer = get_french_stemmer()
