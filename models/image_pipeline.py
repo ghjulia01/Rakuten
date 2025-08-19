@@ -5,6 +5,7 @@ from sklearn.preprocessing import FunctionTransformer
 from scipy.sparse import csr_matrix
 from features.image_loader import ImageLoader
 from sklearn.decomposition import TruncatedSVD, PCA
+from sklearn.preprocessing import StandardScaler
 
 def create_image_pipeline(image_dir, image_size=(64, 64), dim_reduction=None, memory=None):
     """

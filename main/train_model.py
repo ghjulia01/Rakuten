@@ -41,15 +41,23 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
 
-# TOML: py>=3.11 (tomllib) ; py<3.11 (tomli)
+from pathlib import Path
+
+# Résoudre le chemin du TOML en relatif au fichier
+DEFAULT_CFG = Path(__file__).resolve().parents[1] / "features" / "config.toml"
+
+# Py 3.11+ : tomllib (standard). Sinon, fallback sur tomli si installé.
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:
-    import tomli as tomllib  # pip install tomli
+    import tomli as tomllib  # pip install tomli (si Python < 3.11)
 
-# Chemin vers le config.toml
-config_path = Path(__file__).parent.parent / "features" / "config.toml"
-config = toml.load(config_path)
+def load_config(config_path: str | Path | None = None) -> dict:
+    cfg_path = Path(config_path) if config_path else DEFAULT_CFG
+    with open(cfg_path, "rb") as f:
+        cfg = tomllib.load(f)
+    return cfg
+
 
 from models.text_pipeline import create_text_pipeline
 from models.image_pipeline import create_image_pipeline  
@@ -85,8 +93,7 @@ def build_classifier(name: str, use_class_weight: bool):
     name = (name or "lr").lower()
     if name == "svc":
         return LinearSVC(class_weight=cw)
-    return LogisticRegression(max_iter=1000, solver="lbfgs", 
-                              class_weight=cw)
+    return LogisticRegression(max_iter=3000, solver="saga", class_weight=cw, n_jobs=1)
 
 
 # ---------------------- Pipeline construction ---------------------
@@ -102,10 +109,12 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict,
         max_df=text_cfg.get("max_df", 1.0)
     )
 
-    # --- IMAGES: pixels (64x64 -> flatten -> sparse) ---
-    image_dir = cfg["images"]["train_dir"]
-    image_size = tuple(cfg["images"].get("size", [64, 64]))
-    image_pixels = create_image_pipeline(image_dir=image_dir, image_size=image_size)
+    # --- IMAGES: pixels (dimxdim-> flatten -> sparse) ---
+    image_pixels = create_image_pipeline(
+    image_dir=image_dir,
+    image_size=image_size,
+    dim_reduction=cfg.get("images", {}).get("dim_reduction", {})  
+)
 
     # --- IMAGES: stats (width/height/occupancy hors blanc/noir, 
     # AVANT resize), 
