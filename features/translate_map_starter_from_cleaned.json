@@ -1,0 +1,2006 @@
+[
+  {
+    "token": "able",
+    "translation": "able"
+  },
+  {
+    "token": "acced",
+    "translation": "acced"
+  },
+  {
+    "token": "according",
+    "translation": "according"
+  },
+  {
+    "token": "acryl",
+    "translation": "acrylique"
+  },
+  {
+    "token": "acrylic",
+    "translation": "acrylique"
+  },
+  {
+    "token": "activated",
+    "translation": "activated"
+  },
+  {
+    "token": "adapted",
+    "translation": "adapted"
+  },
+  {
+    "token": "adapter",
+    "translation": "adaptateur"
+  },
+  {
+    "token": "added",
+    "translation": "added"
+  },
+  {
+    "token": "advanced",
+    "translation": "advanced"
+  },
+  {
+    "token": "advers",
+    "translation": "advers"
+  },
+  {
+    "token": "alfred",
+    "translation": "alfred"
+  },
+  {
+    "token": "allowing",
+    "translation": "allowing"
+  },
+  {
+    "token": "alloyseed",
+    "translation": "alloyseed"
+  },
+  {
+    "token": "amazing",
+    "translation": "amazing"
+  },
+  {
+    "token": "amusing",
+    "translation": "amusing"
+  },
+  {
+    "token": "animated",
+    "translation": "animated"
+  },
+  {
+    "token": "anodized",
+    "translation": "anodized"
+  },
+  {
+    "token": "antifraying",
+    "translation": "antifraying"
+  },
+  {
+    "token": "assembled",
+    "translation": "assembled"
+  },
+  {
+    "token": "associated",
+    "translation": "associated"
+  },
+  {
+    "token": "assorted",
+    "translation": "assorted"
+  },
+  {
+    "token": "attached",
+    "translation": "attached"
+  },
+  {
+    "token": "backpack",
+    "translation": "sacados"
+  },
+  {
+    "token": "bag",
+    "translation": "sac"
+  },
+  {
+    "token": "baking",
+    "translation": "baking"
+  },
+  {
+    "token": "balanced",
+    "translation": "balanced"
+  },
+  {
+    "token": "based",
+    "translation": "based"
+  },
+  {
+    "token": "bathroom",
+    "translation": "salledebain"
+  },
+  {
+    "token": "bearing",
+    "translation": "bearing"
+  },
+  {
+    "token": "bed",
+    "translation": "bed"
+  },
+  {
+    "token": "bedding",
+    "translation": "bedding"
+  },
+  {
+    "token": "bedroom",
+    "translation": "chambre"
+  },
+  {
+    "token": "bedroomliving",
+    "translation": "bedroomliving"
+  },
+  {
+    "token": "bedspraed",
+    "translation": "bedspraed"
+  },
+  {
+    "token": "belt",
+    "translation": "ceinture"
+  },
+  {
+    "token": "berling",
+    "translation": "berling"
+  },
+  {
+    "token": "black",
+    "translation": "noir"
+  },
+  {
+    "token": "blanket",
+    "translation": "couverture"
+  },
+  {
+    "token": "blau",
+    "translation": "bleu"
+  },
+  {
+    "token": "bless",
+    "translation": "bless"
+  },
+  {
+    "token": "bling",
+    "translation": "bling"
+  },
+  {
+    "token": "bluetooth",
+    "translation": "bluetooth"
+  },
+  {
+    "token": "board",
+    "translation": "board"
+  },
+  {
+    "token": "bosch",
+    "translation": "bosch"
+  },
+  {
+    "token": "boulevers",
+    "translation": "boulevers"
+  },
+  {
+    "token": "bowling",
+    "translation": "bowling"
+  },
+  {
+    "token": "bracelet",
+    "translation": "bracelet"
+  },
+  {
+    "token": "braun",
+    "translation": "marron"
+  },
+  {
+    "token": "bring",
+    "translation": "bring"
+  },
+  {
+    "token": "brown",
+    "translation": "marron"
+  },
+  {
+    "token": "brushed",
+    "translation": "brushed"
+  },
+  {
+    "token": "brushless",
+    "translation": "brushless"
+  },
+  {
+    "token": "building",
+    "translation": "building"
+  },
+  {
+    "token": "bulb",
+    "translation": "ampoule"
+  },
+  {
+    "token": "bunting",
+    "translation": "bunting"
+  },
+  {
+    "token": "calibrated",
+    "translation": "calibrated"
+  },
+  {
+    "token": "camping",
+    "translation": "camping"
+  },
+  {
+    "token": "cap",
+    "translation": "casquette"
+  },
+  {
+    "token": "carpet",
+    "translation": "moquette"
+  },
+  {
+    "token": "carrying",
+    "translation": "carrying"
+  },
+  {
+    "token": "casset",
+    "translation": "casset"
+  },
+  {
+    "token": "caused",
+    "translation": "caused"
+  },
+  {
+    "token": "challenging",
+    "translation": "challenging"
+  },
+  {
+    "token": "changing",
+    "translation": "changing"
+  },
+  {
+    "token": "charged",
+    "translation": "charged"
+  },
+  {
+    "token": "charger",
+    "translation": "chargeur"
+  },
+  {
+    "token": "charging",
+    "translation": "charging"
+  },
+  {
+    "token": "chausset",
+    "translation": "chausset"
+  },
+  {
+    "token": "chewing",
+    "translation": "chewing"
+  },
+  {
+    "token": "chipset",
+    "translation": "chipset"
+  },
+  {
+    "token": "cleaning",
+    "translation": "cleaning"
+  },
+  {
+    "token": "climbing",
+    "translation": "climbing"
+  },
+  {
+    "token": "cling",
+    "translation": "cling"
+  },
+  {
+    "token": "clipping",
+    "translation": "clipping"
+  },
+  {
+    "token": "closet",
+    "translation": "closet"
+  },
+  {
+    "token": "clothing",
+    "translation": "clothing"
+  },
+  {
+    "token": "coat",
+    "translation": "manteau"
+  },
+  {
+    "token": "coated",
+    "translation": "coated"
+  },
+  {
+    "token": "coating",
+    "translation": "coating"
+  },
+  {
+    "token": "cocooning",
+    "translation": "cocooning"
+  },
+  {
+    "token": "coding",
+    "translation": "coding"
+  },
+  {
+    "token": "collecting",
+    "translation": "collecting"
+  },
+  {
+    "token": "colored",
+    "translation": "colored"
+  },
+  {
+    "token": "coloured",
+    "translation": "coloured"
+  },
+  {
+    "token": "combined",
+    "translation": "combined"
+  },
+  {
+    "token": "comed",
+    "translation": "comed"
+  },
+  {
+    "token": "completed",
+    "translation": "completed"
+  },
+  {
+    "token": "computer",
+    "translation": "ordinateur"
+  },
+  {
+    "token": "connected",
+    "translation": "connected"
+  },
+  {
+    "token": "controlled",
+    "translation": "controlled"
+  },
+  {
+    "token": "convers",
+    "translation": "convers"
+  },
+  {
+    "token": "cooking",
+    "translation": "cooking"
+  },
+  {
+    "token": "cooling",
+    "translation": "cooling"
+  },
+  {
+    "token": "corresponding",
+    "translation": "corresponding"
+  },
+  {
+    "token": "cotton",
+    "translation": "coton"
+  },
+  {
+    "token": "cover",
+    "translation": "housse"
+  },
+  {
+    "token": "covered",
+    "translation": "covered"
+  },
+  {
+    "token": "crawling",
+    "translation": "crawling"
+  },
+  {
+    "token": "created",
+    "translation": "created"
+  },
+  {
+    "token": "creating",
+    "translation": "creating"
+  },
+  {
+    "token": "cred",
+    "translation": "cred"
+  },
+  {
+    "token": "creed",
+    "translation": "creed"
+  },
+  {
+    "token": "crossing",
+    "translation": "crossing"
+  },
+  {
+    "token": "curtain",
+    "translation": "rideau"
+  },
+  {
+    "token": "cushion",
+    "translation": "coussin"
+  },
+  {
+    "token": "cutting",
+    "translation": "cutting"
+  },
+  {
+    "token": "damaged",
+    "translation": "damaged"
+  },
+  {
+    "token": "dancing",
+    "translation": "dancing"
+  },
+  {
+    "token": "dazzling",
+    "translation": "dazzling"
+  },
+  {
+    "token": "decorating",
+    "translation": "decorating"
+  },
+  {
+    "token": "dedicated",
+    "translation": "dedicated"
+  },
+  {
+    "token": "deformed",
+    "translation": "deformed"
+  },
+  {
+    "token": "designed",
+    "translation": "designed"
+  },
+  {
+    "token": "detailed",
+    "translation": "detailed"
+  },
+  {
+    "token": "developed",
+    "translation": "developed"
+  },
+  {
+    "token": "dining",
+    "translation": "dining"
+  },
+  {
+    "token": "discharg",
+    "translation": "discharg"
+  },
+  {
+    "token": "dispers",
+    "translation": "dispers"
+  },
+  {
+    "token": "displayed",
+    "translation": "displayed"
+  },
+  {
+    "token": "distributed",
+    "translation": "distributed"
+  },
+  {
+    "token": "divers",
+    "translation": "divers"
+  },
+  {
+    "token": "doset",
+    "translation": "doset"
+  },
+  {
+    "token": "drawing",
+    "translation": "drawing"
+  },
+  {
+    "token": "drawstring",
+    "translation": "drawstring"
+  },
+  {
+    "token": "dress",
+    "translation": "robe"
+  },
+  {
+    "token": "dressed",
+    "translation": "dressed"
+  },
+  {
+    "token": "dressing",
+    "translation": "dressing"
+  },
+  {
+    "token": "drinking",
+    "translation": "drinking"
+  },
+  {
+    "token": "driving",
+    "translation": "driving"
+  },
+  {
+    "token": "drying",
+    "translation": "drying"
+  },
+  {
+    "token": "dyeing",
+    "translation": "dyeing"
+  },
+  {
+    "token": "dévers",
+    "translation": "dévers"
+  },
+  {
+    "token": "edelstahl",
+    "translation": "inox"
+  },
+  {
+    "token": "embossing",
+    "translation": "embossing"
+  },
+  {
+    "token": "encycloped",
+    "translation": "encycloped"
+  },
+  {
+    "token": "endless",
+    "translation": "endless"
+  },
+  {
+    "token": "engineered",
+    "translation": "engineered"
+  },
+  {
+    "token": "engineering",
+    "translation": "engineering"
+  },
+  {
+    "token": "enhanced",
+    "translation": "enhanced"
+  },
+  {
+    "token": "eped",
+    "translation": "eped"
+  },
+  {
+    "token": "epuiset",
+    "translation": "epuiset"
+  },
+  {
+    "token": "equipped",
+    "translation": "equipped"
+  },
+  {
+    "token": "everything",
+    "translation": "everything"
+  },
+  {
+    "token": "exciting",
+    "translation": "exciting"
+  },
+  {
+    "token": "existing",
+    "translation": "existing"
+  },
+  {
+    "token": "extended",
+    "translation": "extended"
+  },
+  {
+    "token": "fadeless",
+    "translation": "fadeless"
+  },
+  {
+    "token": "fading",
+    "translation": "fading"
+  },
+  {
+    "token": "faibless",
+    "translation": "faibless"
+  },
+  {
+    "token": "falling",
+    "translation": "falling"
+  },
+  {
+    "token": "featuring",
+    "translation": "featuring"
+  },
+  {
+    "token": "feed",
+    "translation": "feed"
+  },
+  {
+    "token": "feeling",
+    "translation": "feeling"
+  },
+  {
+    "token": "fighting",
+    "translation": "fighting"
+  },
+  {
+    "token": "filled",
+    "translation": "filled"
+  },
+  {
+    "token": "filling",
+    "translation": "filling"
+  },
+  {
+    "token": "fing",
+    "translation": "fing"
+  },
+  {
+    "token": "finished",
+    "translation": "finished"
+  },
+  {
+    "token": "fishing",
+    "translation": "fishing"
+  },
+  {
+    "token": "fitting",
+    "translation": "fitting"
+  },
+  {
+    "token": "fixed",
+    "translation": "fixed"
+  },
+  {
+    "token": "flashing",
+    "translation": "flashing"
+  },
+  {
+    "token": "floating",
+    "translation": "floating"
+  },
+  {
+    "token": "flying",
+    "translation": "flying"
+  },
+  {
+    "token": "folded",
+    "translation": "folded"
+  },
+  {
+    "token": "folding",
+    "translation": "folding"
+  },
+  {
+    "token": "following",
+    "translation": "following"
+  },
+  {
+    "token": "fouling",
+    "translation": "fouling"
+  },
+  {
+    "token": "fuzzing",
+    "translation": "fuzzing"
+  },
+  {
+    "token": "gaming",
+    "translation": "jeu"
+  },
+  {
+    "token": "gathering",
+    "translation": "gathering"
+  },
+  {
+    "token": "gelb",
+    "translation": "jaune"
+  },
+  {
+    "token": "giving",
+    "translation": "giving"
+  },
+  {
+    "token": "glowing",
+    "translation": "glowing"
+  },
+  {
+    "token": "gold",
+    "translation": "or"
+  },
+  {
+    "token": "grau",
+    "translation": "gris"
+  },
+  {
+    "token": "gray",
+    "translation": "gris"
+  },
+  {
+    "token": "green",
+    "translation": "vert"
+  },
+  {
+    "token": "greeting",
+    "translation": "greeting"
+  },
+  {
+    "token": "grey",
+    "translation": "gris"
+  },
+  {
+    "token": "grinding",
+    "translation": "grinding"
+  },
+  {
+    "token": "gross",
+    "translation": "grand"
+  },
+  {
+    "token": "grossess",
+    "translation": "grossess"
+  },
+  {
+    "token": "groß",
+    "translation": "grand"
+  },
+  {
+    "token": "grun",
+    "translation": "vert"
+  },
+  {
+    "token": "größe",
+    "translation": "taille"
+  },
+  {
+    "token": "guaranteed",
+    "translation": "guaranteed"
+  },
+  {
+    "token": "handbag",
+    "translation": "sac"
+  },
+  {
+    "token": "handed",
+    "translation": "handed"
+  },
+  {
+    "token": "hanging",
+    "translation": "hanging"
+  },
+  {
+    "token": "hat",
+    "translation": "chapeau"
+  },
+  {
+    "token": "haunted",
+    "translation": "haunted"
+  },
+  {
+    "token": "headless",
+    "translation": "headless"
+  },
+  {
+    "token": "headset",
+    "translation": "headset"
+  },
+  {
+    "token": "hobbywing",
+    "translation": "hobbywing"
+  },
+  {
+    "token": "holding",
+    "translation": "holding"
+  },
+  {
+    "token": "hood",
+    "translation": "hood"
+  },
+  {
+    "token": "housekeeping",
+    "translation": "housekeeping"
+  },
+  {
+    "token": "housing",
+    "translation": "housing"
+  },
+  {
+    "token": "hovering",
+    "translation": "hovering"
+  },
+  {
+    "token": "hundred",
+    "translation": "hundred"
+  },
+  {
+    "token": "hunting",
+    "translation": "hunting"
+  },
+  {
+    "token": "hut",
+    "translation": "chapeau"
+  },
+  {
+    "token": "icing",
+    "translation": "icing"
+  },
+  {
+    "token": "illustrated",
+    "translation": "illustrated"
+  },
+  {
+    "token": "immers",
+    "translation": "immers"
+  },
+  {
+    "token": "imped",
+    "translation": "imped"
+  },
+  {
+    "token": "imported",
+    "translation": "imported"
+  },
+  {
+    "token": "included",
+    "translation": "included"
+  },
+  {
+    "token": "including",
+    "translation": "including"
+  },
+  {
+    "token": "inculded",
+    "translation": "inculded"
+  },
+  {
+    "token": "ined",
+    "translation": "ined"
+  },
+  {
+    "token": "infrared",
+    "translation": "infrared"
+  },
+  {
+    "token": "inspired",
+    "translation": "inspired"
+  },
+  {
+    "token": "installed",
+    "translation": "installed"
+  },
+  {
+    "token": "insulated",
+    "translation": "insulated"
+  },
+  {
+    "token": "integrated",
+    "translation": "integrated"
+  },
+  {
+    "token": "interesting",
+    "translation": "interesting"
+  },
+  {
+    "token": "invers",
+    "translation": "invers"
+  },
+  {
+    "token": "jacket",
+    "translation": "veste"
+  },
+  {
+    "token": "jed",
+    "translation": "jed"
+  },
+  {
+    "token": "jogging",
+    "translation": "jogging"
+  },
+  {
+    "token": "kabel",
+    "translation": "cable"
+  },
+  {
+    "token": "keeping",
+    "translation": "keeping"
+  },
+  {
+    "token": "keyboard",
+    "translation": "keyboard"
+  },
+  {
+    "token": "keyring",
+    "translation": "keyring"
+  },
+  {
+    "token": "king",
+    "translation": "king"
+  },
+  {
+    "token": "kissen",
+    "translation": "coussin"
+  },
+  {
+    "token": "kitchen",
+    "translation": "cuisine"
+  },
+  {
+    "token": "klein",
+    "translation": "petit"
+  },
+  {
+    "token": "kunststoff",
+    "translation": "plastique"
+  },
+  {
+    "token": "kärcher",
+    "translation": "kärcher"
+  },
+  {
+    "token": "lamp",
+    "translation": "lampe"
+  },
+  {
+    "token": "landing",
+    "translation": "landing"
+  },
+  {
+    "token": "laptop",
+    "translation": "ordinateur"
+  },
+  {
+    "token": "lasting",
+    "translation": "lasting"
+  },
+  {
+    "token": "learning",
+    "translation": "learning"
+  },
+  {
+    "token": "led",
+    "translation": "led"
+  },
+  {
+    "token": "legging",
+    "translation": "legging"
+  },
+  {
+    "token": "less",
+    "translation": "less"
+  },
+  {
+    "token": "licensed",
+    "translation": "licensed"
+  },
+  {
+    "token": "licht",
+    "translation": "lumiere"
+  },
+  {
+    "token": "light",
+    "translation": "lumiere"
+  },
+  {
+    "token": "lighted",
+    "translation": "lighted"
+  },
+  {
+    "token": "lighting",
+    "translation": "lighting"
+  },
+  {
+    "token": "lightning",
+    "translation": "lightning"
+  },
+  {
+    "token": "limited",
+    "translation": "limited"
+  },
+  {
+    "token": "linen",
+    "translation": "lin"
+  },
+  {
+    "token": "ling",
+    "translation": "ling"
+  },
+  {
+    "token": "lining",
+    "translation": "lining"
+  },
+  {
+    "token": "listing",
+    "translation": "listing"
+  },
+  {
+    "token": "living",
+    "translation": "sejour"
+  },
+  {
+    "token": "looking",
+    "translation": "looking"
+  },
+  {
+    "token": "loved",
+    "translation": "loved"
+  },
+  {
+    "token": "machined",
+    "translation": "machined"
+  },
+  {
+    "token": "making",
+    "translation": "making"
+  },
+  {
+    "token": "mantel",
+    "translation": "manteau"
+  },
+  {
+    "token": "manufactured",
+    "translation": "manufactured"
+  },
+  {
+    "token": "maped",
+    "translation": "maped"
+  },
+  {
+    "token": "matching",
+    "translation": "matching"
+  },
+  {
+    "token": "measured",
+    "translation": "measured"
+  },
+  {
+    "token": "measuring",
+    "translation": "measuring"
+  },
+  {
+    "token": "med",
+    "translation": "med"
+  },
+  {
+    "token": "medium",
+    "translation": "moyen"
+  },
+  {
+    "token": "merced",
+    "translation": "merced"
+  },
+  {
+    "token": "metal",
+    "translation": "metal"
+  },
+  {
+    "token": "metall",
+    "translation": "metal"
+  },
+  {
+    "token": "minutescharging",
+    "translation": "minutescharging"
+  },
+  {
+    "token": "mittel",
+    "translation": "moyen"
+  },
+  {
+    "token": "mixed",
+    "translation": "mixed"
+  },
+  {
+    "token": "mixing",
+    "translation": "mixing"
+  },
+  {
+    "token": "modeling",
+    "translation": "modeling"
+  },
+  {
+    "token": "mounted",
+    "translation": "mounted"
+  },
+  {
+    "token": "mounting",
+    "translation": "mounting"
+  },
+  {
+    "token": "moving",
+    "translation": "moving"
+  },
+  {
+    "token": "mulching",
+    "translation": "mulching"
+  },
+  {
+    "token": "märklin",
+    "translation": "märklin"
+  },
+  {
+    "token": "mütze",
+    "translation": "bonnet"
+  },
+  {
+    "token": "need",
+    "translation": "need"
+  },
+  {
+    "token": "needed",
+    "translation": "needed"
+  },
+  {
+    "token": "nobless",
+    "translation": "nobless"
+  },
+  {
+    "token": "noiset",
+    "translation": "noiset"
+  },
+  {
+    "token": "notebook",
+    "translation": "ordinateur"
+  },
+  {
+    "token": "nothing",
+    "translation": "nothing"
+  },
+  {
+    "token": "nuiset",
+    "translation": "nuiset"
+  },
+  {
+    "token": "nylon",
+    "translation": "nylon"
+  },
+  {
+    "token": "obsed",
+    "translation": "obsed"
+  },
+  {
+    "token": "odorless",
+    "translation": "odorless"
+  },
+  {
+    "token": "offset",
+    "translation": "offset"
+  },
+  {
+    "token": "opening",
+    "translation": "opening"
+  },
+  {
+    "token": "operated",
+    "translation": "operated"
+  },
+  {
+    "token": "operating",
+    "translation": "operating"
+  },
+  {
+    "token": "ordering",
+    "translation": "ordering"
+  },
+  {
+    "token": "orthoped",
+    "translation": "orthoped"
+  },
+  {
+    "token": "overlocked",
+    "translation": "overlocked"
+  },
+  {
+    "token": "paced",
+    "translation": "paced"
+  },
+  {
+    "token": "pack",
+    "translation": "pack"
+  },
+  {
+    "token": "packageincluded",
+    "translation": "packageincluded"
+  },
+  {
+    "token": "packaging",
+    "translation": "packaging"
+  },
+  {
+    "token": "packed",
+    "translation": "packed"
+  },
+  {
+    "token": "packing",
+    "translation": "packing"
+  },
+  {
+    "token": "padded",
+    "translation": "padded"
+  },
+  {
+    "token": "padding",
+    "translation": "padding"
+  },
+  {
+    "token": "painted",
+    "translation": "painted"
+  },
+  {
+    "token": "painting",
+    "translation": "painting"
+  },
+  {
+    "token": "parking",
+    "translation": "parking"
+  },
+  {
+    "token": "pasted",
+    "translation": "pasted"
+  },
+  {
+    "token": "pictureneed",
+    "translation": "pictureneed"
+  },
+  {
+    "token": "pied",
+    "translation": "pied"
+  },
+  {
+    "token": "pink",
+    "translation": "rose"
+  },
+  {
+    "token": "placed",
+    "translation": "placed"
+  },
+  {
+    "token": "planning",
+    "translation": "planning"
+  },
+  {
+    "token": "plastic",
+    "translation": "plastique"
+  },
+  {
+    "token": "played",
+    "translation": "played"
+  },
+  {
+    "token": "playing",
+    "translation": "playing"
+  },
+  {
+    "token": "playset",
+    "translation": "playset"
+  },
+  {
+    "token": "poing",
+    "translation": "poing"
+  },
+  {
+    "token": "polished",
+    "translation": "polished"
+  },
+  {
+    "token": "polyester",
+    "translation": "polyester"
+  },
+  {
+    "token": "porsch",
+    "translation": "porsch"
+  },
+  {
+    "token": "positioning",
+    "translation": "positioning"
+  },
+  {
+    "token": "possed",
+    "translation": "possed"
+  },
+  {
+    "token": "posted",
+    "translation": "posted"
+  },
+  {
+    "token": "pousset",
+    "translation": "pousset"
+  },
+  {
+    "token": "powered",
+    "translation": "powered"
+  },
+  {
+    "token": "printed",
+    "translation": "printed"
+  },
+  {
+    "token": "printing",
+    "translation": "printing"
+  },
+  {
+    "token": "proced",
+    "translation": "proced"
+  },
+  {
+    "token": "processing",
+    "translation": "processing"
+  },
+  {
+    "token": "produced",
+    "translation": "produced"
+  },
+  {
+    "token": "protected",
+    "translation": "protected"
+  },
+  {
+    "token": "protector",
+    "translation": "protecteur"
+  },
+  {
+    "token": "provided",
+    "translation": "provided"
+  },
+  {
+    "token": "providing",
+    "translation": "providing"
+  },
+  {
+    "token": "préced",
+    "translation": "préced"
+  },
+  {
+    "token": "published",
+    "translation": "published"
+  },
+  {
+    "token": "pudding",
+    "translation": "pudding"
+  },
+  {
+    "token": "pullover",
+    "translation": "pull"
+  },
+  {
+    "token": "putting",
+    "translation": "putting"
+  },
+  {
+    "token": "racing",
+    "translation": "racing"
+  },
+  {
+    "token": "rafting",
+    "translation": "rafting"
+  },
+  {
+    "token": "reading",
+    "translation": "reading"
+  },
+  {
+    "token": "recommended",
+    "translation": "recommended"
+  },
+  {
+    "token": "recording",
+    "translation": "recording"
+  },
+  {
+    "token": "red",
+    "translation": "rouge"
+  },
+  {
+    "token": "reed",
+    "translation": "reed"
+  },
+  {
+    "token": "registered",
+    "translation": "registered"
+  },
+  {
+    "token": "related",
+    "translation": "related"
+  },
+  {
+    "token": "remastered",
+    "translation": "remastered"
+  },
+  {
+    "token": "remed",
+    "translation": "remed"
+  },
+  {
+    "token": "removed",
+    "translation": "removed"
+  },
+  {
+    "token": "renvers",
+    "translation": "renvers"
+  },
+  {
+    "token": "requaired",
+    "translation": "requaired"
+  },
+  {
+    "token": "required",
+    "translation": "required"
+  },
+  {
+    "token": "reserved",
+    "translation": "reserved"
+  },
+  {
+    "token": "reset",
+    "translation": "reset"
+  },
+  {
+    "token": "revers",
+    "translation": "revers"
+  },
+  {
+    "token": "ring",
+    "translation": "bague"
+  },
+  {
+    "token": "rising",
+    "translation": "rising"
+  },
+  {
+    "token": "rock",
+    "translation": "jupe"
+  },
+  {
+    "token": "rocking",
+    "translation": "rocking"
+  },
+  {
+    "token": "rolling",
+    "translation": "rolling"
+  },
+  {
+    "token": "roofing",
+    "translation": "roofing"
+  },
+  {
+    "token": "rot",
+    "translation": "rouge"
+  },
+  {
+    "token": "rotating",
+    "translation": "rotating"
+  },
+  {
+    "token": "rubber",
+    "translation": "caoutchouc"
+  },
+  {
+    "token": "rucksack",
+    "translation": "sacados"
+  },
+  {
+    "token": "rug",
+    "translation": "tapis"
+  },
+  {
+    "token": "ruled",
+    "translation": "ruled"
+  },
+  {
+    "token": "running",
+    "translation": "running"
+  },
+  {
+    "token": "sanitized",
+    "translation": "sanitized"
+  },
+  {
+    "token": "saving",
+    "translation": "saving"
+  },
+  {
+    "token": "scarf",
+    "translation": "echarpe"
+  },
+  {
+    "token": "scented",
+    "translation": "scented"
+  },
+  {
+    "token": "schem",
+    "translation": "schem"
+  },
+  {
+    "token": "schleich",
+    "translation": "schleich"
+  },
+  {
+    "token": "schneid",
+    "translation": "schneid"
+  },
+  {
+    "token": "school",
+    "translation": "school"
+  },
+  {
+    "token": "schott",
+    "translation": "schott"
+  },
+  {
+    "token": "schtroumpf",
+    "translation": "schtroumpf"
+  },
+  {
+    "token": "schwarz",
+    "translation": "noir"
+  },
+  {
+    "token": "scrapbooking",
+    "translation": "scrapbooking"
+  },
+  {
+    "token": "scrapcooking",
+    "translation": "scrapcooking"
+  },
+  {
+    "token": "screen",
+    "translation": "ecran"
+  },
+  {
+    "token": "sealed",
+    "translation": "sealed"
+  },
+  {
+    "token": "sealing",
+    "translation": "sealing"
+  },
+  {
+    "token": "seed",
+    "translation": "seed"
+  },
+  {
+    "token": "selling",
+    "translation": "selling"
+  },
+  {
+    "token": "sensing",
+    "translation": "sensing"
+  },
+  {
+    "token": "sensorless",
+    "translation": "sensorless"
+  },
+  {
+    "token": "set",
+    "translation": "set"
+  },
+  {
+    "token": "setting",
+    "translation": "setting"
+  },
+  {
+    "token": "shampooing",
+    "translation": "shampooing"
+  },
+  {
+    "token": "shaped",
+    "translation": "shaped"
+  },
+  {
+    "token": "shining",
+    "translation": "shining"
+  },
+  {
+    "token": "shipping",
+    "translation": "shipping"
+  },
+  {
+    "token": "shirt",
+    "translation": "chemise"
+  },
+  {
+    "token": "shoes",
+    "translation": "chaussures"
+  },
+  {
+    "token": "shooting",
+    "translation": "shooting"
+  },
+  {
+    "token": "shopping",
+    "translation": "shopping"
+  },
+  {
+    "token": "showed",
+    "translation": "showed"
+  },
+  {
+    "token": "showing",
+    "translation": "showing"
+  },
+  {
+    "token": "sided",
+    "translation": "sided"
+  },
+  {
+    "token": "silk",
+    "translation": "soie"
+  },
+  {
+    "token": "silver",
+    "translation": "argent"
+  },
+  {
+    "token": "sing",
+    "translation": "sing"
+  },
+  {
+    "token": "singing",
+    "translation": "singing"
+  },
+  {
+    "token": "sized",
+    "translation": "sized"
+  },
+  {
+    "token": "skirt",
+    "translation": "jupe"
+  },
+  {
+    "token": "sleeping",
+    "translation": "sleeping"
+  },
+  {
+    "token": "sling",
+    "translation": "sling"
+  },
+  {
+    "token": "small",
+    "translation": "petit"
+  },
+  {
+    "token": "smartwatch",
+    "translation": "montreconnectee"
+  },
+  {
+    "token": "solving",
+    "translation": "solving"
+  },
+  {
+    "token": "sorted",
+    "translation": "sorted"
+  },
+  {
+    "token": "soupless",
+    "translation": "soupless"
+  },
+  {
+    "token": "spandex",
+    "translation": "elasthanne"
+  },
+  {
+    "token": "speed",
+    "translation": "speed"
+  },
+  {
+    "token": "spinning",
+    "translation": "spinning"
+  },
+  {
+    "token": "spring",
+    "translation": "spring"
+  },
+  {
+    "token": "stacking",
+    "translation": "stacking"
+  },
+  {
+    "token": "stainless",
+    "translation": "inox"
+  },
+  {
+    "token": "starting",
+    "translation": "starting"
+  },
+  {
+    "token": "steering",
+    "translation": "steering"
+  },
+  {
+    "token": "sticking",
+    "translation": "sticking"
+  },
+  {
+    "token": "stitching",
+    "translation": "stitching"
+  },
+  {
+    "token": "stocked",
+    "translation": "stocked"
+  },
+  {
+    "token": "stocking",
+    "translation": "stocking"
+  },
+  {
+    "token": "storing",
+    "translation": "storing"
+  },
+  {
+    "token": "string",
+    "translation": "string"
+  },
+  {
+    "token": "stuffed",
+    "translation": "stuffed"
+  },
+  {
+    "token": "sued",
+    "translation": "sued"
+  },
+  {
+    "token": "sunset",
+    "translation": "sunset"
+  },
+  {
+    "token": "supported",
+    "translation": "supported"
+  },
+  {
+    "token": "supporting",
+    "translation": "supporting"
+  },
+  {
+    "token": "sweater",
+    "translation": "pull"
+  },
+  {
+    "token": "swing",
+    "translation": "swing"
+  },
+  {
+    "token": "tablet",
+    "translation": "tablette"
+  },
+  {
+    "token": "taking",
+    "translation": "taking"
+  },
+  {
+    "token": "talking",
+    "translation": "talking"
+  },
+  {
+    "token": "thanksgiving",
+    "translation": "thanksgiving"
+  },
+  {
+    "token": "themed",
+    "translation": "themed"
+  },
+  {
+    "token": "thing",
+    "translation": "thing"
+  },
+  {
+    "token": "thinking",
+    "translation": "thinking"
+  },
+  {
+    "token": "tied",
+    "translation": "tied"
+  },
+  {
+    "token": "timeless",
+    "translation": "timeless"
+  },
+  {
+    "token": "timing",
+    "translation": "timing"
+  },
+  {
+    "token": "touring",
+    "translation": "touring"
+  },
+  {
+    "token": "towel",
+    "translation": "serviette"
+  },
+  {
+    "token": "tracking",
+    "translation": "tracking"
+  },
+  {
+    "token": "trading",
+    "translation": "trading"
+  },
+  {
+    "token": "traged",
+    "translation": "traged"
+  },
+  {
+    "token": "training",
+    "translation": "training"
+  },
+  {
+    "token": "traveling",
+    "translation": "traveling"
+  },
+  {
+    "token": "travers",
+    "translation": "travers"
+  },
+  {
+    "token": "trépied",
+    "translation": "trépied"
+  },
+  {
+    "token": "tshirt",
+    "translation": "tshirt"
+  },
+  {
+    "token": "tumbling",
+    "translation": "tumbling"
+  },
+  {
+    "token": "turning",
+    "translation": "turning"
+  },
+  {
+    "token": "tweed",
+    "translation": "tweed"
+  },
+  {
+    "token": "twisted",
+    "translation": "twisted"
+  },
+  {
+    "token": "typc",
+    "translation": "typec"
+  },
+  {
+    "token": "typec",
+    "translation": "typec"
+  },
+  {
+    "token": "tüv",
+    "translation": "tüv"
+  },
+  {
+    "token": "uncharted",
+    "translation": "uncharted"
+  },
+  {
+    "token": "understanding",
+    "translation": "understanding"
+  },
+  {
+    "token": "unfolded",
+    "translation": "unfolded"
+  },
+  {
+    "token": "unframed",
+    "translation": "unframed"
+  },
+  {
+    "token": "united",
+    "translation": "united"
+  },
+  {
+    "token": "univers",
+    "translation": "univers"
+  },
+  {
+    "token": "unlimited",
+    "translation": "unlimited"
+  },
+  {
+    "token": "updated",
+    "translation": "updated"
+  },
+  {
+    "token": "upgraded",
+    "translation": "upgraded"
+  },
+  {
+    "token": "usb",
+    "translation": "usb"
+  },
+  {
+    "token": "used",
+    "translation": "used"
+  },
+  {
+    "token": "using",
+    "translation": "using"
+  },
+  {
+    "token": "vendred",
+    "translation": "vendred"
+  },
+  {
+    "token": "vers",
+    "translation": "vers"
+  },
+  {
+    "token": "viking",
+    "translation": "viking"
+  },
+  {
+    "token": "walking",
+    "translation": "walking"
+  },
+  {
+    "token": "warning",
+    "translation": "warning"
+  },
+  {
+    "token": "washing",
+    "translation": "washing"
+  },
+  {
+    "token": "watch",
+    "translation": "montre"
+  },
+  {
+    "token": "wearing",
+    "translation": "wearing"
+  },
+  {
+    "token": "wedding",
+    "translation": "wedding"
+  },
+  {
+    "token": "weiss",
+    "translation": "blanc"
+  },
+  {
+    "token": "weiß",
+    "translation": "blanc"
+  },
+  {
+    "token": "wing",
+    "translation": "wing"
+  },
+  {
+    "token": "wired",
+    "translation": "wired"
+  },
+  {
+    "token": "wireless",
+    "translation": "sansfil"
+  },
+  {
+    "token": "wool",
+    "translation": "laine"
+  },
+  {
+    "token": "working",
+    "translation": "working"
+  },
+  {
+    "token": "writing",
+    "translation": "writing"
+  },
+  {
+    "token": "xing",
+    "translation": "xing"
+  },
+  {
+    "token": "xl",
+    "translation": "xl"
+  },
+  {
+    "token": "xxl",
+    "translation": "xxl"
+  },
+  {
+    "token": "xxxl",
+    "translation": "xxxl"
+  },
+  {
+    "token": "yellow",
+    "translation": "jaune"
+  },
+  {
+    "token": "zöllner",
+    "translation": "zöllner"
+  },
+  {
+    "token": "épuiset",
+    "translation": "épuiset"
+  }
+]
