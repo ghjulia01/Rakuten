@@ -182,7 +182,7 @@ print(df.head())
 # =========================
 # 3) Sauvegardes CSV + Figures
 # =========================
-OUT_DIR = os.path.join(BASE_PATH, "notebooks")
+OUT_DIR = os.path.join(base_path, "notebooks")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 csv_path = os.path.join(

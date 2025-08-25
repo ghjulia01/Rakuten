@@ -110,11 +110,15 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict,
     )
 
     # --- IMAGES: pixels (dimxdim-> flatten -> sparse) ---
+   # récupère les paramètres depuis le TOML
+    image_train_dir = cfg["images"]["train_dir"]
+    image_size = tuple(cfg["images"].get("size", [64, 64]))
+
     image_pixels = create_image_pipeline(
-    image_dir=image_dir,
-    image_size=image_size,
-    dim_reduction=cfg.get("images", {}).get("dim_reduction", {})  
-)
+        image_dir=image_train_dir,
+        image_size=image_size,
+        dim_reduction=cfg.get("images", {}).get("dim_reduction", {})
+    )
 
     # --- IMAGES: stats (width/height/occupancy hors blanc/noir, 
     # AVANT resize), 
@@ -123,7 +127,7 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict,
     stats_cfg = cfg.get("images", {}).get("stats", {})
     if bool(stats_cfg.get("enabled", False)):
         image_stats = ImageStatsFeaturizer(
-            image_dir=image_dir,
+            image_dir=image_train_dir,          # <— ICI aussi on passe le train_dir
             imgid_col="imageid",
             pid_col="productid",
             white_threshold=int(stats_cfg.get("white_threshold", 230)),
