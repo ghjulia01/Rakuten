@@ -26,8 +26,8 @@ Pipeline texte + image (pixels + stats objet) avec under/over-sampling.
 - Respect strict du split Rakuten proposé (X_train/Y_train vs X_test)
 
 Script exécutable via :
-python -m main.train_model --config config.toml        # entraînement + prédiction
-python -m main.train_model --config config.toml --compare  # + comparaison LR vs SVC (CV)
+python -m main.train_model --config features/config.toml        # entraînement + prédiction
+python -m main.train_model --config features/config.toml --compare  # + comparaison LR vs SVC (CV)
 """
 
 import os
