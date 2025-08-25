@@ -57,7 +57,7 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 - Déploiement en démonstration Streamlit
 
-### Feature Engineering (prochaine étapes dont voici les orientations principales)
+### Feature Engineering (prochaines étapes dont voici les orientations principales)
 
 #### A- Traitement du texte – Pipeline Rakuten
 
@@ -147,24 +147,94 @@ Après nettoyage, les textes passent par une vectorisation TF-IDF :
 
 #### B-  Traitement d’images (normalisation, redimensionnement, encodage)
 
-#### C-  Réduction de dimension (PCA envisagé)
+- Chargement des images par `productid` via un pipeline scikit-learn dédié (`ImageLoader`).
+- Conversion en RGB et redimensionnement homogène à (64,64) px.
+- Normalisation des pixels dans [0,1].
+- Encodage en vecteurs aplatis exploitables par un modèle linéaire.
+- Gestion des images manquantes (vecteur nul).
+- Extraction optionnelle de 3 features simples (width, height, occupancy) pour enrichir les signaux visuels.
+
+#### C-  Réduction de dimension (SVD/PCA)
+
+- Aplatissement des images → vecteurs 12 288-d.
+- Réduction optionnelle configurable :
+  - **TruncatedSVD** sur données sparse (par défaut, rapide et adapté).
+  - **PCA dense** (plus coûteux en mémoire).
+- Paramètres configurables dans `config.toml` (`enabled`, `method`, `n_components`).
+- Objectif : compresser les données visuelles en conservant l’essentiel de l’information et limiter le surapprentissage.
 
 #### D-  Approche multimodale : fusion des embeddings texte et image
+
+Voici un résumé expliquant le flow :
+
+- Branche texte : TextCleaner → TF-IDF → HasDescriptionFlag → DesignationLength
+- Branche image : ImageLoader → Flatten → SVD/PCA optionnel
+- Fusion : FeatureUnion texte + image_pixels + image_stats
+- Rééchantillonnage : RandomUnderSampler + RandomOverSampler
+- Modèle final : LogisticRegression ou LinearSVC (choix dans config.toml)
+
+#### E- Hyperparamètres dans config.toml
+
+On peut changer facilement :
+- `min_df`, `max_df`, `max_features` pour TF-IDF
+- `images.size`, `images.dim_reduction` pour les images
+- `sampling.major_cap`, `sampling.tail_min` pour le rééquilibrage
+
+#### F- Architecture du projet
+
+- `features/` : prétraitement et feature engineering :
+  - `text_cleaner.py` : nettoyage et stemming multilingue
+  - `text_vectorizer.py` : TF-IDF encapsulé
+  - `image_loader.py` : chargement + resize des images
+  - `image_stats.py` : extraction width/height/occupancy
+  - `make_cleaned_frequencies_and_map.py` : génération des fréquences de tokens et dictionnaire EN/DE→FR
+- `models/` : pipelines pour texte et image
+- `main/train_model.py` : pipeline complet multimodal + sampling
+- `data/` : fichiers CSV et images (non fournis ici)
+- `features/config.toml` : **fichier central de configuration** (chemins, hyperparamètres, sorties)
+
+#### G- Comment exécuter le projet
+
+    1. Génération du dictionnaire et des fréquences (optionnel si déjà fait)
+        python features/make_cleaned_frequencies_and_map.py 
+        --x_train_csv data/X_train_update.csv 
+        --out_freq features/token_frequencies_cleaned_stem.csv 
+        --out_map features/translate_map_starter_from_cleaned.json 
+        --config features/config.toml
+    2. Entraînement du modèle + prédictions
+        python -m main.train_model --config features/config.toml
+    3. Comparer LogisticRegression et SVC :
+        python -m main.train_model --config features/config.toml --compare
+    4. Résultats dans models/compare_cv_results.csv.
 
 ## Installation
 
 ### Cloner ce dépôt :
 
 git clone https://github.com/ghjulia01/Rakuten.git
-cd rakuten_product_classification
+cd jul25_bootcamp_ds_classification-de-produits-e--commerce-rakuten-main
 
-### Créer un environnement virtuel
+### Créer un environnement virtuel (Windows)
 
-python -m venv env
-source env/bin/activate
+python -m venv .venv311
+
+### Activer un environnement virtuel (Windows)
+
+# Sous PowerShell :
+.venv311\Scripts\Activate.ps1
+
+# Ou sous CMD :
+.venv311\Scripts\activate.bat
+
+# (Sous Linux/Mac, utilisez `source .venv311/bin/activate`)
 
 ### Installer les dépendances :
 
+# Si requirements.txt existe déjà :
+pip install -r requirements.txt
+
+# Sinon, générer d'abord le fichier requirements.txt avec le script fourni :
+python tools/generate_requirements.py
 pip install -r requirements.txt
 
 ### Télécharger les données (fournies dans le cadre du challenge Rakuten) :
