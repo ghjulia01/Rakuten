@@ -7,11 +7,11 @@
 # à partir du corpus nettoyé.
 #
 # Utilisation :
-#   python make_cleaned_frequencies_and_map.py \
-#       --x_train_csv data/X_train_update.csv \
-#       --out_freq token_frequencies_cleaned_stem.csv \
-#       --out_map translate_map_starter_from_cleaned.json \
-#       --max_new 200
+# python features/make_cleaned_frequencies_and_map.py `
+#  --x_train_csv data/X_train_update.csv `
+#  --out_freq config/token_frequencies_cleaned_stem.csv `
+#  --out_map config/translate_map_starter_from_cleaned.json `
+#  --config features/config.toml
 #
 # Notes :
 # - Dépendances requises : pandas, nltk
