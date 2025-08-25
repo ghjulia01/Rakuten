@@ -45,7 +45,7 @@ min_df = 2.0        # valeurs “prod” 2, valeurs “test” 0.0,
 max_df = 0.95       # valeurs “prod” 0.95, valeurs “test” 1.0,
 use_stem = true
 # si fichier de traduction :
-translate_map_path = "config/translate_map_starter_from_cleaned.json"
+translate_map_path = "features/translate_map_starter_from_cleaned.json"
 
 # Paramètres pour la génération de fréquences et translate_map
 [text.vocab_build]

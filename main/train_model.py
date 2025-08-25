@@ -24,6 +24,10 @@ Pipeline texte + image (pixels + stats objet) avec under/over-sampling.
 - Lecture d'un config TOML (chemins, hyperparams, seuils image, etc.)
 - Option --compare : CV stratifiée pour LR vs LinearSVC (F1-macro)
 - Respect strict du split Rakuten proposé (X_train/Y_train vs X_test)
+
+Script exécutable via :
+python -m main.train_model --config config.toml        # entraînement + prédiction
+python -m main.train_model --config config.toml --compare  # + comparaison LR vs SVC (CV)
 """
 
 import os
