@@ -220,20 +220,20 @@ python -m venv .venv311
 
 ### Activer un environnement virtuel (Windows)
 
-# Sous PowerShell :
+#### Sous PowerShell :
 .venv311\Scripts\Activate.ps1
 
-# Ou sous CMD :
+#### Ou sous CMD :
 .venv311\Scripts\activate.bat
 
-# (Sous Linux/Mac, utilisez `source .venv311/bin/activate`)
+#### (Sous Linux/Mac, utilisez `source .venv311/bin/activate`)
 
 ### Installer les dépendances :
 
-# Si requirements.txt existe déjà :
+#### Si requirements.txt existe déjà :
 pip install -r requirements.txt
 
-# Sinon, générer d'abord le fichier requirements.txt avec le script fourni :
+#### Sinon, générer d'abord le fichier requirements.txt avec le script fourni :
 python tools/generate_requirements.py
 pip install -r requirements.txt
 
