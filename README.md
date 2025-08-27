@@ -102,7 +102,7 @@ end
 
 subgraph P4 ["4) Entraînement et prédiction"]
   F1["Fit sur X_train, y_train"]
-  F2["Mettre à jour le chemin ImageLoader → image_test/ (sans recréer la branche)"]
+  F2["Mettre à jour le chemin ImageLoader → image_test"]
   F3["Predict sur X_test"]
 end
 
