@@ -130,6 +130,7 @@ flowchart TB
   T1 --> T2 --> T3 --> FU
   I1 --> I2 --> I3 --> FU
   FU --> SAMP --> CLF
+```
 
 ### Feature Engineering 
 
@@ -317,6 +318,8 @@ flowchart LR
   B2[**B2** Texte seul: TF-IDF→LR] --> COMP
   B3[**B3** Image seule: PCA→LR]   --> COMP
   B4[**B4** Multimodal: Texte+Image+Sampling→LR/SVC] --> COMP
+```
+
 
 #### H- Comment exécuter le projet
 
