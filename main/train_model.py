@@ -289,7 +289,7 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict,
             white_threshold=int(stats_cfg.get("white_threshold", 230)),
             black_threshold=int(stats_cfg.get("black_threshold", 25)),
             min_area=int(stats_cfg.get("min_area", 16)),
-            out_prefix=str(stats_cfg.get("out_prefix", "img_w230_b25_")),
+            out_prefix=str(stats_cfg.get("out_prefix", "auto")),
         )
         transformers.append(("image_stats", image_stats))
 
