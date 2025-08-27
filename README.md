@@ -179,18 +179,18 @@ Voici un résumé expliquant le flow :
 - Modèle final : LogisticRegression ou LinearSVC (choix dans config.toml)
 
 flowchart LR
-  A[TextCleaner] --> B[TF-IDF]
-  A2[HasDescriptionFlag] --> D[FeatureUnion]
-  A3[DesignationLength] --> D
-  B --> D
+  - A[TextCleaner] --> B[TF-IDF]
+  - A2[HasDescriptionFlag] --> D[FeatureUnion]
+  - A3[DesignationLength] --> D
+  - B --> D
 
-  I1[ImageLoader (RGB, resize)]
-  I1 --> I2[Flatten]
-  I2 --> I3[PCA (option)]
-  I3 --> D
+  - I1[ImageLoader (RGB, resize)]
+  - I1 --> I2[Flatten]
+  - I2 --> I3[PCA (option)]
+  - I3 --> D
 
-  D --> S[Sampling (under + over)]
-  S --> C[Classifier (LR/SVC)]
+  - D --> S[Sampling (under + over)]
+  - S --> C[Classifier (LR/SVC)]
 
 #### E- Hyperparamètres dans config.toml
 
@@ -207,44 +207,44 @@ Points clés (éditables sans toucher au code) :
 
 Architecture du projet
 .
-├── data/
-│   ├── X_train_update.csv
-│   ├── Y_train_CVw08PX.csv
-│   └── X_test_update.csv
-│
-├── data/images/images/
-│   ├── image_train/   # images d'entraînement
-│   └── image_test/    # images de test
-│
-├── features/
-│   ├── text_cleaner.py
-│   ├── text_vectorizer.py
-│   ├── image_loader.py
-│   ├── image_stats.py
-│   ├── make_cleaned_frequencies_and_map.py
-│   └── config.toml          # configuration centrale du projet
-│
-├── main/
-│   └── train_model.py       # orchestration (baselines, CV, pipeline complet)
-│
-├── models/                  # pipelines pour texte et image
-├── results/                 # métriques & figures (sorties baselines)
-├── tools/                   # scripts de reporting (figures)
-│   ├── plot_baselines.py
-│   ├── plot_baseline_bars.py
-│   └── plot_confusion_matrix.py
-└── README.md
+- ├── data/
+- │   ├── X_train_update.csv
+- │   ├── Y_train_CVw08PX.csv
+- │   └── X_test_update.csv
+- │
+- ├── data/images/images/
+- │   ├── image_train/   # images d'entraînement
+- │   └── image_test/    # images de test
+- │
+- ├── features/
+- │   ├── text_cleaner.py
+- │   ├── text_vectorizer.py
+- │   ├── image_loader.py
+- │   ├── image_stats.py
+- │   ├── make_cleaned_frequencies_and_map.py
+- │   └── config.toml          # configuration centrale du projet
+- │
+- ├── main/
+- │   └── train_model.py       # orchestration (baselines, CV, pipeline complet)
+- │
+- ├── models/                  # pipelines pour texte et image
+- ├── results/                 # métriques & figures (sorties baselines)
+- ├── tools/                   # scripts de reporting (figures)
+- │   ├── plot_baselines.py
+- │   ├── plot_baseline_bars.py
+- │   └── plot_confusion_matrix.py
+- └── README.md
 
 #### G- Baselines & Protocole d’évaluation
 
 Nous évaluons 5 références avant/après le multimodal :
 
-Code	    Baseline	        Description
-B0	        Naïf (majoritaire)	DummyClassifier(strategy="most_frequent")
-B1	        Naïf (stratifié)	DummyClassifier(strategy="stratified")
-B2	        Texte seul	        TextCleaner + TF-IDF → LR (sans rééchantillonnage)
-B3	        Image seule	        ImageLoader → flatten → PCA → LR (sans texte)
-B4	        Multimodal complet	Texte + Image (+ image_stats) + under/over-sampling (pipeline principal)
+- Code	    Baseline	        Description
+- B0	        Naïf (majoritaire)	DummyClassifier(strategy="most_frequent")
+- B1	        Naïf (stratifié)	DummyClassifier(strategy="stratified")
+- B2	        Texte seul	        TextCleaner + TF-IDF → LR (sans rééchantillonnage)
+- B3	        Image seule	        ImageLoader → flatten → PCA → LR (sans texte)
+- B4	        Multimodal complet	Texte + Image (+ image_stats) + under/over-sampling (pipeline principal)
 
 - Métriques : F1 macro (équité inter-classes) & F1 pondéré.
 - Validation : K-fold stratifié (paramétré via TOML).
@@ -265,6 +265,7 @@ B4	        Multimodal complet	Texte + Image (+ image_stats) + under/over-samplin
 
 ###### B0 / B1
 python -m main.train_model --config features/config.toml --baseline b0
+
 python -m main.train_model --config features/config.toml --baseline b1
 
 ###### B2 (texte seul)
@@ -299,11 +300,22 @@ python tools/plot_confusion_matrix.py --config features/config.toml --baseline b
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b4 --splits 5 --normalize false --topk 30
 
 
-##### Sorties générées :
+##### Sorties & Organisation des résultats
 
-- results/baseline_results_summary.csv (+ rapports report_b*_cv.txt)
+###### Baselines
+
+- results/baseline_results_summary.csv – cumul des runs (append)
+- results/report_b0_cv.txt, … – classification_report par baseline (CV)
+- results/figures/*.png – bar charts & matrices de confusion (+ CSV agrégés)
 - results/figures/baseline_f1_macro.png, baseline_f1_bars.png, …
 - results/figures/cm_<baseline>.png + cm_<baseline>_full.csv + report_<baseline>_cv.txt
+
+###### Modèle complet (B4)
+
+- models/text_image_classifier.joblib – pipeline entraîné
+- models/y_test_pred.csv – prédictions sur X_test
+- models/compare_cv_results.csv – si --compare activé
+
 
 #### J- Bonnes pratiques & Dépannage
 
