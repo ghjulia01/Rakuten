@@ -1,61 +1,63 @@
 
+# models/image_pipeline.py
 import numpy as np
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer
+from sklearn.preprocessing import FunctionTransformer, StandardScaler
+from sklearn.decomposition import PCA, TruncatedSVD
 from scipy.sparse import csr_matrix
 from features.image_loader import ImageLoader
-from sklearn.decomposition import TruncatedSVD, PCA
-from sklearn.preprocessing import StandardScaler
+
+# ---------- helpers picklables  ----------
+def _select_productid(df):
+    # df est un DataFrame; on retourne un 1D array de productid (str)
+    return df["productid"].astype(str).to_numpy()
+
+def _flatten_images(X):
+    X = np.asarray(X)
+    # (n, H, W, C) -> (n, H*W*C)
+    return X.reshape((X.shape[0], -1)) if X.ndim == 4 else X
+
+def _to_sparse_csr(X):
+    return csr_matrix(X)
+
 
 def create_image_pipeline(image_dir, image_size=(64, 64), dim_reduction=None, memory=None):
     """
     Attend un DataFrame avec une colonne 'productid'.
-    - sélectionne productid
-    - charge + redimensionne + normalise (ImageLoader)
-    - aplatit (n,h,w,3) -> (n, h*w*3)
-    - optionnel: réduction de dimension (SVD/PCA) configurable
-    - pour SVD: conversion en sparse CSR (compatible avec TF-IDF)
+    Étapes :
+      - sélection 'productid'
+      - chargement + redimensionnement + normalisation (ImageLoader)
+      - flatten
+      - réduction de dimension optionnelle (PCA dense ou SVD sparse)
+
+    Remarque :
+      - Pour PCA (dense), on ne convertit PAS en sparse.
+      - Pour SVD, on convertit en CSR avant TruncatedSVD.
     """
-    # 1) Sélection de la colonne productid -> array[str]
-    select_pid = FunctionTransformer(
-        lambda df: df["productid"].astype(str).values, validate=False
-    )
-
-    # 2) Aplatissement en 2D si nécessaire
-    def _flatten(X):
-        X = np.asarray(X)
-        return X.reshape((X.shape[0], -1)) if X.ndim == 4 else X
-    flatten = FunctionTransformer(_flatten, validate=False)
-
     steps = [
-        ("select_pid", select_pid),
+        ("select_pid", FunctionTransformer(_select_productid, validate=False)),
         ("loader", ImageLoader(image_dir=image_dir, image_size=image_size)),
-        ("flatten", flatten),
+        ("flatten", FunctionTransformer(_flatten_images, validate=False)),
     ]
 
-    # 3) Dimensionality reduction (optional)
     if dim_reduction and dim_reduction.get("enabled", False):
-        method = (dim_reduction.get("method", "svd") or "svd").lower()
+        method = (dim_reduction.get("method", "pca") or "pca").lower()
         n_comp = int(dim_reduction.get("n_components", 200))
         rs = dim_reduction.get("random_state", 42)
 
-        if method == "svd":
-            # SVD sur sparse (recommandé)
-            steps += [
-                ("to_sparse", FunctionTransformer(lambda X: csr_matrix(X), accept_sparse=True, validate=False)),
-                ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
-            ]
-        elif method == "pca":
-            # PCA dense (mémoire ↑) : standardisation avec moyenne nécessaire
+        if method == "pca":
             steps += [
                 ("scaler", StandardScaler(with_mean=True)),
                 ("pca", PCA(n_components=n_comp, random_state=rs)),
             ]
+        elif method == "svd":
+            steps += [
+                ("to_sparse", FunctionTransformer(_to_sparse_csr, accept_sparse=True, validate=False)),
+                ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
+            ]
         else:
-            # fallback: juste sparse
-            steps += [("to_sparse", FunctionTransformer(lambda X: csr_matrix(X), accept_sparse=True, validate=False))]
-    else:
-        # Pas de réduction: on reste en sparse comme avant
-        steps += [("to_sparse", FunctionTransformer(lambda X: csr_matrix(X), accept_sparse=True, validate=False))]
+            # méthode inconnue -> pas de réduction
+            pass
 
+    # Si pas de réduction, on reste en DENSE (meilleur pour images + PCA ultérieure).
     return Pipeline(steps=steps, memory=memory)
