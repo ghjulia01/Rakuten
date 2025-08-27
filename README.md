@@ -69,7 +69,7 @@ classDef step  fill:#ffffff,stroke:#999999,stroke-width:1px,color:#111111;
 classDef io    fill:#fffbe6,stroke:#c9a227,color:#4d3d00;
 classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
 
-%%
+
   subgraph P0 ["0) Installation et configuration"]
   P0a["Créer .venv311 et installer requirements"]
   P0b["Configurer features/config.toml (paths, text, images, sampling, cv, model)"]
