@@ -298,21 +298,34 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
     pipe.fit(X_train, y_train)
 
     print(">> Prédiction sur X_test…")
-    # Repointer les branches images vers dossier TEST (pixels + stats)
+    # Repointer les branches images vers dossier TEST 
     feat_union = pipe.named_steps["features"]
-    new_list = []
     image_test_dir = cfg["images"]["test_dir"]
-    image_size = tuple(cfg["images"].get("size", [64, 64]))
+
+    # On parcourt la FeatureUnion et on met à jour UNIQUEMENT le loader
+    new_list = []
     for name, sub in feat_union.transformer_list:
         if name == "image_pixels":
-            new_list.append((name, 
-                             create_image_pipeline(image_dir=image_test_dir, 
-                                                   image_size=image_size)))
+            # sub est une sklearn.Pipeline
+            if "loader" in sub.named_steps:
+                loader = sub.named_steps["loader"]
+                # 1) setter si disponible
+                if hasattr(loader, "set_image_dir"):
+                    loader.set_image_dir(image_test_dir)
+                # 2) sinon on modifie l'attribut directement
+                elif hasattr(loader, "image_dir"):
+                    loader.image_dir = image_test_dir
+                else:
+                    raise RuntimeError("ImageLoader n'a ni 'set_image_dir' ni attribut 'image_dir'.")
+            new_list.append((name, sub))  # on garde la branche 'fit' telle quelle
         elif name == "image_stats":
-            sub.set_image_dir(image_test_dir)  # méthode prévue dans le featurizer
+            # ImageStatsFeaturizer prévoit set_image_dir(...)
+            if hasattr(sub, "set_image_dir"):
+                sub.set_image_dir(image_test_dir)
             new_list.append((name, sub))
         else:
             new_list.append((name, sub))
+
     feat_union.transformer_list = new_list
 
     y_pred = pipe.predict(X_test)
@@ -386,7 +399,7 @@ def main():
         run_baseline_and_report(args.baseline, X_train, y_train, cfg, outdir="results")
         return
     
-    # Option: comparaison LR vs SVC (ne touche pas X_test)
+    # Option: comparaison LR vs SVC 
     if args.compare:
         df_cmp = compare_models_cv(
             X_train[needed], y_train,
