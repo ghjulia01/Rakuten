@@ -1,0 +1,3 @@
+baseline,cv_splits,f1_macro,f1_weighted,train_infer_time_sec,notes
+B0,3,0.00794977368958972,0.025805495655937392,0.056,text_only=False | image_only=False | dummy=True
+B1,3,0.03635043126933371,0.05193151580112361,0.1,text_only=False | image_only=False | dummy=True

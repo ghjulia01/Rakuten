@@ -124,7 +124,17 @@ def build_classifier(name: str, use_class_weight: bool):
     name = (name or "lr").lower()
     if name == "svc":
         return LinearSVC(class_weight=cw)
-    return LogisticRegression(max_iter=3000, solver="saga", class_weight=cw, n_jobs=1)
+    return LogisticRegression(
+        solver="saga", # supporte L1/L2/elasticnet, multi_class, sparse   
+        multi_class="multinomial", # pour plus de 2 classes
+        penalty="l2", 
+        C=1.0,          # baisser à 0.5 ou 0.25 pour converger plus vite
+        max_iter=5000,  # 5000–8000 selon le besoin
+        tol=1e-3,       # tolérance un peu plus large
+        class_weight=cw,   
+        random_state=42,
+        verbose=0, 
+        n_jobs=1)
 
 def build_baseline_pipeline(kind: str, cfg: dict):
     """
@@ -155,7 +165,16 @@ def build_baseline_pipeline(kind: str, cfg: dict):
             min_df=text_cfg.get("min_df", 0.0),
             max_df=text_cfg.get("max_df", 1.0),
         )
-        clf = LogisticRegression(max_iter=3000, solver="saga", class_weight="balanced")
+        clf = LogisticRegression(solver="saga",
+                                 multi_class="multinomial",
+                                 penalty="l2",
+                                 C=1.0,           # baisser à 0.5 ou 0.25 si besoin pour converger plus vite
+                                 max_iter=5000,   # ou 8000 si encore des warnings
+                                 tol=1e-3,        # tolérance un peu plus large
+                                 class_weight="balanced",
+                                 random_state=42,
+                                 verbose=0,
+                                 )
         pipe = SkPipeline([("text", text_branch), ("clf", clf)])
         return pipe, need_cols
 
@@ -171,7 +190,16 @@ def build_baseline_pipeline(kind: str, cfg: dict):
         )
         pca_n = int(cfg.get("images", {}).get("dim_reduction", {}).get("n_components", 100))
         img_pca = make_pipeline(img_branch, PCA(n_components=pca_n, random_state=42))
-        clf = LogisticRegression(max_iter=3000, solver="saga", class_weight="balanced")
+        clf = LogisticRegression(solver="saga",
+                                 multi_class="multinomial",
+                                 penalty="l2",
+                                 C=1.0,           # baisser à 0.5 ou 0.25 si besoin pour converger plus vite
+                                 max_iter=5000,   # ou 8000 si encore des warnings
+                                 tol=1e-3,        # tolérance un peu plus large
+                                 class_weight="balanced",
+                                 random_state=42,
+                                 verbose=0,
+                                 )
         pipe = SkPipeline([("img", img_pca), ("clf", clf)])
         return pipe, need_cols
 
@@ -328,7 +356,16 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
 
     feat_union.transformer_list = new_list
 
-    y_pred = pipe.predict(X_test)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"This Pipeline instance is not fitted yet",
+            category=FutureWarning,
+            module=r"sklearn\.pipeline"
+            )
+        y_pred = pipe.predict(X_test)
+
     return pipe, y_pred
 
 

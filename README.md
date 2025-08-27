@@ -347,21 +347,21 @@ python -m main.train_model --config features/config.toml --compare
 
 #### I- Visualisations & Rapports
 
-##### 1) Barres (une métrique) – F1 macro par défaut
+- ##### 1) Barres (une métrique) – F1 macro par défaut
 python tools/plot_baselines.py
 ###### autre métrique & sortie
 python tools/plot_baselines.py --metric f1_weighted --out results/figures/baseline_f1_weighted.png
 
-##### 2) Barres groupées – F1 macro vs F1 pondéré
+- ##### 2) Barres groupées – F1 macro vs F1 pondéré
 python tools/plot_baseline_bars.py
 ###### imposer l’ordre : B0→B4
 python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 
-##### 3) Matrice de confusion (top-K classes)
+- ##### 3) Matrice de confusion (top-K classes)
 ###### Texte seul (B2), 3 folds, normalisée, top 25 classes
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2
 
-###### Multimodal (B4), 5 folds, non normalisée, top 30
+- ###### Multimodal (B4), 5 folds, non normalisée, top 30
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b4 --splits 5 --normalize false --topk 30
 
 
@@ -384,14 +384,15 @@ python tools/plot_confusion_matrix.py --config features/config.toml --baseline b
 
 #### J- Bonnes pratiques & Dépannage
 
-##### Import models introuvable : 
+- ##### Import models introuvable : 
 lancer depuis la racine avec python -m main.train_model ... et vérifier les __init__.py.
 
-##### Ajustement test images sans recréer la branche : 
+- ##### Ajustement test images sans recréer la branche : 
 On met à jour le chemin du ImageLoader dans la pipeline fit (pas de recréation) → dimension identique train/test.
 
-##### Convergence LR : 
+- ##### Convergence LR : 
 augmenter max_iter (ex. 5000) ou relâcher tol.
+
 
 ##### Mémoire images :
 
