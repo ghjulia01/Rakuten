@@ -36,7 +36,7 @@ enabled = true              # true = on ajoute la branche de features automatiqu
 white_threshold = 230       # pixels >= 230 -> fond (blanc)
 black_threshold = 25        # pixels <= 25  -> fond (noir)
 min_area = 16               # surface min pour éviter le bruit
-out_prefix = "img_w230_b25_"# préfixe des noms de features (traçabilité)
+out_prefix = "auto"         # préfixe des noms de features (traçabilité) avant "img_w230_b25_"
 
 # --- Réglages branche texte
 [text]
