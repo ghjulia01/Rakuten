@@ -61,6 +61,7 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 ### Diagramme
 
+```mermaid
 flowchart TB
   %% ===================== STYLES =====================
   classDef phase fill:#f2f6ff,stroke:#5271ff,stroke-width:1px,color:#1f2a44;
@@ -69,20 +70,17 @@ flowchart TB
   classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
   classDef warn  fill:#fff0f0,stroke:#d9534f,color:#7a0b0b;
 
-  %% ===================== PHASE 0 =====================
   subgraph P0[0) Installation & Configuration]:::phase
     P0a[Créer .venv311 & pip install -r requirements.txt]:::step
     P0b[Configurer features/config.toml\n(paths, text, images, sampling, cv, model)]:::step
   end
 
-  %% ===================== PHASE 1 =====================
   subgraph P1[1) Préparation des données]:::phase
     P1a[Verifier CSV:\nX_train_update.csv,\nY_train_CVw08PX.csv,\nX_test_update.csv]:::io
     P1b[Images:\nimage_train/, image_test/]:::io
     P1c[Optionnel – Générer vocabulaire & map:\nfeatures/make_cleaned_frequencies_and_map.py\n→ token_frequencies_cleaned_stem.csv\n→ translate_map_starter_from_cleaned.json]:::tool
   end
 
-  %% ===================== PHASE 2 =====================
   subgraph P2[2) Baselines (références)]:::phase
     B0[Baseline B0\nDummy - most_frequent]:::step
     B1[Baseline B1\nDummy - stratified]:::step
@@ -91,7 +89,6 @@ flowchart TB
     noteB2["Sans resampling, class_weight='balanced'"]:::warn
   end
 
-  %% ===================== PHASE 3 =====================
   subgraph P3[3) Pipeline multimodal (B4)]:::phase
     subgraph TXT[Branche Texte]:::phase
       T1[TextCleaner:\nconcat titre+desc, nettoyage, accents,\nmap EN/DE→FR (option), stemming (option)]:::step
@@ -108,14 +105,12 @@ flowchart TB
     CLF[Classifier: LR ou LinearSVC]:::step
   end
 
-  %% ===================== PHASE 4 =====================
   subgraph P4[4) Entraînement & Prédiction]:::phase
     F1[Fit pipeline sur X_train,y_train]:::step
     F2[Mise à jour du chemin ImageLoader\n→ image_test/ (sans recréer la branche)]:::step
     F3[Predict sur X_test]:::step
   end
 
-  %% ===================== PHASE 5 =====================
   subgraph P5[5) Évaluation & Reporting]:::phase
     R1[CV (stratified K-fold):\nF1 macro & F1 pondéré]:::step
     R2[Export CSV cumulé:\nresults/baseline_results_summary.csv]:::io
@@ -123,7 +118,6 @@ flowchart TB
     V1[Figures:\nplot_baselines.py → barres F1\nplot_baseline_bars.py → macro vs weighted\nplot_confusion_matrix.py → CM top-K]:::tool
   end
 
-  %% ===================== PHASE 6 =====================
   subgraph P6[6) Sorties & Livraison]:::phase
     O1[models/text_image_classifier.joblib]:::io
     O2[models/y_test_pred.csv]:::io
@@ -132,7 +126,6 @@ flowchart TB
     G2[Sync vers dépôt professeur\nvia git subtree --prefix=Julie ...]:::tool
   end
 
-  %% EDGES
   P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
   T1 --> T2 --> T3 --> FU
   I1 --> I2 --> I3 --> FU
@@ -317,6 +310,7 @@ Nous évaluons 5 références avant/après le multimodal :
 - Validation : K-fold stratifié (paramétré via TOML).
 - Reproductibilité : random_state fixés; config centralisée.
 
+```mermaid
 flowchart LR
   B0[**B0** Dummy most_frequent] --> COMP[Comparaison F1]
   B1[**B1** Dummy stratified]   --> COMP
