@@ -361,7 +361,7 @@ python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 ###### Texte seul (B2), 3 folds, normalisée, top 25 classes
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2
 
-- ###### Multimodal (B4), 5 folds, non normalisée, top 30
+###### Multimodal (B4), 5 folds, non normalisée, top 30
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b4 --splits 5 --normalize false --topk 30
 
 
@@ -394,13 +394,13 @@ On met à jour le chemin du ImageLoader dans la pipeline fit (pas de recréation
 augmenter max_iter (ex. 5000) ou relâcher tol.
 
 
-##### Mémoire images :
+- ##### Mémoire images :
 
 Éviter SVD sparse sur pixels denses,
 Préférer PCA dense,
 Réduire images.size si nécessaire.
 
-##### Équilibrage : 
+- ##### Équilibrage : 
 Toujours comparer B4 à B2 pour mesurer l’apport de l’image.
 
 #### K- Changelog (Rendu 2)
