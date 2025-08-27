@@ -59,6 +59,85 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 - Déploiement en démonstration Streamlit
 
+### Diagramme
+
+flowchart TB
+  %% ===================== STYLES =====================
+  classDef phase fill:#f2f6ff,stroke:#5271ff,stroke-width:1px,color:#1f2a44;
+  classDef step  fill:#fff,stroke:#999,stroke-width:1px,color:#111;
+  classDef io    fill:#fffbe6,stroke:#c9a227,color:#4d3d00;
+  classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
+  classDef warn  fill:#fff0f0,stroke:#d9534f,color:#7a0b0b;
+
+  %% ===================== PHASE 0 =====================
+  subgraph P0[0) Installation & Configuration]:::phase
+    P0a[Créer .venv311 & pip install -r requirements.txt]:::step
+    P0b[Configurer features/config.toml\n(paths, text, images, sampling, cv, model)]:::step
+  end
+
+  %% ===================== PHASE 1 =====================
+  subgraph P1[1) Préparation des données]:::phase
+    P1a[Verifier CSV:\nX_train_update.csv,\nY_train_CVw08PX.csv,\nX_test_update.csv]:::io
+    P1b[Images:\nimage_train/, image_test/]:::io
+    P1c[Optionnel – Générer vocabulaire & map:\nfeatures/make_cleaned_frequencies_and_map.py\n→ token_frequencies_cleaned_stem.csv\n→ translate_map_starter_from_cleaned.json]:::tool
+  end
+
+  %% ===================== PHASE 2 =====================
+  subgraph P2[2) Baselines (références)]:::phase
+    B0[Baseline B0\nDummy - most_frequent]:::step
+    B1[Baseline B1\nDummy - stratified]:::step
+    B2[Baseline B2\nTexte seul:\nTextCleaner → TF-IDF → LR]:::step
+    B3[Baseline B3\nImage seule:\nImageLoader → Resize → Flatten → PCA → LR]:::step
+    noteB2["Sans resampling, class_weight='balanced'"]:::warn
+  end
+
+  %% ===================== PHASE 3 =====================
+  subgraph P3[3) Pipeline multimodal (B4)]:::phase
+    subgraph TXT[Branche Texte]:::phase
+      T1[TextCleaner:\nconcat titre+desc, nettoyage, accents,\nmap EN/DE→FR (option), stemming (option)]:::step
+      T2[TF-IDF (1-2g; min_df/max_df/max_features)]:::step
+      T3[Features additionnelles:\nHasDescriptionFlag, DesignationLength]:::step
+    end
+    subgraph IMG[Branche Image]:::phase
+      I1[ImageLoader (RGB, resize size=[32|64])\nvaleurs [0,1], fallback image noire]:::step
+      I2[Flatten (H×W×C → vecteur)]:::step
+      I3[PCA dense (n_components) \n(ou SVD sparse si configuré)]:::step
+    end
+    FU[FeatureUnion (texte + image + stats)]:::step
+    SAMP[Sampling:\nundersampling + oversampling]:::step
+    CLF[Classifier: LR ou LinearSVC]:::step
+  end
+
+  %% ===================== PHASE 4 =====================
+  subgraph P4[4) Entraînement & Prédiction]:::phase
+    F1[Fit pipeline sur X_train,y_train]:::step
+    F2[Mise à jour du chemin ImageLoader\n→ image_test/ (sans recréer la branche)]:::step
+    F3[Predict sur X_test]:::step
+  end
+
+  %% ===================== PHASE 5 =====================
+  subgraph P5[5) Évaluation & Reporting]:::phase
+    R1[CV (stratified K-fold):\nF1 macro & F1 pondéré]:::step
+    R2[Export CSV cumulé:\nresults/baseline_results_summary.csv]:::io
+    R3[Rapports par baseline:\nresults/report_b*_cv.txt]:::io
+    V1[Figures:\nplot_baselines.py → barres F1\nplot_baseline_bars.py → macro vs weighted\nplot_confusion_matrix.py → CM top-K]:::tool
+  end
+
+  %% ===================== PHASE 6 =====================
+  subgraph P6[6) Sorties & Livraison]:::phase
+    O1[models/text_image_classifier.joblib]:::io
+    O2[models/y_test_pred.csv]:::io
+    O3[models/compare_cv_results.csv (option --compare)]:::io
+    G1[README + Diagrams Mermaid]:::tool
+    G2[Sync vers dépôt professeur\nvia git subtree --prefix=Julie ...]:::tool
+  end
+
+  %% EDGES
+  P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
+  T1 --> T2 --> T3 --> FU
+  I1 --> I2 --> I3 --> FU
+  FU --> SAMP --> CLF
+
 ### Feature Engineering 
 
 #### A- Traitement du texte – Pipeline Rakuten
@@ -178,19 +257,7 @@ Voici un résumé expliquant le flow :
 - Rééchantillonnage : RandomUnderSampler + RandomOverSampler
 - Modèle final : LogisticRegression ou LinearSVC (choix dans config.toml)
 
-flowchart LR
-  - A[TextCleaner] --> B[TF-IDF]
-  - A2[HasDescriptionFlag] --> D[FeatureUnion]
-  - A3[DesignationLength] --> D
-  - B --> D
 
-  - I1[ImageLoader (RGB, resize)]
-  - I1 --> I2[Flatten]
-  - I2 --> I3[PCA (option)]
-  - I3 --> D
-
-  - D --> S[Sampling (under + over)]
-  - S --> C[Classifier (LR/SVC)]
 
 #### E- Hyperparamètres dans config.toml
 
@@ -250,6 +317,12 @@ Nous évaluons 5 références avant/après le multimodal :
 - Validation : K-fold stratifié (paramétré via TOML).
 - Reproductibilité : random_state fixés; config centralisée.
 
+flowchart LR
+  B0[**B0** Dummy most_frequent] --> COMP[Comparaison F1]
+  B1[**B1** Dummy stratified]   --> COMP
+  B2[**B2** Texte seul: TF-IDF→LR] --> COMP
+  B3[**B3** Image seule: PCA→LR]   --> COMP
+  B4[**B4** Multimodal: Texte+Image+Sampling→LR/SVC] --> COMP
 
 #### H- Comment exécuter le projet
 
