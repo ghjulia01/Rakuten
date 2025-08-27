@@ -162,8 +162,8 @@ Après nettoyage, les textes passent par une vectorisation TF-IDF :
 - Aplatissement des images 
 - Les vecteurs aplatis sont denses → privilégier PCA dense (mémoire maîtrisée).
 - Réduction optionnelle configurable :
-  - **TruncatedSVD** sur données sparse (par défaut, rapide et adapté).
-  - **PCA dense** (plus coûteux en mémoire).
+  - **TruncatedSVD** sur données sparse .
+  - **PCA dense** (plus adapté).
 - Paramètres configurables dans `config.toml` (`enabled`, `method`, `n_components`).
 - Conseil RAM : size = [32,32] + n_components ≈ 50~150 pour un bon compromis.
 - Objectif : compresser les données visuelles en conservant l’essentiel de l’information et limiter le surapprentissage.

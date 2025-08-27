@@ -25,7 +25,7 @@ size = [32, 32]
 
 [images.dim_reduction]
 enabled = true
-method = "pca"          # "svd" (recommandé) ou "pca"
+method = "pca"          # "svd" ou "pca" (recommandé) 
 n_components = 100
 random_state = 42
 
