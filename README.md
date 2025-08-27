@@ -63,73 +63,68 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 ```mermaid
 flowchart TB
-  %% ===================== STYLES =====================
-  classDef phase fill:#f2f6ff,stroke:#5271ff,stroke-width:1px,color:#1f2a44;
-  classDef step  fill:#fff,stroke:#999,stroke-width:1px,color:#111;
-  classDef io    fill:#fffbe6,stroke:#c9a227,color:#4d3d00;
-  classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
-  classDef warn  fill:#fff0f0,stroke:#d9534f,color:#7a0b0b;
+%% Styles
+classDef phase fill:#f2f6ff,stroke:#5271ff,stroke-width:1px,color:#1f2a44;
+classDef step  fill:#ffffff,stroke:#999999,stroke-width:1px,color:#111111;
+classDef io    fill:#fffbe6,stroke:#c9a227,color:#4d3d00;
+classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
 
-  subgraph P0[0) Installation & Configuration]:::phase
-    P0a[Créer .venv311 & pip install -r requirements.txt]:::step
-    P0b[Configurer features/config.toml\n(paths, text, images, sampling, cv, model)]:::step
-  end
+%%
+  subgraph P0 ["0) Installation et configuration"]
+  P0a["Créer .venv311 et installer requirements"]
+  P0b["Configurer features/config.toml (paths, text, images, sampling, cv, model)"]
+end
 
-  subgraph P1[1) Préparation des données]:::phase
-    P1a[Verifier CSV:\nX_train_update.csv,\nY_train_CVw08PX.csv,\nX_test_update.csv]:::io
-    P1b[Images:\nimage_train/, image_test/]:::io
-    P1c[Optionnel – Générer vocabulaire & map:\nfeatures/make_cleaned_frequencies_and_map.py\n→ token_frequencies_cleaned_stem.csv\n→ translate_map_starter_from_cleaned.json]:::tool
-  end
+subgraph P1 ["1) Préparation des données"]
+  P1a["Vérifier CSV : X_train_update.csv, Y_train_CVw08PX.csv, X_test_update.csv"]
+  P1b["Images : image_train/, image_test/"]
+  P1c["Optionnel : make_cleaned_frequencies_and_map.py → fréquences + translate_map"]
+end
 
-  subgraph P2[2) Baselines (références)]:::phase
-    B0[Baseline B0\nDummy - most_frequent]:::step
-    B1[Baseline B1\nDummy - stratified]:::step
-    B2[Baseline B2\nTexte seul:\nTextCleaner → TF-IDF → LR]:::step
-    B3[Baseline B3\nImage seule:\nImageLoader → Resize → Flatten → PCA → LR]:::step
-    noteB2["Sans resampling, class_weight='balanced'"]:::warn
-  end
+subgraph P2 ["2) Baselines (références)"]
+  B0["B0 Dummy - most_frequent"]
+  B1["B1 Dummy - stratified"]
+  B2["B2 Texte : TextCleaner → TF-IDF → LR"]
+  B3["B3 Image : ImageLoader → Resize → Flatten → PCA → LR"]
+end
 
-  subgraph P3[3) Pipeline multimodal (B4)]:::phase
-    subgraph TXT[Branche Texte]:::phase
-      T1[TextCleaner:\nconcat titre+desc, nettoyage, accents,\nmap EN/DE→FR (option), stemming (option)]:::step
-      T2[TF-IDF (1-2g; min_df/max_df/max_features)]:::step
-      T3[Features additionnelles:\nHasDescriptionFlag, DesignationLength]:::step
-    end
-    subgraph IMG[Branche Image]:::phase
-      I1[ImageLoader (RGB, resize size=[32|64])\nvaleurs [0,1], fallback image noire]:::step
-      I2[Flatten (H×W×C → vecteur)]:::step
-      I3[PCA dense (n_components) \n(ou SVD sparse si configuré)]:::step
-    end
-    FU[FeatureUnion (texte + image + stats)]:::step
-    SAMP[Sampling:\nundersampling + oversampling]:::step
-    CLF[Classifier: LR ou LinearSVC]:::step
-  end
+subgraph P3 ["3) Pipeline multimodal (B4)"]
+  T1["TextCleaner"]
+  T2["TF-IDF (1–2g)"]
+  T3["Features : HasDescriptionFlag, DesignationLength"]
+  I1["ImageLoader (RGB, resize)"]
+  I2["Flatten"]
+  I3["PCA (n_components)"]
+  FU["FeatureUnion (texte + image + stats)"]
+  SAMP["Sampling (under+over)"]
+  CLF["Classifier (LR ou LinearSVC)"]
+end
 
-  subgraph P4[4) Entraînement & Prédiction]:::phase
-    F1[Fit pipeline sur X_train,y_train]:::step
-    F2[Mise à jour du chemin ImageLoader\n→ image_test/ (sans recréer la branche)]:::step
-    F3[Predict sur X_test]:::step
-  end
+subgraph P4 ["4) Entraînement et prédiction"]
+  F1["Fit sur X_train, y_train"]
+  F2["Mettre à jour le chemin ImageLoader → image_test/ (sans recréer la branche)"]
+  F3["Predict sur X_test"]
+end
 
-  subgraph P5[5) Évaluation & Reporting]:::phase
-    R1[CV (stratified K-fold):\nF1 macro & F1 pondéré]:::step
-    R2[Export CSV cumulé:\nresults/baseline_results_summary.csv]:::io
-    R3[Rapports par baseline:\nresults/report_b*_cv.txt]:::io
-    V1[Figures:\nplot_baselines.py → barres F1\nplot_baseline_bars.py → macro vs weighted\nplot_confusion_matrix.py → CM top-K]:::tool
-  end
+subgraph P5 ["5) Évaluation et reporting"]
+  R1["CV stratifiée : F1 macro et F1 pondéré"]
+  R2["Export CSV cumulé : results/baseline_results_summary.csv"]
+  R3["Rapports : results/report_b*_cv.txt"]
+  V1["Figures : plot_baselines.py, plot_baseline_bars.py, plot_confusion_matrix.py"]
+end
 
-  subgraph P6[6) Sorties & Livraison]:::phase
-    O1[models/text_image_classifier.joblib]:::io
-    O2[models/y_test_pred.csv]:::io
-    O3[models/compare_cv_results.csv (option --compare)]:::io
-    G1[README + Diagrams Mermaid]:::tool
-    G2[Sync vers dépôt professeur\nvia git subtree --prefix=Julie ...]:::tool
-  end
+subgraph P6 ["6) Sorties et livraison"]
+  O1["models/text_image_classifier.joblib"]
+  O2["models/y_test_pred.csv"]
+  O3["models/compare_cv_results.csv (option --compare)"]
+  G1["README + diagrammes Mermaid"]
+  G2["Sync vers dépôt professeur (git subtree --prefix=Julie)"]
+end
 
-  P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
-  T1 --> T2 --> T3 --> FU
-  I1 --> I2 --> I3 --> FU
-  FU --> SAMP --> CLF
+P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
+T1 --> T2 --> T3 --> FU
+I1 --> I2 --> I3 --> FU
+FU --> SAMP --> CLF
 ```
 
 ### Feature Engineering 
