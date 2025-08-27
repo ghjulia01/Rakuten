@@ -1,7 +1,7 @@
 # Rakuten Product Classification – DataScientest x Mines Paris
 
 
-## Presentation and Installation 
+## Presentation  
 
 
 Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Paris** et du challenge proposé par **Rakuten Institute of Technology** via la plateforme Challenge Data en partenariat avec le **Collège de France**. Il vise à **automatiser la classification des produits vendus sur la marketplace Rakuten** France en s’appuyant à la fois sur des **données textuelles** (titres, descriptions) et **visuelles** (images produits).
@@ -14,6 +14,8 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 - Traiter les défis liés au déséquilibre des classes, à la diversité linguistique et à l’hétérogénéité des visuels.
 
 - Proposer une structuration sémantique des catégories pour faciliter l'expérience utilisateur et optimiser la navigation.
+
+-L’approche est multimodale : une branche texte (nettoyage + TF-IDF) et une branche image (chargement, normalisation, PCA), fusionnées puis apprises par un classifieur linéaire, avec rééquilibrage des classes (undersampling/oversampling).
 
 ## Methodologie
 
@@ -57,7 +59,7 @@ Ce projet s’inscrit dans le cadre de la formation **DataScientest – Mines Pa
 
 - Déploiement en démonstration Streamlit
 
-### Feature Engineering (prochaines étapes dont voici les orientations principales)
+### Feature Engineering 
 
 #### A- Traitement du texte – Pipeline Rakuten
 
@@ -148,19 +150,22 @@ Après nettoyage, les textes passent par une vectorisation TF-IDF :
 #### B-  Traitement d’images (normalisation, redimensionnement, encodage)
 
 - Chargement des images par `productid` via un pipeline scikit-learn dédié (`ImageLoader`).
-- Conversion en RGB et redimensionnement homogène à (64,64) px.
+- Conversion en RGB.
+- Redimensionnement homogène (TOML images.size, ex. 32×32 ou 64×64).
 - Normalisation des pixels dans [0,1].
 - Encodage en vecteurs aplatis exploitables par un modèle linéaire.
-- Gestion des images manquantes (vecteur nul).
+- Gestion des images manquantes: vecteur nul (image noire).
 - Extraction optionnelle de 3 features simples (width, height, occupancy) pour enrichir les signaux visuels.
 
 #### C-  Réduction de dimension (SVD/PCA)
 
-- Aplatissement des images → vecteurs 12 288-d.
+- Aplatissement des images 
+- Les vecteurs aplatis sont denses → privilégier PCA dense (mémoire maîtrisée).
 - Réduction optionnelle configurable :
   - **TruncatedSVD** sur données sparse (par défaut, rapide et adapté).
   - **PCA dense** (plus coûteux en mémoire).
 - Paramètres configurables dans `config.toml` (`enabled`, `method`, `n_components`).
+- Conseil RAM : size = [32,32] + n_components ≈ 50~150 pour un bon compromis.
 - Objectif : compresser les données visuelles en conservant l’essentiel de l’information et limiter le surapprentissage.
 
 #### D-  Approche multimodale : fusion des embeddings texte et image
@@ -173,39 +178,159 @@ Voici un résumé expliquant le flow :
 - Rééchantillonnage : RandomUnderSampler + RandomOverSampler
 - Modèle final : LogisticRegression ou LinearSVC (choix dans config.toml)
 
+flowchart LR
+  A[TextCleaner] --> B[TF-IDF]
+  A2[HasDescriptionFlag] --> D[FeatureUnion]
+  A3[DesignationLength] --> D
+  B --> D
+
+  I1[ImageLoader (RGB, resize)]
+  I1 --> I2[Flatten]
+  I2 --> I3[PCA (option)]
+  I3 --> D
+
+  D --> S[Sampling (under + over)]
+  S --> C[Classifier (LR/SVC)]
+
 #### E- Hyperparamètres dans config.toml
 
-On peut changer facilement :
-- `min_df`, `max_df`, `max_features` pour TF-IDF
-- `images.size`, `images.dim_reduction` pour les images
-- `sampling.major_cap`, `sampling.tail_min` pour le rééquilibrage
+Points clés (éditables sans toucher au code) :
+
+- Chemins : [paths] (csv) et [images] (répertoires train/test, taille size = [32,32] ou [64,64]).
+- Texte : [text] (max_features, min_df, max_df, use_stem, translate_map_path).
+- Images : [images.dim_reduction] (enabled, method="pca", n_components, random_state).
+- CV : [cv].splits (3 ou 5).
+- Équilibrage : [sampling] (major_class, major_cap, tail_min).
+- Modèle : [model] (type lr/svc, use_class_weight, etc.).
 
 #### F- Architecture du projet
 
-- `features/` : prétraitement et feature engineering :
-  - `text_cleaner.py` : nettoyage et stemming multilingue
-  - `text_vectorizer.py` : TF-IDF encapsulé
-  - `image_loader.py` : chargement + resize des images
-  - `image_stats.py` : extraction width/height/occupancy
-  - `make_cleaned_frequencies_and_map.py` : génération des fréquences de tokens et dictionnaire EN/DE→FR
-- `models/` : pipelines pour texte et image
-- `main/train_model.py` : pipeline complet multimodal + sampling
-- `data/` : fichiers CSV et images (non fournis ici)
-- `features/config.toml` : **fichier central de configuration** (chemins, hyperparamètres, sorties)
+Architecture du projet
+.
+├── data/
+│   ├── X_train_update.csv
+│   ├── Y_train_CVw08PX.csv
+│   └── X_test_update.csv
+│
+├── data/images/images/
+│   ├── image_train/   # images d'entraînement
+│   └── image_test/    # images de test
+│
+├── features/
+│   ├── text_cleaner.py
+│   ├── text_vectorizer.py
+│   ├── image_loader.py
+│   ├── image_stats.py
+│   ├── make_cleaned_frequencies_and_map.py
+│   └── config.toml          # configuration centrale du projet
+│
+├── main/
+│   └── train_model.py       # orchestration (baselines, CV, pipeline complet)
+│
+├── models/                  # pipelines pour texte et image
+├── results/                 # métriques & figures (sorties baselines)
+├── tools/                   # scripts de reporting (figures)
+│   ├── plot_baselines.py
+│   ├── plot_baseline_bars.py
+│   └── plot_confusion_matrix.py
+└── README.md
 
-#### G- Comment exécuter le projet
+#### G- Baselines & Protocole d’évaluation
 
-    1. Génération du dictionnaire et des fréquences (optionnel si déjà fait)
+Nous évaluons 5 références avant/après le multimodal :
+
+Code	    Baseline	        Description
+B0	        Naïf (majoritaire)	DummyClassifier(strategy="most_frequent")
+B1	        Naïf (stratifié)	DummyClassifier(strategy="stratified")
+B2	        Texte seul	        TextCleaner + TF-IDF → LR (sans rééchantillonnage)
+B3	        Image seule	        ImageLoader → flatten → PCA → LR (sans texte)
+B4	        Multimodal complet	Texte + Image (+ image_stats) + under/over-sampling (pipeline principal)
+
+- Métriques : F1 macro (équité inter-classes) & F1 pondéré.
+- Validation : K-fold stratifié (paramétré via TOML).
+- Reproductibilité : random_state fixés; config centralisée.
+
+
+#### H- Comment exécuter le projet
+
+##### Génération du dictionnaire et des fréquences (optionnel si déjà fait)
         python features/make_cleaned_frequencies_and_map.py 
         --x_train_csv data/X_train_update.csv 
         --out_freq features/token_frequencies_cleaned_stem.csv 
         --out_map features/translate_map_starter_from_cleaned.json 
         --config features/config.toml
-    2. Entraînement du modèle + prédictions
-        python -m main.train_model --config features/config.toml
-    3. Comparer LogisticRegression et SVC :
-        python -m main.train_model --config features/config.toml --compare
-    4. Résultats dans models/compare_cv_results.csv.
+
+
+##### Lancer les baselines
+
+###### B0 / B1
+python -m main.train_model --config features/config.toml --baseline b0
+python -m main.train_model --config features/config.toml --baseline b1
+
+###### B2 (texte seul)
+python -m main.train_model --config features/config.toml --baseline b2
+
+###### B3 (image seule)
+python -m main.train_model --config features/config.toml --baseline b3
+
+##### Lancer le modèle multimodal (B4)
+python -m main.train_model --config features/config.toml
+
+##### (Option) Comparer LR vs SVC (CV)
+python -m main.train_model --config features/config.toml --compare
+
+#### I- Visualisations & Rapports
+
+##### 1) Barres (une métrique) – F1 macro par défaut
+python tools/plot_baselines.py
+###### autre métrique & sortie
+python tools/plot_baselines.py --metric f1_weighted --out results/figures/baseline_f1_weighted.png
+
+##### 2) Barres groupées – F1 macro vs F1 pondéré
+python tools/plot_baseline_bars.py
+###### imposer l’ordre : B0→B4
+python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
+
+##### 3) Matrice de confusion (top-K classes)
+###### Texte seul (B2), 3 folds, normalisée, top 25 classes
+python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2
+
+###### Multimodal (B4), 5 folds, non normalisée, top 30
+python tools/plot_confusion_matrix.py --config features/config.toml --baseline b4 --splits 5 --normalize false --topk 30
+
+
+##### Sorties générées :
+
+- results/baseline_results_summary.csv (+ rapports report_b*_cv.txt)
+- results/figures/baseline_f1_macro.png, baseline_f1_bars.png, …
+- results/figures/cm_<baseline>.png + cm_<baseline>_full.csv + report_<baseline>_cv.txt
+
+#### J- Bonnes pratiques & Dépannage
+
+##### Import models introuvable : 
+lancer depuis la racine avec python -m main.train_model ... et vérifier les __init__.py.
+
+##### Ajustement test images sans recréer la branche : 
+On met à jour le chemin du ImageLoader dans la pipeline fit (pas de recréation) → dimension identique train/test.
+
+##### Convergence LR : 
+augmenter max_iter (ex. 5000) ou relâcher tol.
+
+##### Mémoire images :
+
+Éviter SVD sparse sur pixels denses,
+Préférer PCA dense,
+Réduire images.size si nécessaire.
+
+##### Équilibrage : 
+Toujours comparer B4 à B2 pour mesurer l’apport de l’image.
+
+#### K- Changelog (Rendu 2)
+
+- Ajout des baselines B0–B3 + comparaison B4 (multimodal).
+- Export automatique CSV + TXT + figures (barres, matrice de confusion).
+- Refactor prédiction images : repointage du ImageLoader test sans recréer la branche (stabilité dimensionnelle).
+- Paramétrage centralisé (TOML) et scripts de visualisation (tools/…).
 
 ## Installation
 
