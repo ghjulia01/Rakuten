@@ -14,6 +14,36 @@ y_train_csv = "data/Y_train_CVw08PX.csv"
 # Jeu de test (variables explicatives, sans labels)
 x_test_csv  = "data/X_test_update.csv"
 
+# --- Chemins de sortie ---
+[outputs]
+# Fichier .joblib pour sauvegarder le pipeline entraîné
+model_out   = "models/text_image_classifier.joblib"
+# Fichier CSV contenant les prédictions sur X_test
+pred_out    = "models/y_test_pred.csv"
+# Fichier CSV des résultats de comparaison LR vs SVC
+compare_out = "models/compare_cv_results.csv"
+
+[random]
+# Fixer la reproductibilité (semences aléatoires)
+seed = 42
+
+[compute]
+# Fixer le parallélisme (mettre 1 pour un debug plus lisible)
+# Utiliser plusieurs jobs en production si la machine le permet
+n_jobs = 1
+
+# --- Réglages branche texte
+[text]
+max_features = 40000  # monter à 100000 si l'ordi le permet
+ngram_min = 1
+ngram_max = 2
+min_df = 2        # valeurs “prod” 2, valeurs “test” 0,
+max_df = 0.95       # valeurs “prod” 0.95, valeurs “test” 1.0,
+sublinear_tf = true
+use_stem = true
+# si fichier de traduction :
+translate_map_path = "features/translate_map_starter_from_cleaned.json"
+
 # --- Paramètres liés aux images ---
 [images]
 # Dossier contenant les images associées à X_train
@@ -24,19 +54,16 @@ test_dir  = "data/images/images/image_test"
 size = [32, 32]
 
 [images.dim_reduction]
+# Activer une PCA légère pour accélérer
+# Garder une PCA (80–120) pour compresser les pixels
 enabled = true
 method = "pca"          # "svd" ou "pca" (recommandé) 
 n_components = 100
 random_state = 42
 
-[random]
-seed = 42
-
-[compute]
-n_jobs = 1
-
 # --- Statistiques des images ---
 # Features width/height/occupancy (hors blanc/noir)
+# Activer les features de stats (5 colonnes)
 [images.stats]
 enabled = true              # true = on ajoute la branche de features automatiques
 white_threshold = 230       # pixels >= 230 -> fond (blanc)
@@ -44,24 +71,9 @@ black_threshold = 25        # pixels <= 25  -> fond (noir)
 min_area = 16               # surface min pour éviter le bruit
 out_prefix = "auto"         # préfixe des noms de features (traçabilité) avant "img_w230_b25_"
 
-# --- Réglages branche texte
-[text]
-max_features = 40000
-ngram_min = 1
-ngram_max = 2
-min_df = 2        # valeurs “prod” 2, valeurs “test” 0,
-max_df = 0.95       # valeurs “prod” 0.95, valeurs “test” 1.0,
-sublinear_tf = true
-use_stem = true
-# si fichier de traduction :
-translate_map_path = "features/translate_map_starter_from_cleaned.json"
-
-# Paramètres pour la génération de fréquences et translate_map
-[text.vocab_build]
-top_k   = 20000            # ← nombre de tokens candidats triés par fréquence
-max_new = 400              # ← nb max de “placeholders” auto ajoutés (EN/DE)
-
 # --- Stratégies de rééchantillonnage ---
+# Paramétrer le rééchantillonnage (under adaptatif + over tail )
+# ajuster au besoin après EDA
 [sampling]
 # Identifiant de la classe la plus fréquente
 major_class = 2583
@@ -71,6 +83,9 @@ major_cap   = 6000
 tail_min    = 1500
 
 # --- Paramètres du modèle ---
+# Choisir le modèle final (dev: LR avec saga) ; 
+# Choisir LR (saga) ou LinearSVC selon les meilleurs scores CV
+# NE PAS combiner class_weight et samplers
 [model]
 # Nom du modèle à utiliser : 'lr' (LogisticRegression) ou 'svc' (LinearSVC)
 name = "lr"
@@ -82,19 +97,19 @@ C = 1.0
 max_iter = 3000
 tol = 0.001
 ovr = false          # passe à true pour tester One-vs-Rest
+# si ovr = true il faut garder use_class_weight = false et 
+# Continuer à rééchantillonner (under/over)
+
+# Paramètres pour la génération de fréquences et translate_map
+[text.vocab_build]
+top_k   = 20000            # ← nombre de tokens candidats triés par fréquence
+max_new = 400              # ← nb max de “placeholders” auto ajoutés (EN/DE)
 
 # --- Paramètres de la validation croisée ---
 [cv]
 # Nombre de folds pour la comparaison LR vs SVC si --compare est activé
-splits = 3
+# Définir la cross-validation (peu de folds pour aller vite)
+splits = 3  # ou 5 par exemple
 shuffle = true
 random_state = 42
 
-# --- Chemins de sortie ---
-[outputs]
-# Fichier .joblib pour sauvegarder le pipeline entraîné
-model_out   = "models/text_image_classifier.joblib"
-# Fichier CSV contenant les prédictions sur X_test
-pred_out    = "models/y_test_pred.csv"
-# Fichier CSV des résultats de comparaison LR vs SVC
-compare_out = "models/compare_cv_results.csv"
