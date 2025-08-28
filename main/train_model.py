@@ -222,6 +222,10 @@ def build_baseline_pipeline(kind: str, cfg: dict, seed: int):
             use_stem=bool(text_cfg.get("use_stem", True)),
             min_df=text_cfg.get("min_df", 0.0),
             max_df=text_cfg.get("max_df", 1.0),
+            sublinear_tf=bool(text_cfg.get("sublinear_tf", True)),
+            norm=text_cfg.get("norm", "l2"),
+            trip_accents=text_cfg.get("strip_accents", "unicode"),
+            stop_words=text_cfg.get("stop_words", None),
         )
         clf = LogisticRegression(
             solver="saga",
