@@ -29,6 +29,12 @@ method = "pca"          # "svd" ou "pca" (recommandé)
 n_components = 100
 random_state = 42
 
+[random]
+seed = 42
+
+[compute]
+n_jobs = 1
+
 # --- Statistiques des images ---
 # Features width/height/occupancy (hors blanc/noir)
 [images.stats]
@@ -41,8 +47,11 @@ out_prefix = "auto"         # préfixe des noms de features (traçabilité) avan
 # --- Réglages branche texte
 [text]
 max_features = 40000
+ngram_min = 1
+ngram_max = 2
 min_df = 2        # valeurs “prod” 2, valeurs “test” 0,
 max_df = 0.95       # valeurs “prod” 0.95, valeurs “test” 1.0,
+sublinear_tf = true
 use_stem = true
 # si fichier de traduction :
 translate_map_path = "features/translate_map_starter_from_cleaned.json"
@@ -67,12 +76,19 @@ tail_min    = 1500
 name = "lr"
 # true  = appliquer class_weight="balanced"
 # false = class_weight=None (pas de pondération automatique des classes)
-use_class_weight = true
+use_class_weight = false  
+solver = "saga"
+C = 1.0
+max_iter = 3000
+tol = 0.001
+ovr = false          # passe à true pour tester One-vs-Rest
 
 # --- Paramètres de la validation croisée ---
 [cv]
 # Nombre de folds pour la comparaison LR vs SVC si --compare est activé
 splits = 3
+shuffle = true
+random_state = 42
 
 # --- Chemins de sortie ---
 [outputs]
