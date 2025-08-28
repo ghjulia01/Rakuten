@@ -23,6 +23,13 @@ class ImageLoader(BaseEstimator, TransformerMixin):
         self.index = {}
         # Dictionnaire pour indexer les images par product_id
 
+    def set_image_dir(self, new_dir):
+        #Permettre de re-pointer le dossier d'images (utile pour X_test).
+        self.image_dir = new_dir
+        # réinitialiser l'index pour éviter les collisions train/test
+        self.index = {}
+        return self
+
 # Cette méthode est obligatoire pour les objets scikit-learn.
 # Elle ne fait rien ici (pas d’apprentissage à faire), 
 # mais elle permet l’intégration dans un pipeline.
