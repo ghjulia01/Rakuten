@@ -290,7 +290,7 @@ random_state = 42                 # reproductibilité
 
 ##### 5) Exemple côté code (pipeline images)**
 
-# Dans train_model.py (extrait)
+###### Dans train_model.py (extrait)
 from models.image_pipeline import create_image_pipeline
 
 image_pixels = create_image_pipeline(
