@@ -508,6 +508,7 @@ flowchart LR
 
 ###### B0 / B1
 python -m main.train_model --config features/config.toml --baseline b0
+
 python -m main.train_model --config features/config.toml --baseline b1
 
 ###### B2 (texte seul)
@@ -523,10 +524,12 @@ python -m main.train_model --config features/config.toml
 
 ##### (Option) Comparer LR vs SVC (CV)
 python -m main.train_model --config features/config.toml --compare
+
 → Résultats CSV : outputs.compare_out
 
 ##### Forcer le modèle côté CLI
 python -m main.train_model --config features/config.toml --model svc
+
 Écraser [model].name à la volée.
 
 #### I- Visualisations & Rapports
@@ -618,6 +621,7 @@ python -m venv .venv311
 #### (Sous Linux/Mac, utilisez `source .venv311/bin/activate`)
 
 ### Installer les dépendances :
+python -m pip install --upgrade pip setuptools wheel
 
 #### Si requirements.txt existe déjà :
 pip install -r requirements.txt
@@ -625,6 +629,9 @@ pip install -r requirements.txt
 #### Sinon, générer d'abord le fichier requirements.txt avec le script fourni :
 python tools/generate_requirements.py
 pip install -r requirements.txt
+
+#### Télécharger  les stopwords NLTK :
+python -c "import nltk; nltk.download('stopwords')"
 
 ### Télécharger les données (fournies dans le cadre du challenge Rakuten) :
 
