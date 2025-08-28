@@ -167,7 +167,11 @@ def build_classifier(cfg: dict, seed: int):
         # Retourner un SVM linéaire (souvent performant sur TF-IDF sparse)
         return LinearSVC(class_weight=cw)
 
-    # Configurer une LogisticRegression sparse-friendly (saga), sans multi_class explicite (déprécié)
+    # Configurer une LogisticRegression sparse-friendly (saga), 
+    # sans multi_class explicite (déprécié)
+    # Lire n_jobs depuis le TOML (section [compute])
+    n_jobs = int(cfg.get("compute", {}).get("n_jobs", 1))
+
     base_lr = LogisticRegression(
         solver=solver,
         penalty="l2",
@@ -179,9 +183,11 @@ def build_classifier(cfg: dict, seed: int):
         n_jobs=1,
     )
     if ovr:
-        # Envelopper en One-vs-Rest explicite si demandé
+    # Envelopper en One-vs-Rest explicite et paralléliser les K classifieurs
         from sklearn.multiclass import OneVsRestClassifier
-        return OneVsRestClassifier(base_lr)
+        return OneVsRestClassifier(base_lr, n_jobs=n_jobs)
+
+    # Sinon, retourner la LR multinomiale “native”
     return base_lr
 
 
