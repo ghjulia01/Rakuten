@@ -95,7 +95,7 @@ def load_config(config_path: str | Path | None = None) -> dict:
 
 # === Importer les pipelines texte / image et le featurizer de stats ============
 # Importer les fabriques de branches (définies ailleurs dans le repo)
-from models.text_pipeline import create_text_pipeline            # construire la branche texte
+from models.text_pipeline import create_text_pipeline_from_cfg           # construire la branche texte
 from models.image_pipeline import create_image_pipeline          # construire la branche pixels
 from features.image_stats import ImageStatsFeaturizer            # extraire des stats d'objets
 
@@ -214,19 +214,9 @@ def build_baseline_pipeline(kind: str, cfg: dict, seed: int):
         return pipe, ["designation"]
 
     if kind == "b2":
-        # Construire la branche texte seule (sans under/over)
-        text_cfg = cfg.get("text", {})
-        text_branch = create_text_pipeline(
-            max_features=text_cfg.get("max_features", 5000),
-            translate_map_path=text_cfg.get("translate_map_path", None),
-            use_stem=bool(text_cfg.get("use_stem", True)),
-            min_df=text_cfg.get("min_df", 0.0),
-            max_df=text_cfg.get("max_df", 1.0),
-            sublinear_tf=bool(text_cfg.get("sublinear_tf", True)),
-            norm=text_cfg.get("norm", "l2"),
-            trip_accents=text_cfg.get("strip_accents", "unicode"),
-            stop_words=text_cfg.get("stop_words", None),
-        )
+        # Construire la branche texte seule (sans under/over), en lisant TOUTE la section [text]
+        text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
+        
         clf = LogisticRegression(
             solver="saga",
             penalty="l2",
@@ -325,15 +315,8 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
 # === Construire la pipeline multimodale complète ================================
 def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dict, seed: int):
     """Construire la pipeline texte+image, rééchantillonner, scaler, et ajouter le modèle final."""
-    # Construire la branche TEXTE
-    text_cfg = cfg.get("text", {})
-    text_branch = create_text_pipeline(
-        max_features=text_cfg.get("max_features", 5000),
-        translate_map_path=text_cfg.get("translate_map_path", None),
-        use_stem=bool(text_cfg.get("use_stem", True)),
-        min_df=text_cfg.get("min_df", 0.0),
-        max_df=text_cfg.get("max_df", 1.0),
-    )
+    # Utiliser la fabrique qui lit directement toutes les options depuis [text]
+    text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
 
     # Construire la branche IMAGES (pixels)
     image_train_dir = cfg["images"]["train_dir"]
@@ -494,7 +477,10 @@ def parse_args():
 def main():
     # Lire les arguments et la configuration
     args = parse_args()
-    cfg = load_config(args.config)
+    cfg = load_config(args.config) # Charger le TOML
+    # Si --model est fourni, écraser le nom du modèle de la config
+    if args.model:
+        cfg.setdefault("model", {})["name"] = args.model
 
     # Initialiser les graines pour la reproductibilité
     seed = int(cfg.get("random", {}).get("seed", 42))
