@@ -135,6 +135,12 @@ class AdaptiveUnderSampler(BaseEstimator, SamplerMixin):
     recalculer une cible par classe en la bornant à min(plafond, effectif_du_fold).
     cap_dict : {classe: plafond_max} (ex. {2583: 6000}).
     """
+    # >>> AJOUT : contraintes pour la validation de scikit-learn
+    _parameter_constraints: dict = {
+        "cap_dict": [dict, None],
+        "random_state": [None, int],
+    }
+    
     def __init__(self, cap_dict=None, random_state=None):
         self.cap_dict = cap_dict or {}
         self.random_state = random_state
