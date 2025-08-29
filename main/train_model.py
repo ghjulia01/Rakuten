@@ -129,33 +129,52 @@ def make_sampling_strategies(y_train: pd.Series,
 
 
 # === Définir un under-sampler adaptatif (CV-safe) ===============================
-class AdaptiveUnderSampler(BaseEstimator, SamplerMixin):
+import numpy as np
+from imblearn.base import BaseSampler
+from collections import Counter
+from imblearn.under_sampling import RandomUnderSampler
+
+class AdaptiveUnderSampler(BaseSampler):
     """
-    Implémenter un under-sampler adaptatif : pour chaque fold de CV,
-    recalculer une cible par classe en la bornant à min(plafond, effectif_du_fold).
-    cap_dict : {classe: plafond_max} (ex. {2583: 6000}).
+    Under-sampler adaptatif : à chaque fold de CV, on borne l'effectif de chaque
+    classe à min(plafond_configuré, effectif_du_fold).
+    cap_dict : {classe: plafond_max} (ex. {2583: 6000})
     """
-    # >>> AJOUT : contraintes pour la validation de scikit-learn
-    _parameter_constraints: dict = {
+    # contraintes pour la validation sklearn >= 1.4
+    _parameter_constraints = {
         "cap_dict": [dict, None],
         "random_state": [None, int],
     }
-    
+
     def __init__(self, cap_dict=None, random_state=None):
         self.cap_dict = cap_dict or {}
         self.random_state = random_state
 
     def _fit_resample(self, X, y):
-        # Compter les effectifs observés dans CE fold
-        cnt = Counter(y)
-        # Construire une stratégie feasible par classe
-        sampling_strategy = {cls: min(n, self.cap_dict.get(cls, n)) for cls, n in cnt.items()}
-        # Déléguer à RandomUnderSampler avec la stratégie clipée
-        rus = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=self.random_state)
-        Xr, yr = rus.fit_resample(X, y)
-        return Xr, yr
+        # y en 1D
+        y_arr = np.asarray(y).ravel()
 
+        # effectifs observés dans CE fold
+        cnt = Counter(y_arr)
 
+        # stratégie par classe bornée par cap_dict
+        sampling_strategy = {
+            cls: min(n, self.cap_dict.get(cls, n))
+            for cls, n in cnt.items()
+        }
+
+        # déléguer à RandomUnderSampler (API publique)
+        rus = RandomUnderSampler(
+            sampling_strategy=sampling_strategy,
+            random_state=self.random_state
+        )
+        X_res, y_res = rus.fit_resample(X, y_arr)
+        return X_res, y_res
+
+    def _more_tags(self):
+        # tags facultatifs mais propres
+        return {"allow_nan": False, "X_types": ["2darray", "sparse"]}
+    
 # === Fabriquer le classifieur à partir de la config =============================
 def build_classifier(cfg: dict, seed: int):
     """Construire le classifieur (LR ou LinearSVC) en lisant [model] dans le TOML."""
