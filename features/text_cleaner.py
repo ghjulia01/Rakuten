@@ -57,7 +57,10 @@ mots_vagues = {
     "générique", "génériques", "anti", "tout", "toute", "tous", "toutes",
     "stream", "design", "home", "style", "mode", "fashion", "vol",
     "année", "années", "voir", "largeur", "longueur", "hauteur", "largeure", "microns",
-    "comment", "extension", "extensions"
+    "comment", "extension", "extensions", "cet", "x", "plus", "moins", "très", "peu", "peut", "facile",
+    "facilement", "difficile", "difficilement", "simple", "simplement", "complexe",
+    "complexes", "complexité", "complexité", "complexités", "léger", "légère", "légers", "différents",
+    "différente", "différentes",
 }
 
 # -------------------------------------------------------------------
