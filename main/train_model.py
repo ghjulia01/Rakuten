@@ -139,7 +139,7 @@ class AdaptiveUnderSampler(BaseEstimator, SamplerMixin):
         self.cap_dict = cap_dict or {}
         self.random_state = random_state
 
-    def fit_resample(self, X, y):
+    def _fit_resample(self, X, y):
         # Compter les effectifs observés dans CE fold
         cnt = Counter(y)
         # Construire une stratégie feasible par classe

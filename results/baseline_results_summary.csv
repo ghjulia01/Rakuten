@@ -5,3 +5,5 @@ B2,3,0.7031336760640103,0.7246327245427945,7153.076,text_only=True | image_only=
 B3,3,0.19860308002839422,0.23690022150758563,1585.382,text_only=False | image_only=True | dummy=False
 B0,3,0.00794977368958972,0.025805495655937392,0.162,text_only=False | image_only=False | dummy=True
 B1,3,0.03635043126933371,0.05193151580112361,0.377,text_only=False | image_only=False | dummy=True
+B2,3,0.5866129079823929,0.605741259617593,4612.301,text_only=True | image_only=False | dummy=False
+B3,3,0.19860308002839422,0.23690022150758563,1581.7,text_only=False | image_only=True | dummy=False
