@@ -136,28 +136,32 @@ from imblearn.under_sampling import RandomUnderSampler
 
 class AdaptiveUnderSampler(BaseSampler):
     """
-    Under-sampler adaptatif : à chaque fold de CV, on borne l'effectif de chaque
+    Under-sampler adaptatif : à chaque fold de CV, borner l'effectif de chaque
     classe à min(plafond_configuré, effectif_du_fold).
     cap_dict : {classe: plafond_max} (ex. {2583: 6000})
     """
-    # contraintes pour la validation sklearn >= 1.4
+    # imblearn/sklearn validations
     _parameter_constraints = {
         "cap_dict": [dict, None],
         "random_state": [None, int],
+        "sampling_strategy": [str, dict, float, callable, None],  # ex. 'auto'
     }
+    _sampling_type = "under-sampling"  # requis par BaseSampler
 
-    def __init__(self, cap_dict=None, random_state=None):
+    def __init__(self, cap_dict=None, random_state=None, sampling_strategy="auto"):
         self.cap_dict = cap_dict or {}
         self.random_state = random_state
+        # requis par BaseSampler.fit_resample (même si non utilisé ensuite)
+        self.sampling_strategy = sampling_strategy
 
     def _fit_resample(self, X, y):
-        # y en 1D
+        # sécuriser y en 1D
         y_arr = np.asarray(y).ravel()
 
         # effectifs observés dans CE fold
         cnt = Counter(y_arr)
 
-        # stratégie par classe bornée par cap_dict
+        # stratégie bornée par cap_dict : min(effectif_fold, plafond_configuré)
         sampling_strategy = {
             cls: min(n, self.cap_dict.get(cls, n))
             for cls, n in cnt.items()
@@ -172,7 +176,6 @@ class AdaptiveUnderSampler(BaseSampler):
         return X_res, y_res
 
     def _more_tags(self):
-        # tags facultatifs mais propres
         return {"allow_nan": False, "X_types": ["2darray", "sparse"]}
     
 # === Fabriquer le classifieur à partir de la config =============================
