@@ -82,20 +82,14 @@ class TextCleaner(BaseEstimator, TransformerMixin):
     Nettoie et normalise le texte pour la classification.
     
     Paramètres:
-        combine_cols: Tuple[str, str]
-            Colonnes à fusionner (designation, description)
-        remove_html: bool
-            Si True, supprime les balises HTML
-        translate_map_path: Optional[str]
-            Chemin vers le fichier JSON de traduction
-        use_stem: bool
-            Si True, applique le stemming
-        stem_langs: Tuple[str, ...]
-            Langues pour le stemming
-        clean_special: bool
-            Si True, nettoie les caractères spéciaux
-        handle_emojis: bool
-            Si True, convertit les emojis en texte
+        combine_cols: Tuple[str, str]  colonnes à fusionner (designation, description)
+        remove_html: bool              supprimer les balises HTML
+        translate_map_path: Optional[str]  JSON de traduction (token -> token)
+        use_stem: bool                 activer stemming Snowball
+        stem_langs: Tuple[str, ...]    langues ("french","english","german", …)
+        clean_special: bool            nettoyer caractères spéciaux/ctrl
+        handle_emojis: bool            convertir les emojis en :emoji:
+        remove_numbers: bool           retirer les chiffres avant tokenisation
     """
     def __init__(
         self,
@@ -107,14 +101,8 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         clean_special: bool = True,
         handle_emojis: bool = True,
         remove_numbers: bool = False,
-        use_lemmatization: bool = False,
     ):
-        # Validation des langues supportées
-        if not all(lang in SnowballStemmer.languages for lang in stem_langs):
-            invalid = set(stem_langs) - set(SnowballStemmer.languages)
-            raise ValueError(f"Langues non supportées: {invalid}")
-        
-        # Attribution des paramètres
+        # Attributs utilisateur
         self.combine_cols = combine_cols
         self.remove_html = remove_html
         self.translate_map_path = translate_map_path
@@ -123,161 +111,109 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         self.clean_special = clean_special
         self.handle_emojis = handle_emojis
         self.remove_numbers = remove_numbers
-        self.use_lemmatization = use_lemmatization
-        
-        # Initialisation des stemmers
+
+        # Internes initialisés ici (évite AttributeError en fit/transform)
         self._stemmers = {
-            lang: SnowballStemmer(lang)
-            for lang in stem_langs
+            lang: SnowballStemmer(lang) for lang in stem_langs
             if lang in SnowballStemmer.languages
         }
+        self._translate_map: Dict[str, str] = {}
 
-    def fit(self, X, y=None):
-        """
-        Initialise les composants du nettoyage.
-        
-        Args:
-            X: DataFrame d'entrée (non utilisé)
-            y: Labels (non utilisé)
-            
-        Returns:
-            self: Retourne l'instance pour le chainage
-        """
-        # Log des paramètres
-        logger.info(f"Fitting TextCleaner with parameters: stem={self.use_stem}, "
-                    f"TextCleaner: translate_map_path={self.translate_map_path} (n={len(self._translate_map)})",
-                   f"clean_special={self.clean_special}, langs={self.stem_langs}")
-        
-        # Initialisation du dictionnaire de traduction
-        self._translate_map = {}
-        if self.translate_map_path:
-            try:
-                with open(self.translate_map_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        self._translate_map = data
-                    elif isinstance(data, list):
-                        self._translate_map = {
-                            d["token"]: d["translation"]
-                            for d in data
-                            if isinstance(d, dict) 
-                            and "token" in d 
-                            and "translation" in d
-                        }
-                    logger.info(f"Dictionnaire de traduction chargé: {len(self._translate_map)} entrées")
-            except Exception as e:
-                logger.warning(f"Erreur chargement translate_map: {e}")
-        
-        return self
-
+    # ------------------------- Utils de nettoyage -------------------------
     def _clean_special_chars(self, text: str) -> str:
-        """Nettoie les caractères spéciaux et emojis."""
         if not isinstance(text, str):
             return ""
-            
         if self.handle_emojis:
             text = emoji.demojize(text)
-            
         if self.clean_special:
-            text = unicodedata.normalize('NFKD', text)
+            text = unicodedata.normalize("NFKD", text)
             text = "".join(ch for ch in text if unicodedata.category(ch)[0] != "C")
         return text
 
     def _strip_html(self, text: str) -> str:
-        """Supprime le HTML en préservant le contenu."""
-        # Remplacer balises bloc par espace
-        text = re.sub(r'<(br|hr|p)[^>]*/?>', ' ', text, flags=re.I)
-        # Supprimer autres balises
-        text = re.sub(r'<[^>]+>', '', text)
-        # Nettoyer entités HTML
-        text = re.sub(r'&(nbsp|gt|lt|amp|quot|apos);', ' ', text)
+        text = re.sub(r"<(br|hr|p)[^>]*/?>", " ", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", "", text)
+        text = re.sub(r"&(nbsp|gt|lt|amp|quot|apos);", " ", text)
         return text
 
     def _normalize(self, text: str) -> str:
-        """Normalisation basique du texte."""
         text = text.lower()
         text = re.sub(f"[{re.escape(string.punctuation)}]", " ", text)
         if self.remove_numbers:
-            text = re.sub(r'\d+', ' ', text)
+            text = re.sub(r"\d+", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
+    # ------------------------------ API sklearn ---------------------------
+    def fit(self, X, y=None):
+        # (ré)initialiser le translate_map
+        self._translate_map = {}
+        if self.translate_map_path:
+            try:
+                with open(self.translate_map_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._translate_map = data
+                elif isinstance(data, list):
+                    self._translate_map = {
+                        d["token"]: d["translation"]
+                        for d in data
+                        if isinstance(d, dict) and "token" in d and "translation" in d
+                    }
+            except Exception as e:
+                logger.warning("Erreur chargement translate_map (%s): %s",
+                               self.translate_map_path, e)
+
+        logger.info(
+            "TextCleaner prêt | translate_map=%d, stem=%s, langs=%s, "
+            "clean_special=%s, emojis=%s, remove_numbers=%s",
+            len(self._translate_map), self.use_stem, self.stem_langs,
+            self.clean_special, self.handle_emojis, self.remove_numbers
+        )
+        return self
+
     def clean_text(self, text: str) -> str:
-        """Pipeline complet de nettoyage."""
         try:
             if pd.isnull(text):
                 return ""
-
-            # 1. Nettoyage caractères spéciaux
+            # 1) spéciaux/emoji
             text = self._clean_special_chars(text)
-
-            # 2. Suppression HTML si activé
+            # 2) HTML
             if self.remove_html:
                 text = self._strip_html(text)
-
-            # 3. Normalisation basique
+            # 3) normalisation
             text = self._normalize(text)
-
-            # 4. Tokenization
+            # 4) tokens
             tokens = text.split()
-
-            # 5. Traduction si dictionnaire chargé
+            # 5) traduction
             if self._translate_map:
                 tokens = [self._translate_map.get(t, t) for t in tokens]
-
-            # 6. Filtrage stopwords et mots vagues
-            tokens = [
-                t for t in tokens 
-                if t not in STOPWORDS_ALL and t not in mots_vagues
-            ]
-
-            # 7. Stemming si activé
+            # 6) stopwords + mots vagues
+            tokens = [t for t in tokens if t not in STOPWORDS_ALL and t not in mots_vagues]
+            # 7) stemming
             if self.use_stem and self._stemmers:
                 stemmed = []
-                for token in tokens:
-                    forms = [stemmer.stem(token) 
-                            for stemmer in self._stemmers.values()]
+                for tok in tokens:
+                    forms = [stemmer.stem(tok) for stemmer in self._stemmers.values()]
                     stemmed.append(min(forms, key=len))
                 tokens = stemmed
-            # (Optionnel) Lemmatization — placeholder : à activer/implémenter au besoin
-            # if self.use_lemmatization:
-            #     try:
-            #         from nltk.stem import WordNetLemmatizer
-            #         lemmatizer = WordNetLemmatizer()
-            #         tokens = [lemmatizer.lemmatize(t) for t in tokens]
-            #     except ImportError:
-            #         logger.warning("WordNetLemmatizer non disponible. Ignorer la lemmatization.")
-
             return " ".join(tokens) if tokens else "__empty__"
-
         except Exception as e:
-            logger.error(f"Erreur nettoyage texte: {e}")
+            logger.error("Erreur nettoyage texte: %s", e)
             return "__error__"
 
     def transform(self, X: pd.DataFrame) -> pd.Series:
-        """Combine et nettoie les colonnes textuelles."""
-        if not hasattr(self, '_translate_map'):
-            logger.warning("TextCleaner not fitted. Call fit first.")
+        if not hasattr(self, "_translate_map"):
+            # sécurité si fit non appelé
             self.fit(X)
-            
-        try:
-            # Vérifier colonnes requises
-            missing = [col for col in self.combine_cols if col not in X.columns]
-            if missing:
-                raise ValueError(f"Colonnes manquantes: {missing}")
-
-            # Combiner les colonnes
-            combined = (
-                X[self.combine_cols[0]].fillna("") + 
-                " " + 
-                X[self.combine_cols[1]].fillna("")
-            )
-
-            # Nettoyage avec gestion erreurs
-            return combined.apply(self.clean_text)
-
-        except Exception as e:
-            logger.error(f"Erreur transformation: {e}")
-            raise
+        # colonnes nécessaires
+        missing = [c for c in self.combine_cols if c not in X.columns]
+        if missing:
+            raise ValueError(f"Colonnes manquantes: {missing}")
+        combined = (
+            X[self.combine_cols[0]].fillna("").astype(str) + " " +
+            X[self.combine_cols[1]].fillna("").astype(str)
+        )
+        return combined.apply(self.clean_text)
 
 class HasDescriptionFlag(BaseEstimator, TransformerMixin):
     """Feature binaire indiquant la présence d'une description."""

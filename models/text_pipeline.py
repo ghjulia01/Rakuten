@@ -177,18 +177,24 @@ def create_text_pipeline(
     return FeatureUnion(transformers)
 
 def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
-    logger.info("Construction du pipeline depuis la configuration...")
+    tmap_path = cfg_text.get("translate_map_path", None)
+    n_map = len(_load_translate_map(tmap_path)) if tmap_path else 0
+    logger.info(
+        "Construction du pipeline depuis la configuration… translate_map_path=%s (n=%d)",
+        tmap_path, n_map
+    )
 
     # 1) Construire la branche "word" complète (avec ses sous-transformeurs)
     word_branch = create_text_pipeline(
-        # cleaner
+        # Cleaner
         translate_map_path=cfg_text.get("translate_map_path", None),
         use_stem=cfg_text.get("use_stem", True),
         clean_special=cfg_text.get("clean_special", True),
         handle_emojis=cfg_text.get("handle_emojis", True),
         remove_numbers=cfg_text.get("remove_numbers", False),
         use_lemmatization=cfg_text.get("use_lemmatization", False),
-        # tfidf
+
+        # TF-IDF (word)
         max_features=cfg_text.get("max_features", 100_000),
         ngram_min=cfg_text.get("ngram_min", 1),
         ngram_max=cfg_text.get("ngram_max", 2),
@@ -197,7 +203,8 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
         sublinear_tf=cfg_text.get("sublinear_tf", True),
         norm=cfg_text.get("norm", "l2"),
         strip_accents=cfg_text.get("strip_accents", "unicode"),
-        # features additionnelles
+
+        # Features additionnelles
         use_language_detection=cfg_text.get("use_language_detection", True),
         use_text_stats=cfg_text.get("use_text_stats", True),
     )
@@ -217,16 +224,12 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
                 remove_numbers=cfg_text.get("remove_numbers", False),
             ),
             TextTfidfVectorizer(
-                analyzer=str(char_cfg.get("analyzer", "char_wb")),   # ← char_wb par défaut
-                ngram_range=(
-                    int(char_cfg.get("ngram_min", 2)),
-                    int(char_cfg.get("ngram_max", 6))
-                ),
+                analyzer=str(char_cfg.get("analyzer", "char_wb")),  # ← lit le TOML
+                ngram_range=(int(char_cfg.get("ngram_min", 2)), int(char_cfg.get("ngram_max", 6))),
                 min_df=char_cfg.get("min_df", 2),
                 max_df=char_cfg.get("max_df", 0.95),
                 sublinear_tf=bool(char_cfg.get("sublinear_tf", True)),
-                # strip_accents est ignoré pour char en pratique, mais tu peux l'exposer :
-                strip_accents=char_cfg.get("strip_accents", None),
+                strip_accents=char_cfg.get("strip_accents", None),  # souvent None côté char
                 dtype=np.float64,
             ),
         )

@@ -79,11 +79,11 @@ Priorités : pipeline **multimodale** (Texte+Image), **sampling CV-safe**, métr
 ---
 
 ### Checkpoints & To-Do rapides
-- [ ] Boucler Step 1 (B0–B4 minimal) & publier `baseline_results_summary.csv`.
-- [ ] Activer char, sampling CV-safe & `--compare` (Step 2) ; produire `compare_cv_results.csv`.
-- [ ] Lancer CNN+SVD (option) et ablations clés (char on/off, stats image on/off, pixels vs CNN).
-- [ ] Rédiger **Rendu 2** (graphes, confusions, interprétations) → avant **26/09**.
-- [ ] Finaliser rapport & repo GitHub **avant 03/10** ; préparer **Streamlit** & pitch.
+- Finaliser Step 1 (B0–B4 minimal) & publier `baseline_results_summary.csv`.
+- Activer char, sampling CV-safe & `--compare` (Step 2) ; produire `compare_cv_results.csv`.
+- Lancer CNN+SVD (option) et ablations clés (char on/off, stats image on/off, pixels vs CNN).
+- Rédiger **Rendu 2** (graphes, confusions, interprétations) → avant **26/09**.
+- Finaliser rapport & repo GitHub **avant 03/10** ; préparer **Streamlit** & pitch.
 
 ### Diagramme
 
