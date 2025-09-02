@@ -584,14 +584,14 @@ Nous évaluons 5 références avant / après le multimodal :
 - **Validation** : K-fold **stratifié** (paramétré via TOML).  
 - **Reproductibilité** : `random_state` fixés ; **config centralisée**.
 
-```mermaid
-flowchart LR
+
+flowchart 
   B0[**B0** Dummy most_frequent] --> COMP[Comparaison F1]
   B1[**B1** Dummy stratified]   --> COMP
   B2[**B2** Texte seul: TF-IDF -->LR] --> COMP
   B3[**B3** Image seule: Pixels/CNN-->(PCA/SVD)-->LR] --> COMP 
   B4[**B4** Multimodal: Texte+Image+Stats+Sampling-->LR/SVC] --> COMP
-```
+
 
 #### H — Comment exécuter le projet
 

@@ -196,3 +196,6 @@ splits = 3  # ou 5 par exemple
 shuffle = true
 random_state = 42
 
+[outputs]
+log_dir = "C:/Users/colle/AppData/Local/rakuten-logs"     # choisir le repertoire local ou mettre les logs pour ne pas créer de latence avec la synchronisation
+

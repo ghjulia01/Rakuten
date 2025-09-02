@@ -62,6 +62,7 @@ import logging
 import toml
 from typing import Dict, Any, Union, Optional, Tuple, List
 from tqdm.auto import tqdm
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -91,18 +92,61 @@ from models.image_pipeline import diagnostic_reduction
 from models.cnn_features import CNNFeaturizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
-
-# Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('training.log'),
-        logging.StreamHandler()
-    ]
-)
+from logging.handlers import RotatingFileHandler
 
 logger = logging.getLogger(__name__)
+
+class TqdmLoggingHandler(logging.StreamHandler):
+    """Écrit les logs via tqdm.write pour ne pas casser la barre de progression."""
+    def emit(self, record):
+        try:
+            from tqdm.auto import tqdm
+            msg = self.format(record)
+            tqdm.write(msg)
+            self.flush()
+        except Exception:
+            super().emit(record)
+
+def setup_logging(log_dir: str = "results/logs", level=logging.INFO):
+    log_dir = os.path.expanduser(os.path.expandvars(log_dir))
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Format commun
+    fmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    # Handlers fichiers
+    train_fh = RotatingFileHandler(
+        os.path.join(log_dir, "training.log"),
+        encoding="utf-8", maxBytes=5_000_000, backupCount=3, delay=True
+    )
+    train_fh.setLevel(level)
+    train_fh.setFormatter(fmt)
+
+    img_fh = RotatingFileHandler(
+        os.path.join(log_dir, "image_processing.log"),
+        encoding="utf-8", maxBytes=5_000_000, backupCount=3, delay=True
+    )
+    img_fh.setLevel(level)
+    img_fh.setFormatter(fmt)
+
+    # Handler console compatible tqdm
+    console_h = TqdmLoggingHandler()
+    console_h.setLevel(level)
+    console_h.setFormatter(fmt)
+
+    # (Re)configurer radicalement la racine
+    logging.basicConfig(level=level, handlers=[train_fh, console_h], force=True)
+
+    # Attacher un fichier dédié aux loggers image
+    for name in ["models.image_pipeline", "features.image_loader", "features.image_stats"]:
+        lg = logging.getLogger(name)
+        lg.setLevel(level)
+        lg.addHandler(img_fh)     # écrira dans image_processing.log
+        lg.propagate = True       # et remontera aussi vers la racine
+
+    # Exemple : logger principal
+    root = logging.getLogger(__name__)
+    root.info("Logging initialisé — logs dans %s", os.path.abspath(log_dir))
 
 # Importer ImageLoader depuis le module features
 
@@ -810,7 +854,8 @@ def main():
         from tools.compare_models import compare_all_models
         compare_all_models()
         return
-
+    setup_logging(log_dir=cfg.get("outputs", {}).get("log_dir", "results/logs"))
+    logger.info("Configuration chargée.")
     # Initialiser les graines pour la reproductibilité
     seed = int(cfg.get("random", {}).get("seed", 42))
     init_seeds(seed)
