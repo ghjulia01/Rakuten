@@ -173,7 +173,7 @@ def create_image_pipeline_from_cfg(
     Returns:
         Pipeline sklearn.
     """
-    size = tuple(images_cfg.get("size", [128, 128]))
+    size = images_cfg.get("size", [128, 128])
     img_dir_key = "test_dir" if use_test_dir else "train_dir"
     img_dir = images_cfg.get(img_dir_key)
     if not img_dir:

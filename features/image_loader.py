@@ -1,13 +1,8 @@
 # features/image_loader.py
-# ------------------------------------------------------------
-# Rôle : charger et prétraiter les images depuis imageid/productid
-# Nom de fichier attendu : image_{imageid}_product_{productid}.jpg
-# Exemple : image_216810030_product_6342052.jpg
-# ------------------------------------------------------------
 from __future__ import annotations
 
 import os
-from typing import Tuple, List
+from typing import Tuple, Optional, List, Any
 
 import numpy as np
 from PIL import Image
@@ -16,80 +11,91 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 class ImageLoader(BaseEstimator, TransformerMixin):
     """
-    Charger les pixels d'images à partir de `imageid` et `productid` en
-    construisant le chemin :
-        image_{imageid}_product_{productid}{ext}
+    Charger les pixels d'images à partir de `imageid` et `productid` en construisant
+    des chemins de type: image_{imageid}_product_{productid}<ext>
 
-    - Tolérer les fichiers manquants/corrompus (remplir avec des zéros)
-    - Redimensionner à `image_size` et normaliser dans [0, 1]
-    - Retourner un tableau (n_samples, H, W, 3) float32
-
-    Args:
-        image_dir: dossier des images (train ou test)
-        image_size: (H, W) en pixels
-        imgid_col: nom de la colonne image id
-        pid_col: nom de la colonne product id
-        ext: extension de fichier (".jpg" par défaut)
+    - Laisser les paramètres *inchangés* dans __init__ (compatibilité sklearn.clone).
+    - Redimensionner à `image_size` et normaliser dans [0,1].
+    - Renvoyer un tenseur (n_samples, H, W, 3) en float32.
+    - En cas d'erreur/fichier manquant, retourner un vecteur zéro (fallback).
     """
 
     def __init__(
         self,
         image_dir: str,
-        image_size: Tuple[int, int] = (128, 128),
+        image_size: Any = (128, 128),   # ne pas forcer le type ici
         imgid_col: str = "imageid",
         pid_col: str = "productid",
         ext: str = ".jpg",
-    ) -> None:
-        self.image_dir = str(image_dir)
-        self.image_size = (int(image_size[0]), int(image_size[1]))
-        self.imgid_col = str(imgid_col)
-        self.pid_col = str(pid_col)
-        self.ext = str(ext)
+    ):
+        # Ne pas modifier les valeurs reçues (ex: pas de tuple(), pas de int())
+        self.image_dir = image_dir
+        self.image_size = image_size
+        self.imgid_col = imgid_col
+        self.pid_col = pid_col
+        self.ext = ext
 
-    # sklearn API -----------------------------------------------------
+    # --- API sklearn ------------------------------------------------------------
 
-    def fit(self, X=None, y=None) -> "ImageLoader":
-        # ne rien apprendre (transformeur statique)
+    def fit(self, X=None, y=None):
+        # ne rien apprendre
         return self
+
+    def _resolve_size(self) -> Tuple[int, int]:
+        """
+        Sécuriser/convertir la taille *au moment de l'usage* (pas dans __init__).
+        Accepter tuple, liste, numpy array…
+        """
+        sz = self.image_size
+        try:
+            H = int(sz[0])
+            W = int(sz[1])
+        except Exception:
+            # défaut robuste
+            H, W = 128, 128
+        return H, W
+
+    def _build_path(self, imgid: Any, pid: Any) -> str:
+        """Construire le chemin d'une image à partir des ids."""
+        # convertir prudemment en int -> str
+        try:
+            iid = str(int(imgid))
+        except Exception:
+            iid = str(imgid)
+        try:
+            pid_str = str(int(pid))
+        except Exception:
+            pid_str = str(pid)
+        fname = f"image_{iid}_product_{pid_str}{self.ext}"
+        return os.path.join(self.image_dir, fname)
 
     def transform(self, X):
         """
-        X : DataFrame/Series (avec colonnes imgid/pid) ou itérable de dicts
-        Retour : np.ndarray (N, H, W, 3) en float32
+        X: DataFrame avec colonnes `imageid` et `productid`.
+        Retour: np.ndarray (n, H, W, 3) float32 dans [0,1].
         """
-        H, W = self.image_size
+        H, W = self._resolve_size()
 
-        # extraire listes de ids (garantir chaînes sans espaces)
-        if hasattr(X, "loc"):  # DataFrame/Series
-            imgids = X[self.imgid_col].astype("int64").astype(str).tolist()
-            pids   = X[self.pid_col].astype("int64").astype(str).tolist()
-        else:
-            # itérable de dicts/objets : chercher les attributs
-            imgids, pids = [], []
-            for row in X:
-                imgids.append(str(int(row[self.imgid_col])))
-                pids.append(str(int(row[self.pid_col])))
+        # extraire colonnes (laisser pandas gérer les types)
+        imgids = X[self.imgid_col].tolist()
+        pids   = X[self.pid_col].tolist()
 
-        # construire chemins
-        paths: List[str] = [
-            os.path.join(self.image_dir, f"image_{iid}_product_{pid}{self.ext}")
-            for iid, pid in zip(imgids, pids)
-        ]
-
-        # allouer sortie
+        paths: List[str] = [self._build_path(iid, pid) for iid, pid in zip(imgids, pids)]
         out = np.zeros((len(paths), H, W, 3), dtype=np.float32)
 
-        # charger + prétraiter
         for i, p in enumerate(paths):
             try:
                 with Image.open(p) as img:
-                    # convertir en RGB, redimensionner (Pillow attend (W, H))
-                    img = img.convert("RGB").resize((W, H), Image.Resampling.LANCZOS)
-                    arr = np.asarray(img, dtype=np.float32) / 255.0
+                    img = img.convert("RGB").resize((W, H))  # PIL: (width, height)
+                    arr = np.asarray(img, dtype=np.float32)
+                # normaliser en [0,1] seulement si besoin (éviter /0)
+                if arr.max() > 1.0:
+                    arr /= 255.0
                 if arr.shape == (H, W, 3):
-                    out[i] = arr  # sinon: garder zéros
+                    out[i] = arr
+                # sinon: garder les zéros (fallback)
             except Exception:
-                # fichier manquant/corrompu → garder l'image noire
+                # fichier manquant/corrompu -> garder le vecteur zéro
                 pass
 
         return out
