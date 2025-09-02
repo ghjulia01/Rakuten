@@ -46,6 +46,9 @@ remove_numbers = true
 strip_accents = "unicode"
 # si fichier de traduction :
 translate_map_path = "features/translate_map_starter_from_cleaned.json"
+# Active/désactive les features additionnelles
+use_text_stats = true
+use_language_detection = true
 
 # -->  "char"
 [text.char]
@@ -61,8 +64,10 @@ sublinear_tf = true
 [text.weights]
 tfidf_word = 1.0
 tfidf_char = 0.4
-# text_stats = 0.3
-# language = 0.2
+has_desc   = 0.2
+title_len  = 0.2
+text_stats = 0.2         # pris en compte si use_text_stats=true
+language   = 0.1         # pris en compte si use_language_detection=true
 
 [text.cleaner]
 clean_special = true

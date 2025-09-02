@@ -18,47 +18,62 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 -L’approche est multimodale : une branche texte (nettoyage + TF-IDF) et une branche image (chargement, normalisation, PCA), fusionnées puis apprises par un classifieur linéaire, avec rééquilibrage des classes (undersampling/oversampling).
 
-## Methodologie
+## Méthodologie — Planning Modélisation & Livrables (MÀJ)
 
-### Exploration et Préprocessing
+> Contexte Rendu 1 (EDA) acquis : **27 classes fortement déséquilibrées**, ~**35 %** de `description` manquante, données **multilingues**, images **500×500** nommées `image_{imageid}_product_{productid}.jpg`. 
 
-- Fusion des données texte et visuelles via imageid et productid
+Priorités : pipeline **multimodale** (Texte+Image), **sampling CV-safe**, métriques **F1 macro / pondéré**.
 
-- Traitement des valeurs manquantes (35% de description manquantes)
+---
 
-- Construction d’un dictionnaire de mots vagues multilingues pour améliorer les visualisations
+### Étape 3 — Modélisation  
 
-- Création de colonnes auxiliaires (ex. image_name) pour faciliter les jointures
+#### Step 1 — Baselines & premier cadrage 
+- Lancer **B0–B3** puis un premier **B4** minimal (Texte=TF-IDF(word), Image=pixels+PCA, **sans** char/CNN).
+- Générer : `results/baseline_results_summary.csv`, `reports/report_b*_cv.txt`.
+- Analyser la pertinence : déséquilibre vs F1-macro, classes confondues (matrices de confusion top-K).
 
-#### Visualisation
+#### Step 2 — Mesures & optimisation 
+- **Mesures** : F1-macro & F1-pondéré + confusion (B2 & B4).
+- **Optimisations rapides** :
+  - Texte : activer **TF-IDF(char/char_wb)**, ajuster `max_features`, `min_df/max_df`, pondérations `FeatureUnion`.
+  - Image (pixels) : ajuster `size` (32/64) & **PCA** (`n_components` 80–120).
+  - **Sampling CV-safe** : `AdaptiveUnderSampler` (cap p85–p90) → `RandomOverSampler` (tail_min 1 000–1 500).
+  - **Comparaison modèle** : `--compare` (**LR(saga)** vs **LinearSVC**), tuning `C`.
+  - **CNN (option)** : embeddings **ResNet18/50** + **SVD 128–256**.
+- Livrables : `results/compare_cv_results.csv`, figures barres & confusion mises à jour, notes d’ablation.
 
-- Nuages de mots bruts et nettoyés
+#### Step 3 — Modélisation avancée & interprétabilité 
+- **Bagging/Boosting** *(si temps/ressources)* : LightGBM/HistGBDT sur **text SVD** (+ image SVD) en One-Vs-Rest.
+- **Deep Learning** *(option GPU)* : baseline **CNN embeddings** renforcée (pooling/MLP), ou petit **ViT/EfficientNet** gelé + head linéaire.
+- **Interprétabilité** :
+  - Texte : coefficients LR/SVC par classe, **permutation importance**, **LIME/SHAP** sur classes clés.
+  - Image : inspection d’**erreurs typiques** (collages d’images + confusion).
+- **Conclusions métiers** : synthèse succès/limites, recommandations (qualité de saisie, regroupements de classes).
+- Livrable : **Rendu 2 — rapport de modélisation** (résultats, ablations, interprétations, recommandations).
 
-- Affichage d’images par catégorie
+---
 
-- Diagrammes de distribution des classes (déséquilibrées)
+### Étape 4 — Rapport final + codes GitHub  
+- Fusionner **Rendu 1 + Rendu 2** → rapport final avec **conclusion & ouverture**.
+- Code **propre & commenté** : README (pipelines, toggles TOML, diagrammes Mermaid), dossiers `results/` & `reports/` structurés.
 
-- Arborescence thématique (ex. : Jeux & gaming > Accessoires gaming)
+---
 
-#### Observations et résultats de l'étape EDA
+### Étape 5 — Streamlit + Soutenances  
+- App **esthétique** (plusieurs onglets) : *Aperçu données*, *Training & scores*, *Démo prédiction*.
+- **Pas de ré-entraînement** côté app ; charger `models/text_image_classifier.joblib`.
+- **Soutenance** : 20 min présentation + 10 min Q/R ; au choix **Slides + Démo** ou **App seule**.
+- Checklist : stabilité (pas de bugs), temps d’inférence ok, dépendances légères.
 
-- 27 catégories identifiées dans Y_train, très déséquilibrées (de 764 à 10 209 produits)
+---
 
-- Définition d’un nom standardisé des catégories inspiré des marketplaces
-
-- Structuration de 8 thématiques principales (Jeux & Gaming, Livres & Presse, Maison & Jardin, etc.)
-
-- Mise en place d’un pipeline pour visualiser, nettoyer, et interpréter les données
-
-#### Prochaines étapes
-
-- Entraînement d’un modèle de classification multimodale (texte + image)
-
-- Mise en place d’un modèle en cascade : d’abord prédiction de la thématique, puis de la catégorie
-
-- Évaluation via F1-score pondéré pour gérer le déséquilibre des classes
-
-- Déploiement en démonstration Streamlit
+### Checkpoints & To-Do rapides
+- [ ] Boucler Step 1 (B0–B4 minimal) & publier `baseline_results_summary.csv`.
+- [ ] Activer char, sampling CV-safe & `--compare` (Step 2) ; produire `compare_cv_results.csv`.
+- [ ] Lancer CNN+SVD (option) et ablations clés (char on/off, stats image on/off, pixels vs CNN).
+- [ ] Rédiger **Rendu 2** (graphes, confusions, interprétations) → avant **26/09**.
+- [ ] Finaliser rapport & repo GitHub **avant 03/10** ; préparer **Streamlit** & pitch.
 
 ### Diagramme
 
@@ -75,7 +90,7 @@ classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
 %% -------------------------------------------------------
 subgraph P0["0) Installation et configuration"]
   P0a["Créer .venv311 et installer requirements"]:::step
-  P0b["Configurer features/config.toml<br/>(paths, outputs, random/compute/cv,<br/>text, images(+stats), sampling, model)"]:::step
+  P0b["Configurer features/config.toml<br/>(paths, outputs, random/compute/cv,<br/>text(+char), images(pixels+cnn+stats), sampling, model)"]:::step
 end
 class P0,P0a,P0b phase;
 
@@ -95,47 +110,63 @@ class P1,P1a,P1b,P1c phase;
 subgraph P2["2) Baselines (références)"]
   B0["B0 Dummy — most_frequent"]:::step
   B1["B1 Dummy — stratified"]:::step
-  B2["B2 Texte : TextCleaner → TF-IDF → LR(saga)"]:::step
-  B3["B3 Image : ImageLoader → Resize → Flatten → PCA → LR(saga)"]:::step
+  B2["B2 Texte : TextCleaner → TF-IDF(word) → LR(saga)"]:::step
+  B3["B3 Image (pixels) : ImageLoader → Resize → Flatten → PCA → LR(saga)"]:::step
+  B4["B4 Multimodale : Texte + Image (pixels|CNN) + Stats"]:::step
 end
-class P2,B0,B1,B2,B3 phase;
+class P2,B0,B1,B2,B3,B4 phase;
 
 %% -------------------------------------------------------
 %% 3) Pipeline multimodale (B4)
 %% -------------------------------------------------------
 subgraph P3["3) Pipeline multimodale (B4) — entraînement"]
   %% Texte
-  T1["TextCleaner<br/>(normaliser, traduire, stopwords, stemmer)"]:::tool
-  T2["TF-IDF (ngrams 1–2, min/max_df, sublinear_tf)<br/>+ petites features (HasDescription, TitleLength)"]:::tool
-  
+  T0["TextCleaner<br/>(normaliser, traduire, stopwords, stemmer)"]:::tool
+  T1["TF-IDF (word)<br/>(ngrams 1–2, min/max_df, sublinear_tf)"]:::tool
+  T1b["TF-IDF (char/char_wb) <i>option</i><br/>(ngrams 2–6)"]:::tool
+  T2["Petites features texte<br/>(HasDescription, TitleLength, TextStats, Language)"]:::tool
+
   %% Images (pixels)
   I1["ImageLoader (RGB, resize)"]:::tool
   I2["Flatten"]:::tool
-  I3["Réduction dim. (PCA/SVD) <i>optionnel</i>"]:::tool
-  
+  I3["Réduction dim. (PCA/SVD) <i>option</i>"]:::tool
+
+  %% Images (CNN)
+  C1["Embeddings CNN (ResNet18/50/101)<br/>+ L2-normalisation"]:::tool
+  C2["Post-réduction (SVD) <i>option</i>"]:::tool
+
   %% Images (stats)
   S1["ImageStatsFeaturizer<br/>(width, height, occupancy, white_ratio, black_ratio)"]:::tool
-  
-  %% Fusion
-  FU["FeatureUnion : Texte + Pixels (+ Stats)"]:::step
-  
-  %% Sampling + Scaler + Modèle
-  SAMP["Sampling (CV-safe)<br/><b>Under</b> : AdaptiveUnderSampler(cap par classe)<br/><b>Over</b> : RandomOverSampler(tail_min)"]:::step
-  SCAL["StandardScaler(with_mean=false)"]:::step
-  CLF["Classifier : LogisticRegression(saga) <i>ou</i> LinearSVC<br/>(option : OvR true → One-Vs-Rest, parallélisé par compute.n_jobs)"]:::step
-end
-class P3,T1,T2,I1,I2,I3,S1,FU,SAMP,SCAL,CLF phase;
 
-T1 --> T2 --> FU
+  %% Fusion
+  FU["FeatureUnion (poids par branche)<br/>Texte[word + char + feats] + Pixels + CNN + Stats"]:::step
+
+  %% Sampling + Scaler + Modèle
+  SAMP["Rééquilibrage (CV-safe)<br/><b>Under</b> : AdaptiveUnderSampler (cap par classe)<br/><b>Over</b> : RandomOverSampler (tail_min)"]:::step
+  SCAL["StandardScaler(with_mean=false)"]:::step
+  CLF["Classifier : LogisticRegression(saga) <i>ou</i> LinearSVC<br/>(option : OneVsRest parallélisé via compute.n_jobs)"]:::step
+end
+class P3,T0,T1,T1b,T2,I1,I2,I3,C1,C2,S1,FU,SAMP,SCAL,CLF phase;
+
+%% Branching & fusion
+T0 --> T1
+T0 --> T1b
+T0 --> T2
+T1 --> FU
+T1b --> FU
+T2 --> FU
+
 I1 --> I2 --> I3 --> FU
+C1 --> C2 --> FU
 S1 --> FU
+
 FU --> SAMP --> SCAL --> CLF
 
 %% -------------------------------------------------------
 %% 4) Entraîner & prédire
 %% -------------------------------------------------------
 subgraph P4["4) Entraîner et prédire (split Rakuten respecté)"]
-  F1["Fit pipeline sur X_train, y_train"]:::step
+  F1["Fit pipeline sur X_train, y_train (CV stratifiée)"]:::step
   F2["Re-pointer images vers test_dir<br/>(ImageLoader.set_image_dir / ImageStatsFeaturizer.set_image_dir)"]:::step
   F3["Predict sur X_test → CSV"]:::step
 end
@@ -145,10 +176,10 @@ class P4,F1,F2,F3 phase;
 %% 5) Évaluation & comparaison
 %% -------------------------------------------------------
 subgraph P5["5) Évaluation et reporting"]
-  R1["CV stratifiée : F1-macro / F1-pondéré"]:::step
+  R1["Scores CV : F1-macro / F1-pondéré"]:::step
   R2["Baselines : results/baseline_results_summary.csv<br/>+ reports/report_b*_cv.txt"]:::io
   R3["Option --compare : LR vs SVC (CV F1-macro)<br/>→ outputs.compare_out"]:::io
-  V1["Visualisations (confusion, barres, etc.)"]:::tool
+  V1["Visualisations (matrices de confusion, barres, etc.)"]:::tool
 end
 class P5,R1,R2,R3,V1 phase;
 
@@ -175,75 +206,116 @@ P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
 ##### 1) Objectif
 Exploiter le texte produit (**designation** + **description**) pour **prédire la catégorie** :
 - **Nettoyer** les chaînes (retirer le bruit, harmoniser).
-- **Représenter** en TF-IDF exploitable par des modèles linéaires.
-- **Enrichir** avec des signaux simples (ex. présence d’une description).
+- **Représenter** en TF-IDF **word** et, en option, **char/char_wb** (robuste aux fautes de frappe & variantes).
+- **Enrichir** avec des signaux simples (ex. présence d’une description, longueur du titre, stats de texte).
+- **Fusionner & pondérer** les sous-branches via `FeatureUnion`.
 
 ##### 2) Sources utilisées
-- **designation** : nom du produit.  
-- **description** : texte descriptif.
+- **designation** : nom du produit  
+- **description** : texte descriptif  
+- *(optionnel)* `translate_map` : normalisation inter-langues (EN/DE/ES → FR)
 
-> **Remarque** : l’existence d’une description est informative. D’où la feature binaire `has_description`.
+> **Remarque** : l’existence d’une description est informative → feature binaire `has_description`.
 
 ##### 3) Étapes de traitement
 
 ###### 3.1) Fusion & indicateur `has_description`
-- **Fusionner** `designation` et `description` en un texte unique (ex. `full_text`).  
+- **Fusionner** `designation` et `description` (ou passer les deux colonnes au vectoriseur qui les concatène en interne).
 - **Ajouter** `has_description = 1` si `description` non vide, sinon `0`.  
-→ **Maximiser** l’information lexicale + **capturer** un signal simple de complétude.
+→ **Maximiser** l’information lexicale + **capturer** un signal de complétude.
 
 ###### 3.2) Nettoyage avec `TextCleaner`
 - **Retirer** le HTML (balises `<...>`, entités `&amp;`, `&#39;`, …).
-- **Normaliser** (minuscules, ponctuation, caractères non alphanumériques).
-- **Supprimer** les stopwords (NLTK) — penser à `nltk.download('stopwords')`.
-- **Traduire** via un **translate_map** optionnel (ex. EN/DE → FR) si fourni.
-- **Stemmer** (Snowball FR) pour réduire la variance morphologique.
+- **Normaliser** : minuscules, accents (`strip_accents='unicode'`), ponctuation, caractères non alphanumériques.
+- **Stopwords** FR (NLTK) — penser à `nltk.download('stopwords')`.
+- **Traduire/mapper** via `translate_map` si fourni (anglicismes → FR, homogénéisation marques).
+- **Stemming** (Snowball FR) pour réduire la variance morphologique.
 
-###### 3.3) Vectorisation TF-IDF (`TextTfidfVectorizer`)
-- **`max_features`** : taille du vocabulaire (ex. **100 000** en prod).
-- **`ngram_range = (ngram_min, ngram_max)`** :
-  - 1-gram : *chaussure*, *cuir* ; 2-gram : *acier inox*, *coque iphone*.
-  - **Capturer** vocabulaire général + expressions composées.
-- **`min_df` / `max_df`** : filtrer termes **trop rares** / **trop fréquents** (ex. 2 / 0.95).
-- **`sublinear_tf = true`** : transformer TF en `1 + log(tf)` pour **réduire l’impact** des répétitions.
-- **`strip_accents = 'unicode'`** : homogénéiser accents.
-- **`lowercase = False`** : déjà géré par `TextCleaner`.
-- **`dtype = float64`** : **éviter** le warning sklearn (conversion depuis float32).
+###### 3.3) Vectorisation TF-IDF (branche **word**)
+- **`max_features`** : taille du vocabulaire (ex. **100_000** en prod).
+- **`ngram_range`** : `(1, 2)` typiquement → 1-gram (*chaussure*), 2-gram (*acier inox*, *coque iphone*).
+- **`min_df` / `max_df`** : filtrer les termes **trop rares** / **trop fréquents** (ex. `2` / `0.95`).
+- **`sublinear_tf = true`** : `1 + log(tf)` pour **réduire l’impact** des répétitions.
+- **`norm = 'l2'`** : nécessaire pour bons perfs des modèles linéaires.
+- **`strip_accents = 'unicode'`** ; **`lowercase = false`** (déjà géré par `TextCleaner`).
+- **`dtype = float64`** : éviter les conversions/avertissements sklearn.
+
+###### 3.4) Vectorisation TF-IDF (branche **char/char_wb** — optionnelle)
+- **`analyzer = "char_wb"`** recommandé (captures n-grammes **à l’intérieur** des mots, plus robuste).
+- **`ngram_range = (2, 6)`** : capte affixes, marques, fautes de frappe, formats (e.g. *128go*).
+- **`min_df` / `max_df`** : mêmes principes que la branche word.
+- Apporte un **gain robuste** sur titres courts, langues mixtes ou bruitées.
+
+###### 3.5) Statistiques liées au texte
+- **`HasDescriptionFlag`** : binaire 0/1 sur la complétude.
+- **`DesignationLength`** : longueur/compte de tokens du titre (signal de qualité de saisie).
+- **`TextStatistics`** : ratios chiffres/majuscules/ponctuation, densité moyenne de tokens, etc.
+- **`LanguageDetector`** : FR/EN/… (utile pour pondérer le stemming/stopwords ou pour l’analyse).
+
+###### 3.6) Fusion & pondération (`FeatureUnion`)
+- Fusion des sous-branches : **TF-IDF (word)**, **TF-IDF (char)**, **has_desc**, **title_len**, **text_stats**, **language**.
+- **Pondération** possible (ex. `tfidf_word=1.0`, `tfidf_char=0.5`, `has_desc=0.2`, `title_len=0.2`, `text_stats=0.2`, `language=0.1`).
+- Sortie **creuse CSR** compatible avec l’image et la suite du pipeline.
+
+###### 3.7) Sortie & intégration modèle
+- La branche texte renvoie une **matrice creuse float64 L2-normée**, prête pour la **fusion multimodale**.
+- Si un **scaler** est appliqué plus loin, utiliser `StandardScaler(with_mean=False)` pour préserver le format creux.
+
 
 **Exemple TOML — section `[text]`**
 ```toml
 [text]
-max_features = 100000
-ngram_min = 1
-ngram_max = 2
-min_df = 2
-max_df = 0.95
-sublinear_tf = true
-use_stem = true
-translate_map_path = "features/translate_map.json"
-# options avancées
-norm = "l2"
-strip_accents = "unicode"
-stop_words = null   # "french" / ["the","and",...] / null
+# Active/désactive les features additionnelles
+use_text_stats = true
+use_language_detection = true
+
+# Branche caractères (optionnelle)
+[text.char]
+enabled = true
+ngram_min = 2
+ngram_max = 6
+
+# Pondération des sous-branches (FeatureUnion)
+[text.weights]
+tfidf_word = 1.0
+tfidf_char = 0.5         # pris en compte si [text.char.enabled]=true
+has_desc   = 0.2
+title_len  = 0.2
+text_stats = 0.2         # pris en compte si use_text_stats=true
+language   = 0.1         # pris en compte si use_language_detection=true
 ```
 
-**Exemple d’appel côté code**
-
-from models.text_pipeline import create_text_pipeline_from_cfg
-text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
-
-#### B — Traitement d’images (chargement, redimensionnement, encodage)
+#### B — Traitement image – Pipeline Rakuten
 
 ##### 1) Objectif
-Représenter l’information visuelle sous forme de vecteurs utilisables par des modèles linéaires.
+Représenter l’information visuelle sous forme de **vecteurs** utilisables par des modèles linéaires, via deux branches **alternatives** (activables par la config) :
+- **Pixels** : chargement → redimensionnement → flatten → *(option)* réduction (PCA).
+- **CNN** : extraction d’**embeddings ResNet** → **L2-normalisation** → *(option)* réduction (SVD).
+
+---
 
 ##### 2) Étapes
-- **Charger** via `ImageLoader` (noms : `image_{imageid}_product_{productid}.jpg`).
-- **Convertir** en **RGB** et **redimensionner** à `images.size` (TOML).
-- **Aplatir** (flatten) pour obtenir un vecteur de pixels.
-- **Gérer** les images manquantes → **vecteur nul** (image noire) afin de ne pas casser la pipeline.
-- **(Option)** **réduire** la dimension (section C).
 
-##### 3) Exemple TOML — section `[images]`
+**2.a) Branche Pixels**
+- **Charger** via `ImageLoader` (pattern : `image_{imageid}_product_{productid}.jpg`).
+- **Convertir** en **RGB** et **redimensionner** à `images.size` (TOML).
+- **Aplatir** (flatten) pour obtenir un vecteur de pixels (dense).
+- **Gérer** les images manquantes → **vecteur nul** (image noire) pour ne pas casser la pipeline.
+- **(Option)** **réduire** la dimension (PCA) — voir section **C**.
+
+**2.b) Branche CNN (optionnelle)**
+- **Charger & prétraiter** l’image (RGB, resize).
+- **Extraire** un embedding via **ResNet** (`resnet18`=512d, `resnet50/101`=2048d) **sans** fine-tuning.
+- **Normaliser L2** l’embedding (robuste aux variations d’échelle/éclairage).
+- **(Option)** **réduire** la dimension (SVD aléatoire) pour accélérer la CV et limiter la mémoire.
+- **Fallback** images manquantes → **vecteur 0** (même dimension que l’embedding).
+
+> **Note** : La baseline *B3* utilise la branche **Pixels** par défaut ; si `[images.cnn.enabled]=true`, la branche **CNN** est utilisée pour l’image.
+
+---
+
+##### 3) Exemple TOML — sections `[images]` & `[images.cnn]`
+
 ```toml
 [images]
 train_dir = "data/images/images/image_train"
@@ -252,29 +324,43 @@ size = [64, 64]
 
 [images.dim_reduction]
 enabled = true
-method = "pca"      # "pca" conseillé pour pixels denses (images)
+method = "pca"      # "pca" conseillé pour pixels denses
 n_components = 100
 random_state = 42
+
+[images.cnn]
+enabled = true
+arch = "resnet50"          # "resnet18" (512d) | "resnet50"/"resnet101" (2048d)
+batch_size = 16
+device = "auto"            # "auto" | "cpu" | "cuda"
+use_imagenet_norm = true
+fallback_zero = true       # image manquante -> vecteur 0
+dtype = "float32"
+
+[images.cnn.dim_reduction]
+enabled = true
+n_components = 256         # post-réduction (SVD) des embeddings
+random_state = 42
+
 ```
 
-#### C — Réduction de dimension (PCA / SVD)
+### C — Réduction de dimension (PCA / SVD)
 
-##### 1) Objectif
-Réduire la **dimension** des vecteurs d’images pour :
-- **accélérer** l’entraînement et la CV,
-- **limiter** la mémoire,
-- **stabiliser** le modèle (moins de bruit, moins d’overfit),
+#### 1) Objectif
+Réduire la dimension des vecteurs d’images pour :
+- **accélérer** l’entraînement et la validation croisée (CV),
+- **limiter** l’usage mémoire,
+- **stabiliser** le modèle (moins de bruit),
 tout en **conservant l’essentiel** de l’information visuelle.
 
-##### 2) Quand et pourquoi
-- Les pixels aplatís sont **denses** → privilégier **PCA** (dense).
-- Les matrices **creuses** (ex. TF-IDF texte) préfèrent **TruncatedSVD** (LSA).
-- Utiliser la réduction surtout quand `images.size` augmente (64×64, 96×96…).
+#### 2) Quand et pourquoi
+- **Pixels (flatten)** → données **denses** : privilégier **PCA** (centrée) pour capturer la variance dominante.
+- **Embeddings CNN (L2)** → vecteurs **denses** déjà bien conditionnés : **TruncatedSVD** (aléatoire) est souvent plus rapide et **non centrant** (n’altère pas la normalisation L2).
+- Activer la réduction surtout quand `images.size` augmente (ex. **64×64**, **96×96**…) ou que `arch` produit des embeddings longs (**2048d** pour ResNet50/101).
 
-##### 3) Méthodes
-- **PCA** : décomposition sur données **denses** (images).  
-- **TruncatedSVD** : décomposition sur matrices **creuses** (texte).  
-> Dans ce projet, la réduction porte sur les **pixels** → **PCA** recommandée.
+#### 3) Méthodes
+- **PCA** : décomposition sur données **denses** (pixels).
+- **TruncatedSVD** : bonne réduction **sans centrage** (embeddings CNN, matrices creuses texte).
 
 ##### 4) Paramétrage TOML
 ```toml
@@ -282,55 +368,65 @@ tout en **conservant l’essentiel** de l’information visuelle.
 size = [64, 64]                   # 32×32 en dev ; 64×64 en prod
 
 [images.dim_reduction]
-enabled = true                    # activer/désactiver la réduction
-method = "pca"                    # "pca" (images denses) | "svd" (matrices creuses)
-n_components = 100                # 50–80 (dev), 80–120 (prod) selon budget
-random_state = 42                 # reproductibilité
+enabled = true                    # branche Pixels
+method = "pca"                    # "pca" (pixels) | "svd" (si besoin)
+n_components = 100
+random_state = 42
+
+[images.cnn.dim_reduction]
+enabled = true                    # branche CNN
+n_components = 256                # 128–512 selon budget
+random_state = 42
 ```
 
 ##### 5) Exemple côté code (pipeline images)**
 
 ###### Dans train_model.py (extrait)
 from models.image_pipeline import create_image_pipeline
-
+# Pixels (B3 par défaut)
 image_pixels = create_image_pipeline(
     image_dir=cfg["images"]["train_dir"],
-    image_size=tuple(cfg["images"]["size"]),                 # ex. (64, 64)
+    image_size=tuple(cfg["images"]["size"]),
     dim_reduction=cfg.get("images", {}).get("dim_reduction", {})
+)
 
-##### 6) Conseils performance / mémoire
+# CNN (activé si cfg["images"]["cnn"]["enabled"] == True)
+from models.cnn_features import create_cnn_branch_from_cfg
+image_cnn = create_cnn_branch_from_cfg(cfg["images"]["cnn"])
 
-- **Dev rapide** : size=[32,32] + n_components=50–80 → itérations rapides.
-- **Prod** : size=[64,64] + n_components=80–120 → meilleur compromis précision/temps.
-- **Surcoût PCA** : croît avec n_components et la taille d’image ; ajuster si la CV devient lente.
-- **Standardiser après sampling** (dans la pipeline globale) pour scaler ce que voit réellement le modèle.
+### 6) Conseils performance / mémoire
+- **Dev rapide (Pixels)** : `size = [32, 32]` + `n_components = 50–80`.
+- **Prod (Pixels)** : `size = [64, 64]` + `n_components = 80–120`.
+- **CNN** : `resnet18` si RAM/GPU limités, `resnet50` pour un meilleur signal ; **post-SVD 128–256** recommandé.
+- **Batch_size / device** : adapter `batch_size` selon la VRAM/CPU ; `device="auto"` choisit le GPU s’il est disponible.
+- **Standardiser après sampling** (pipeline globale) pour scaler ce que voit réellement le modèle.
 
-##### 7) Contrôles rapides
+### 7) Contrôles rapides
+- **Forme des features** : vérifier que la dimension baisse quand la réduction est activée.
+- **Seeds** : fixer `random_state` (PCA/SVD) pour des runs reproductibles.
+- **Overfit** : un `n_components` trop grand peut réintroduire du bruit → suivre la **F1-macro CV**.
 
-- **Vérifier la forme** : après FeatureUnion, contrôler que la dimension baisse bien quand enabled=true.
-- **Fixer la seed** : random_state dans [images.dim_reduction] pour des runs reproductibles.
-- **Surveillance overfit** : trop grand n_components peut réintroduire du bruit → suivre F1-macro CV.
+---
 
-#### D — Features statistiques d’image (objet sur fond)
+### D — Features statistiques d’image (objet vs fond)
 
-##### 1) Objectif
-Capturer des **indices globaux** de l’objet photographié (taille, occupation, contraste) qui
-complètent les pixels bruts. Ces signaux sont **peu coûteux** et souvent **robustes** aux variations.
+#### 1) Objectif
+Capturer des **indices globaux** (taille, occupation, contraste) complémentaires aux pixels/embeddings. Peu coûteux et souvent **robustes**.
 
-##### 2) Principe
-- **Binariser** l’image en trois zones sur l’échelle de gris 0–255 :
+#### 2) Principe
+- **Seuils gris** 0–255 :
   - **Noir** ≤ `black_threshold` (ex. 25)
   - **Blanc** ≥ `white_threshold` (ex. 230)
   - **Objet** = le **reste** (pixels intermédiaires)
 - **Filtrer** les petites composantes (`min_area`) pour éviter le bruit.
 - **Mesurer** sur l’objet principal :
-  - `width`, `height`  → dimensions de l’enveloppe
-  - `occupancy`        → ratio surface_objet / surface_image ∈ [0,1]
-- **Calculer** des indicateurs de contraste global :
+  - `width`, `height` → dimensions de l’enveloppe
+  - `occupancy` → ratio surface_objet / surface_image ∈ [0, 1]
+- **Contraste global** :
   - `white_ratio` → proportion de pixels « blancs »
   - `black_ratio` → proportion de pixels « noirs »
 
-> Formule : `occupancy = nb_pixels_objet / (H × W)`
+> `occupancy = nb_pixels_objet / (H × W)`
 
 ##### 3) Paramétrage via TOML
 ```toml
@@ -339,169 +435,160 @@ enabled = true          # activer la branche stats
 white_threshold = 230   # seuil "blanc" (fond clair)
 black_threshold = 25    # seuil "noir"
 min_area = 16           # ignorer les composantes trop petites
-out_prefix = "auto"     # nommer les colonnes en incluant les seuils (ex. img_w230_b25_*)
+out_prefix = "auto"     # colonnes nommées avec les seuils (ex. img_w230_b25_*)
 ```
 
-##### 4) Intégration dans la pipeline
+### 4) Intégration dans la pipeline
 
-- Placer la branche ImageStatsFeaturizer dans le FeatureUnion (avec texte & pixels).
-- Rééchantillonner ensuite (under adaptatif → over), puis scaler.
-- Re-pointer le dossier test avant la prédiction (set_image_dir).
-
-**Extrait (entraînement)**
-
-from features.image_stats import ImageStatsFeaturizer
-
-stats_cfg = cfg.get("images", {}).get("stats", {})
-if bool(stats_cfg.get("enabled", False)):
-    image_stats = ImageStatsFeaturizer(
-        image_dir=cfg["images"]["train_dir"],
-        imgid_col="imageid",
-        pid_col="productid",
-        white_threshold=int(stats_cfg.get("white_threshold", 230)),
-        black_threshold=int(stats_cfg.get("black_threshold", 25)),
-        min_area=int(stats_cfg.get("min_area", 16)),
-        out_prefix=str(stats_cfg.get("out_prefix", "auto")),
-    )
-    transformers.append(("image_stats", image_stats))  # ← ajouté au FeatureUnion
-
-##### 5) Bonnes pratiques
-
-- **Adapter les seuils** : 230/25 marchent bien sur fonds clairs ; diminuer white_threshold
-si les images sont globalement sombres, ou augmenter black_threshold si le fond est gris.
-- **Vérifier la distribution des features** (histos de occupancy, white_ratio, black_ratio) sur un échantillon.
-- **Corréler avec les classes pour repérer les signaux utiles** (ex. catégories “livres” vs “high-tech”).
-- **Désactiver rapidement la branche** en mettant enabled=false (ablation study).
-- **Laisser out_prefix="auto"** pour tracer facilement quels seuils ont servi dans un run.
-
-#### E — Approche multimodale : fusion & sampling
-
-##### 1) Objectif
-Combiner **texte** + **pixels** + **stats d’image** dans une même pipeline, puis **rééquilibrer** les classes
-de façon **CV-safe**, **standardiser** et **entraîner** un classifieur linéaire robuste (LR ou LinearSVC).
+- **Ajouter** la branche `ImageStatsFeaturizer` dans le **FeatureUnion** aux côtés de la **branche texte** et de **la branche image** (**pixels** *ou* **CNN** selon la config).
+- **Réordonner** correctement la suite du flow : **fusion → under-sampling adaptatif → over-sampling → standardisation → classifieur**.
+- **Re-pointer** les répertoires d’images **avant la prédiction** :
+  - `ImageLoader.set_image_dir(<test_dir>)`
+  - `ImageStatsFeaturizer.set_image_dir(<test_dir>)`
+  - *(si CNN activé)* : branche CNN → même répertoire test.
+- **Pondérer** les branches dans `FeatureUnion` si besoin (`texte`, `pixels`/`cnn`, `stats`) pour équilibrer leur contribution.
 
 ---
 
-##### 2) Flow d’entraînement (résumé)
-1. **Texte** : `TextCleaner` → `TF-IDF` (+ `HasDescriptionFlag`, `DesignationLength`)
-2. **Images (pixels)** : `ImageLoader` → `Resize` → `Flatten` → **(option)** PCA/SVD
-3. **Stats image** : `ImageStatsFeaturizer` (5 features globales)
-4. **Fusion** via `FeatureUnion` (**texte + pixels + stats**)
-5. **Sampling** :
-   - **Under** : `AdaptiveUnderSampler` (cap par classe **recalculé par fold** → **CV-safe**)
-   - **Over**  : `RandomOverSampler` (remonter les classes sous `tail_min`)
-6. **Scaler** : `StandardScaler(with_mean=false)` **après** sampling
-7. **Classifier** : `LogisticRegression(saga)` **ou** `LinearSVC`
-   - Option **OvR** (`ovr=true`) : **One-Vs-Rest**, parallélisé par `[compute].n_jobs`
+### 5) Bonnes pratiques
+
+- **Seuils** : `white_threshold=230` / `black_threshold=25` conviennent aux fonds clairs ;  
+  baisser `white_threshold` si fonds sombres, monter `black_threshold` si fond gris.
+- **Diagnostiquer** : inspecter la distribution de `occupancy`, `white_ratio`, `black_ratio` (histos/boxplots) sur un échantillon.
+- **Corréler** aux classes pour repérer les signaux utiles (ex. *livres* vs *high-tech*).
+- **Ablations** : couper rapidement la branche via `[images.stats].enabled = false` pour mesurer son impact.
+- **Traçabilité** : laisser `out_prefix="auto"` afin d’encoder les seuils dans les noms de colonnes.
+- **Sanity-checks** : vérifier l’absence de `NaN`/`Inf` après les stats ; confirmer l’alignement `productid/imageid`.
+
+---
+
+## E — Approche multimodale : fusion & sampling
+
+### 1) Objectif
+Combiner **Texte** + **Image** (**Pixels** *ou* **CNN**) + **Stats d’image** dans une **même pipeline**, puis **rééquilibrer** les classes de façon **CV-safe**, **standardiser** et **entraîner** un classifieur linéaire robuste (**LogisticRegression(saga)** ou **LinearSVC**).
+
+---
+
+### 2) Flow d’entraînement (résumé)
+
+1. **Texte** : `TextCleaner` → `TF-IDF (word)` **+ (option)** `TF-IDF (char/char_wb)` → petites features (`HasDescriptionFlag`, `DesignationLength`, *(option)* `TextStatistics`, `LanguageDetector`).
+2. **Image (pixels)** : `ImageLoader` → `Resize` → `Flatten` → **(option)** réduction **PCA**.  
+   **OU (CNN)** : `ResNet18/50/101` → **L2-norm** → **(option)** réduction **SVD**.
+3. **Stats image** : `ImageStatsFeaturizer` (ex. `width`, `height`, `occupancy`, `white_ratio`, `black_ratio`).
+4. **Fusion** via `FeatureUnion` (**texte** + **pixels/CNN** + **stats**) avec **poids** configurables par branche.
+5. **Sampling (CV-safe)** :
+   - **Under** : `AdaptiveUnderSampler` (cap par classe **recalculé à chaque fold**).
+   - **Over**  : `RandomOverSampler` (remonter les classes sous `tail_min`).
+6. **Scaler** : `StandardScaler(with_mean=false)` **après** sampling.
+7. **Classifier** : `LogisticRegression(saga)` **ou** `LinearSVC`.  
+   - Option **OvR** : `OneVsRest` parallélisé via `[compute].n_jobs`.
 
 > **Éviter** de combiner `class_weight="balanced"` **et** les samplers (double compensation).
 
----
+##### 3) Bonnes pratiques & garde-fous
 
-##### 3) Paramétrage TOML
-```toml
-[sampling]
-major_class = 2583   # id de la classe majoritaire
-major_cap   = 6000   # plafond d'under pour cette classe (cap par fold)
-tail_min    = 1500   # seuil d'over pour classes rares
+- **Sampler vs `class_weight`** : choisir **l’un ou l’autre**, éviter de cumuler (double compensation).
+- **CV-safe** : utiliser l’**under adaptatif** (cap recalculé **à chaque fold**) pour éviter les `ValueError` d’imblearn et toute fuite d’information.
+- **Ordre des steps** : `features → under → over → scaler → model`.
+- **OvR** : utile si beaucoup de classes (long tail) ; paralléliser via `[compute].n_jobs`.
+- **Temps / RAM (réduire le coût)** :
+  - `text.max_features`, `text.char.enabled` (désactiver ou baisser `ngram_max`), ajuster `text.weights`.
+  - `images.size` (32→64), `images.dim_reduction.n_components` (PCA pixels).
+  - `images.cnn.enabled` (désactiver si besoin), `images.cnn.dim_reduction.n_components` (SVD embeddings 128–256).
+  - `images.cnn.batch_size` et `device` (`"auto"` bascule sur GPU si dispo).
+- **Reproductibilité** : fixer `[random].seed`, `[cv].random_state` (et garder les `random_state` des réducteurs PCA/SVD).
 
-[model]
-name = "lr"          # "lr" ou "svc"
-use_class_weight = false
-solver = "saga"
-C = 1.0
-max_iter = 3000
-tol = 0.001
-ovr = false          # true → One-Vs-Rest (parallélisé)
 
-[compute]
-n_jobs = 1           # paralléliser la CV et l’OvR
+##### 4) Contrôles rapides
 
-[cv]
-splits = 3
-shuffle = true
-random_state = 42
-```
-##### 4) Bonnes pratiques & garde-fous
-
-- **Sampler vs class_weight **: choisir l’un ou l’autre, éviter les deux en même temps.
-- **CV-safe** : utiliser l’under adaptatif (cap par fold) pour éviter les ValueError d’imblearn.
-- **Ordre des steps**: features → under → over → scaler → model.
-- **OvR** : utile si beaucoup de classes et classes rares ; paralléliser via [compute].n_jobs.
-- **Temps/ram** : réduire text.max_features, images.dim_reduction.n_components si l’entraînement est trop long.
-- **Reproductibilité** : fixer [random].seed et [cv].random_state.
-
-##### 5) Contrôles rapides
-
-- **Sanity check sampling** : logger les effectifs par classe avant/après sampling sur un fold.
-- **Forme des features** : vérifier la dimension de FeatureUnion (ex. fit_transform sur un mini batch).
-- **Ablations** : comparer stats.enabled=false/true, ovr=false/true, svc vs lr pour le rapport.
+- **Sanity check sampling** : logger les **effectifs par classe** avant / après under & over sur un fold.
+- **Forme des features** : vérifier la dimension de `FeatureUnion` (un `fit_transform` sur mini-batch).
+- **Ablations** : comparer `text.char.enabled=false/true`, `images.cnn.enabled=false/true`, `images.stats.enabled=false/true`, `ovr=false/true`, `svc` vs `lr`.
+- **I/O images** : taux d’images manquantes (fallback vecteur 0), cohérence `imageid/productid`.
+- **Pas de fuite** : sampling **à l’intérieur** du CV, **après** fusion des features ; aucun accès au test en entraînement.
 
 #### F- Architecture du projet
 
 Architecture du projet
 .
-- ├── data/
-- │   ├── X_train_update.csv
-- │   ├── Y_train_CVw08PX.csv
-- │   └── X_test_update.csv
-- │
-- ├── data/images/images/
-- │   ├── image_train/   # images d'entraînement
-- │   └── image_test/    # images de test
-- │
-- ├── features/
-- │   ├── text_cleaner.py
-- │   ├── text_vectorizer.py
-- │   ├── image_loader.py
-- │   ├── image_stats.py
-- │   ├── make_cleaned_frequencies_and_map.py
-- │   └── config.toml          # configuration centrale du projet
-- │
-- ├── main/
-- │   └── train_model.py       # orchestration (baselines, CV, pipeline complet)
-- │
-- ├── models/                  # pipelines pour texte et image
-- ├── results/                 # métriques & figures (sorties baselines)
-- ├── tools/                   # scripts de reporting (figures)
-- │   ├── plot_baselines.py
-- │   ├── plot_baseline_bars.py
-- │   └── plot_confusion_matrix.py
-- └── README.md
+├── data/
+│ ├── X_train_update.csv
+│ ├── Y_train_CVw08PX.csv
+│ └── X_test_update.csv
+│
+├── data/images/images/
+│ ├── image_train/ # images d'entraînement
+│ └── image_test/ # images de test
+│
+├── features/
+│ ├── config.toml # configuration centrale (texte, images, sampling, model, cv…)
+│ └── make_cleaned_frequencies_and_map.py
+│
+├── models/ # transformeurs & pipelines
+│ ├── text_cleaner.py
+│ ├── text_vectorizer.py
+│ ├── text_features.py # HasDescription, DesignationLength, TextStatistics, LanguageDetector
+│ ├── text_pipeline.py
+│ ├── image_loader.py
+│ ├── image_stats.py # ImageStatsFeaturizer
+│ ├── image_pipeline.py # pixels → flatten → (PCA)
+│ └── cnn_features.py # embeddings ResNet → L2 → (SVD)
+│
+├── main/
+│ └── train_model.py # orchestration (baselines, CV, pipeline complet, compare)
+│
+├── results/
+│ ├── baseline_results_summary.csv
+│ ├── compare_cv_results.csv
+│ ├── predictions_test.csv
+│ └── figures/
+│ ├── baseline_f1_macro.png
+│ └── confusion_matrix_b4.png
+│
+├── reports/
+│ └── report_b*_cv.txt
+│
+├── tools/ # scripts de reporting
+│ ├── plot_baselines.py
+│ ├── plot_baseline_bars.py
+│ ├── plot_confusion_matrix.py
+│ ├── generate_requirements.py # génère un requirements.txt depuis l’environnement courant
+│ └── compare_models.py # comparaisons & visus globales
+└── README.md
 
 #### G- Baselines & Protocole d’évaluation
 
-Nous évaluons 5 références avant/après le multimodal :
+Nous évaluons 5 références avant / après le multimodal :
 
-- Code	    Baseline	        Description
-- B0	        Naïf (majoritaire)	DummyClassifier(strategy="most_frequent")
-- B1	        Naïf (stratifié)	DummyClassifier(strategy="stratified")
-- B2	        Texte seul	        TextCleaner + TF-IDF → LR (sans rééchantillonnage)
-- B3	        Image seule	        ImageLoader → flatten → PCA → LR (sans texte)
-- B4	        Multimodal complet	Texte + Image (+ image_stats) + under/over-sampling (pipeline principal)
+| Code | Baseline            | Description |
+|------|---------------------|-------------|
+| B0   | Naïf (majoritaire) | `DummyClassifier(strategy="most_frequent")` |
+| B1   | Naïf (stratifié)   | `DummyClassifier(strategy="stratified")` |
+| B2   | **Texte seul**     | `TextCleaner` + `TF-IDF (word [+ char])` → **LR(saga)** |
+| B3   | **Image seule**    | **Pixels** `ImageLoader→flatten→PCA` → **LR** *(ou **CNN** si `[images.cnn.enabled]=true`)* |
+| B4   | **Multimodal**     | Texte + Image (Pixels **ou** CNN) + `ImageStats` + under/over (pipeline principal, **LR/SVC**) |
 
-- Métriques : F1 macro (équité inter-classes) & F1 pondéré.
-- Validation : K-fold stratifié (paramétré via TOML).
-- Reproductibilité : random_state fixés; config centralisée.
+- **Métriques** : **F1 macro** (équité inter-classes) & **F1 pondéré**.  
+- **Validation** : K-fold **stratifié** (paramétré via TOML).  
+- **Reproductibilité** : `random_state` fixés ; **config centralisée**.
 
 ```mermaid
 flowchart LR
   B0[**B0** Dummy most_frequent] --> COMP[Comparaison F1]
   B1[**B1** Dummy stratified]   --> COMP
   B2[**B2** Texte seul: TF-IDF→LR] --> COMP
-  B3[**B3** Image seule: PCA→LR]   --> COMP
-  B4[**B4** Multimodal: Texte+Image+Sampling→LR/SVC] --> COMP
+  B3[**B3** Image seule: Pixels/CNN→(PCA/SVD)→LR] --> COMP
+  B4[**B4** Multimodal: Texte+Image+Stats+Sampling→LR/SVC] --> COMP
 ```
-
 
 #### H- Comment exécuter le projet
 
 ##### Génération du dictionnaire et des fréquences (optionnel si déjà fait)
-        python features/make_cleaned_frequencies_and_map.py 
-        --x_train_csv data/X_train_update.csv 
-        --out_freq features/token_frequencies_cleaned_stem.csv 
-        --out_map features/translate_map_starter_from_cleaned.json 
-        --config features/config.toml
+        python features/make_cleaned_frequencies_and_map.py \
+        --x_train_csv data/X_train_update.csv \
+        --out_freq features/token_frequencies_cleaned_stem.csv \
+        --out_map  features/translate_map_starter_from_cleaned.json \
+        --config   features/config.toml
 
 
 ##### Lancer les baselines
@@ -515,26 +602,31 @@ python -m main.train_model --config features/config.toml --baseline b1
 python -m main.train_model --config features/config.toml --baseline b2
 
 ###### B3 (image seule)
+**Pixels par défaut ; activer CNN via [images.cnn.enabled]=true**
 python -m main.train_model --config features/config.toml --baseline b3
 
 ##### Lancer le modèle multimodal (B4)
 python -m main.train_model --config features/config.toml
-- Modèle sérialisé : outputs.model_out
-- Prédictions test : outputs.pred_out
+** Sorties :**
+** - Modèle sérialisé : models/text_image_classifier.joblib**
+**- Prédictions test : results/predictions_test.csv**
 
 ##### (Option) Comparer LR vs SVC (CV)
 python -m main.train_model --config features/config.toml --compare
 
-→ Résultats CSV : outputs.compare_out
+→ Résultats CSV : results/compare_cv_results.csv
 
 ##### Forcer le modèle côté CLI
-python -m main.train_model --config features/config.toml --model svc
+python -m main.train_model --config features/config.toml --model svc   # ou: lr
 
 Écraser [model].name à la volée.
 
 #### I- Visualisations & Rapports
 
-python -m main.train_model --compare-all
+> Avant d’appeler les scripts de visu, lance au moins une fois les **baselines** et/ou le **multimodal** pour alimenter `results/` et `reports/`.
+
+**Comparaison intégrée (depuis train_model) : B0→B4 + figures de base**
+python -m main.train_model --config features/config.toml --compare-all
 
 # Comparaison complète avec toutes les visualisations
 python -m tools.compare_models --all
@@ -566,17 +658,20 @@ python tools/plot_confusion_matrix.py --config features/config.toml --baseline b
 
 ###### Baselines
 
-- results/baseline_results_summary.csv – cumul des runs (append)
-- results/report_b0_cv.txt, … – classification_report par baseline (CV)
-- results/figures/*.png – bar charts & matrices de confusion (+ CSV agrégés)
-- results/figures/baseline_f1_macro.png, baseline_f1_bars.png, …
-- results/figures/cm_<baseline>.png + cm_<baseline>_full.csv + report_<baseline>_cv.txt
+- `results/baseline_results_summary.csv` — cumul des runs (append)
+- `reports/report_b0_cv.txt`, `reports/report_b1_cv.txt`, … — `classification_report` par baseline (CV)
+- `results/figures/*.png` — bar charts & matrices de confusion (+ CSV agrégés)
+
+**Exemples :**
+- `results/figures/baseline_f1_macro.png`, `results/figures/baseline_f1_bars.png`
+- `results/figures/cm_<baseline>.png`, `results/figures/cm_<baseline>_full.csv`
+- `reports/report_<baseline>_cv.txt`
 
 ###### Modèle complet (B4)
 
-- models/text_image_classifier.joblib – pipeline entraîné
-- models/y_test_pred.csv – prédictions sur X_test
-- models/compare_cv_results.csv – si --compare activé
+- `models/text_image_classifier.joblib` — pipeline entraînée
+- `results/predictions_test.csv` — prédictions sur `X_test` (si génération activée)
+- `results/compare_cv_results.csv` — comparaison LR vs SVC (si `--compare` ou via `tools.compare_models`)
 
 
 #### J- Bonnes pratiques & Dépannage
