@@ -589,8 +589,8 @@ flowchart LR
   B0[**B0** Dummy most_frequent] --> COMP[Comparaison F1]
   B1[**B1** Dummy stratified]   --> COMP
   B2[**B2** Texte seul: TF-IDF -->LR] --> COMP
-  B3[**B3** Image seule: Pixels/CNN→(PCA/SVD)→LR] --> COMP
-  B4[**B4** Multimodal: Texte+Image+Stats+Sampling→LR/SVC] --> COMP
+  B3[**B3** Image seule: Pixels/CNN-->(PCA/SVD)-->LR] --> COMP 
+  B4[**B4** Multimodal: Texte+Image+Stats+Sampling-->LR/SVC] --> COMP
 ```
 
 #### H — Comment exécuter le projet
@@ -635,7 +635,7 @@ python -m main.train_model --config features/config.toml --model svc   # ou: lr
 
 #### I — Visualisations & Rapports
 
-> Avant d’appeler les scripts de visu, lance au moins une fois les **baselines** et/ou le **multimodal** pour alimenter `results/` et `reports/`.
+> Avant d’appeler les scripts de visu, lance au moins une fois les **baselines** et/ ou le **multimodal** pour alimenter `results/` et `reports/`.
 
 **Comparaison intégrée (depuis train_model) : B0→B4 + figures de base**
 python -m main.train_model --config features/config.toml --compare-all
