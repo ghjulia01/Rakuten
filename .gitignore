@@ -1,4 +1,19 @@
-/data/images/
+# Fichiers de configuration
+# Environnements
+venv/
+.venv*/
+env/
+ENV/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Données lourdes (adapte si besoin)
 data/images/
 Scripts perso.raku
 /venv/
