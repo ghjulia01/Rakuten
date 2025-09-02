@@ -2,18 +2,16 @@
 from __future__ import annotations
 import os, sys
 from pathlib import Path
-import numpy as np
+from inspect import signature
+import numpy as np                   # <-- import en haut (global)
+from scipy import sparse             # <-- import en haut (global)
 import pandas as pd
+from tomllib import load as toml_load  # Python 3.11+
 
-# S'assurer que la racine du projet est dans sys.path si on lance sans -m
+# S’assurer que la racine du projet est dans sys.path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
-from tomllib import load as toml_load  # Python 3.11+
-from inspect import signature
-
-# === Résolution des chemins depuis le TOML =====================================
 
 CFG = ROOT / "features" / "config.toml"
 
@@ -36,20 +34,16 @@ def _path_from_cfg(cfg: dict, base: Path, key: str, fallback: str) -> Path:
         p = base / p
     return p.resolve()
 
-# === Construction d'un ImageLoader compatible quelle que soit la signature =====
-
 def _build_imageloader(img_dir: Path):
-    """Créer un ImageLoader en s'adaptant aux noms de paramètres de __init__."""
-    from features.image_loader import ImageLoader  # import après sys.path
+    """Créer un ImageLoader compatible quelle que soit sa signature."""
+    from features.image_loader import ImageLoader
     sig = signature(ImageLoader.__init__)
     params = sig.parameters.keys()
 
     kwargs = {}
-    # obligatoire
     if "image_dir" in params:
         kwargs["image_dir"] = str(img_dir)
-
-    # colonnes id: plusieurs variantes possibles selon ta version
+    # colonnes selon version
     if "imgid_col" in params:
         kwargs["imgid_col"] = "imageid"
     elif "img_col" in params:
@@ -64,25 +58,20 @@ def _build_imageloader(img_dir: Path):
     elif "product_col" in params:
         kwargs["product_col"] = "productid"
 
-    # taille
     if "target_size" in params:
         kwargs["target_size"] = (128, 128)
     elif "size" in params:
         kwargs["size"] = (128, 128)
 
-    # options de confort si disponibles
     if "quiet" in params:
         kwargs["quiet"] = True
     if "safe_mode" in params:
         kwargs["safe_mode"] = True
     if "flatten" in params:
-        # on préfère récupérer des vecteurs (compatible stats ci-dessous)
         kwargs["flatten"] = True
 
     print("[debug] ImageLoader kwargs résolus:", kwargs)
     return ImageLoader(**kwargs)
-
-# === Programme principal =======================================================
 
 def main():
     with open(CFG, "rb") as f:
@@ -98,38 +87,27 @@ def main():
     print("[debug] y_train :", y_train)
     print("[debug] img_dir :", img_dir)
 
-    # Charger un petit échantillon
     X = pd.read_csv(X_train, index_col=0).reset_index(drop=True)
     y = pd.read_csv(y_train, index_col=0).iloc[:, 0].reset_index(drop=True)
     X = X[["productid", "imageid"]].copy()
 
     n = min(2000, len(X))
-    idx = np.random.choice(len(X), size=n, replace=False)
+    idx = np.random.choice(len(X), size=n, replace=False)   # <- np OK ici
     Xs = X.loc[idx].reset_index(drop=True)
     ys = y.loc[idx].reset_index(drop=True)
 
-    # Construire un loader compatible
     loader = _build_imageloader(img_dir)
     loader.fit(None)
-
     imgs = loader.transform(Xs)
 
-    # Normaliser la sortie pour calculer les stats
-    try:
-        import numpy as np
-        from scipy import sparse
-        if isinstance(imgs, np.ndarray):
-            arr = imgs.reshape(len(Xs), -1)
-        elif 'sparse' in str(type(imgs)) or hasattr(imgs, 'toarray'):
-            arr = imgs.toarray()
-        else:
-            # dernier recours : convertir en numpy
-            arr = np.asarray(imgs).reshape(len(Xs), -1)
-    except Exception as e:
-        print("[erreur] Conversion features -> array:", e)
-        return
+    # Conversion en array pour stats
+    if isinstance(imgs, np.ndarray):
+        arr = imgs.reshape(len(Xs), -1)
+    elif hasattr(imgs, "toarray"):
+        arr = imgs.toarray()
+    else:
+        arr = np.asarray(imgs).reshape(len(Xs), -1)
 
-    # Stats simples
     row_norms = np.linalg.norm(arr, axis=1)
     hit_rate  = float((row_norms > 0).mean())
     mean_var  = float(arr.var(axis=0).mean())

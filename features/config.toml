@@ -79,6 +79,7 @@ test_dir  = "data/images/images/image_test"
 size = [128, 128]  # Taille des images
 batch_size = 32    # Réduire sipython -m main.train_model --compare-all OOM
 cache_enabled = true
+ext = ".jpg"
 
 [images.dim_reduction]
 # Activer une PCA légère pour accélérer
