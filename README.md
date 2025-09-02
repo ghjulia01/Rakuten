@@ -522,50 +522,50 @@ Combiner **Texte** + **Image** (**Pixels** *ou* **CNN**) + **Stats d’image** d
 Architecture du projet
 
 
--├── data/
--│ ├── X_train_update.csv
--│ ├── Y_train_CVw08PX.csv
--│ └── X_test_update.csv
--│
--├── data/images/images/
--│ ├── image_train/ # images d'entraînement
--│ └── image_test/ # images de test
--│
--├── features/
--│ ├── config.toml # configuration centrale (texte, images, sampling, model, cv…)
--│ └── make_cleaned_frequencies_and_map.py
--│
--├── models/ # transformeurs & pipelines
--│ ├── text_cleaner.py
--│ ├── text_vectorizer.py
--│ ├── text_features.py # HasDescription, DesignationLength, TextStatistics, LanguageDetector
--│ ├── text_pipeline.py
--│ ├── image_loader.py
--│ ├── image_stats.py # ImageStatsFeaturizer
--│ ├── image_pipeline.py # pixels → flatten → (PCA)
--│ └── cnn_features.py # embeddings ResNet → L2 → (SVD)
--│
--├── main/
--│ └── train_model.py # orchestration (baselines, CV, pipeline complet, compare)
--│
--├── results/
--│ ├── baseline_results_summary.csv
--│ ├── compare_cv_results.csv
--│ ├── predictions_test.csv
--│ └── figures/
--│ ├── baseline_f1_macro.png
--│ └── confusion_matrix_b4.png
--│
--├── reports/
--│ └── report_b*_cv.txt
--│
--├── tools/ # scripts de reporting
--│ ├── plot_baselines.py
--│ ├── plot_baseline_bars.py
--│ ├── plot_confusion_matrix.py
--│ ├── generate_requirements.py # génère un requirements.txt depuis l’environnement courant
--│ └── compare_models.py # comparaisons & visus globales
--└── README.md
+- ├── data/
+- │ ├── X_train_update.csv
+- │ ├── Y_train_CVw08PX.csv
+- │ └── X_test_update.csv
+- │
+- ├── data/images/images/
+- │ ├── image_train/ # images d'entraînement
+- │ └── image_test/ # images de test
+- │
+- ├── features/
+- │ ├── config.toml # configuration centrale (texte, images, sampling, model, cv…)
+- │ └── make_cleaned_frequencies_and_map.py
+- │
+- ├── models/ # transformeurs & pipelines
+- │ ├── text_cleaner.py
+- │ ├── text_vectorizer.py
+- │ ├── text_features.py # HasDescription, DesignationLength, TextStatistics, LanguageDetector
+- │ ├── text_pipeline.py
+- │ ├── image_loader.py
+- │ ├── image_stats.py # ImageStatsFeaturizer
+- │ ├── image_pipeline.py # pixels → flatten → (PCA)
+- │ └── cnn_features.py # embeddings ResNet → L2 → (SVD)
+- │
+- ├── main/
+- │ └── train_model.py # orchestration (baselines, CV, pipeline complet, compare)
+- │
+- ├── results/
+- │ ├── baseline_results_summary.csv
+- │ ├── compare_cv_results.csv
+- │ ├── predictions_test.csv
+- │ └── figures/
+- │ ├── baseline_f1_macro.png
+- │ └── confusion_matrix_b4.png
+- │
+- ├── reports/
+- │ └── report_b*_cv.txt
+- │
+- ├── tools/ # scripts de reporting
+- │ ├── plot_baselines.py
+- │ ├── plot_baseline_bars.py
+- │ ├── plot_confusion_matrix.py
+- │ ├── generate_requirements.py # génère un requirements.txt depuis l’environnement courant
+- │ └── compare_models.py # comparaisons & visus globales
+- └── README.md
 
 
 #### G — Baselines & Protocole d’évaluation
