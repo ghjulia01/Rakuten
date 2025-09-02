@@ -1,2 +1,22 @@
 /data/images/
 data/images/
+Scripts perso.raku
+/venv/
+/.venv*/
+
+# caches / artefacts locaux
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Données lourdes (adapte si besoin)
+data/images/
+data/raw/
+
+# OS
+.DS_Store
+Thumbs.db

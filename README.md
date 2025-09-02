@@ -534,6 +534,15 @@ python -m main.train_model --config features/config.toml --model svc
 
 #### I- Visualisations & Rapports
 
+python -m main.train_model --compare-all
+
+# Comparaison complète avec toutes les visualisations
+python -m tools.compare_models --all
+
+# Ou sélectivement
+python -m tools.compare_models --confusion
+python -m tools.compare_models --baselines
+
 - ##### 1) Barres (une métrique) – F1 macro par défaut
 python tools/plot_baselines.py
 ###### autre métrique & sortie
@@ -549,6 +558,7 @@ python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2
 
 ###### Multimodal (B4), 5 folds, non normalisée, top 30
+
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b4 --splits 5 --normalize false --topk 30
 
 

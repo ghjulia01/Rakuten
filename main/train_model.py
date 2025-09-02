@@ -48,18 +48,26 @@ python -m main.train_model --config features/config.toml --compare
 """
 
 # === Importer les bibliothèques standard et ML ==================================
+# === Importer les bibliothèques standard et ML ==================================
 import os
+import re
+import time
 import argparse
 import joblib
-import time
+import json
 import random
 from collections import Counter
 from pathlib import Path
+import logging
+import toml
+from typing import Dict, Any, Union, Optional, Tuple, List
+from tqdm.auto import tqdm
 
 import numpy as np
 import pandas as pd
 
 from sklearn.dummy import DummyClassifier
+from sklearn.pipeline import Pipeline  # Ajout de l'import manquant
 from sklearn.pipeline import make_pipeline, Pipeline as SkPipeline, FeatureUnion
 from sklearn.decomposition import PCA
 from sklearn.metrics import f1_score, classification_report
@@ -67,12 +75,65 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_va
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
-from sklearn.base import BaseEstimator
 
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
-from imblearn.base import SamplerMixin
+from imblearn.base import BaseSampler
+
+# Importer nos modules personnalisés
+from features.image_loader import ImageLoader
+from models.text_pipeline import create_text_pipeline_from_cfg
+from models.image_pipeline import create_image_pipeline
+from models.image_pipeline import create_image_pipeline_from_cfg 
+from features.image_stats import ImageStatsFeaturizer
+from models.image_pipeline import diagnostic_reduction
+from models.cnn_features import CNNFeaturizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.preprocessing import Normalizer
+
+# Configuration du logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('training.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Importer ImageLoader depuis le module features
+
+def validate_config(cfg: Dict[str, Any]) -> None:
+    """
+    Valide la configuration en vérifiant la présence des sections requises.
+    
+    Args:
+        cfg: Dictionnaire de configuration chargé depuis le fichier TOML
+        
+    Raises:
+        ValueError: Si une section requise est manquante
+    """
+    required = ['paths', 'model', 'compute']
+    for key in required:
+        if key not in cfg:
+            raise ValueError(f"Configuration manquante: {key}")
+            
+def train_model(config_path: str = "features/config.toml"):
+    """Entraîne le modèle avec la configuration spécifiée."""
+    logger.info("Chargement de la configuration...")
+    
+    try:
+        with open(config_path) as f:
+            config = toml.load(f)
+        validate_config(config)  # Validation après chargement
+        logger.debug("Configuration validée avec succès")
+    except Exception as e:
+        logger.error(f"Erreur de configuration: {e}")
+        raise
+
 
 # === Définir le chemin par défaut du TOML ======================================
 # Définir un chemin par défaut vers features/config.toml (relatif à ce fichier)
@@ -92,12 +153,6 @@ def load_config(config_path: str | Path | None = None) -> dict:
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
     return cfg
-
-# === Importer les pipelines texte / image et le featurizer de stats ============
-# Importer les fabriques de branches (définies ailleurs dans le repo)
-from models.text_pipeline import create_text_pipeline_from_cfg           # construire la branche texte
-from models.image_pipeline import create_image_pipeline          # construire la branche pixels
-from features.image_stats import ImageStatsFeaturizer            # extraire des stats d'objets
 
 
 # === Initialiser les graines de hasard (reproductibilité) =======================
@@ -129,10 +184,6 @@ def make_sampling_strategies(y_train: pd.Series,
 
 
 # === Définir un under-sampler adaptatif (CV-safe) ===============================
-import numpy as np
-from imblearn.base import BaseSampler
-from collections import Counter
-from imblearn.under_sampling import RandomUnderSampler
 
 class AdaptiveUnderSampler(BaseSampler):
     """
@@ -167,7 +218,7 @@ class AdaptiveUnderSampler(BaseSampler):
             for cls, n in cnt.items()
         }
 
-        # déléguer à RandomUnderSampler (API publique)
+        # déléguer à RandomUnderSampler avec cette stratégie
         rus = RandomUnderSampler(
             sampling_strategy=sampling_strategy,
             random_state=self.random_state
@@ -180,113 +231,162 @@ class AdaptiveUnderSampler(BaseSampler):
     
 # === Fabriquer le classifieur à partir de la config =============================
 def build_classifier(cfg: dict, seed: int):
-    """Construire le classifieur (LR ou LinearSVC) en lisant [model] dans le TOML."""
-    model_cfg = cfg.get("model", {})
-    name = str(model_cfg.get("name", "lr")).lower()
-    use_class_weight = bool(model_cfg.get("use_class_weight", False))
-    solver = str(model_cfg.get("solver", "saga"))
-    C = float(model_cfg.get("C", 1.0))
-    max_iter = int(model_cfg.get("max_iter", 3000))
-    tol = float(model_cfg.get("tol", 1e-3))
-    ovr = bool(model_cfg.get("ovr", False))
-    cw = "balanced" if use_class_weight else None
+    """
+    Construire le classifieur final depuis la section [model] du TOML.
 
+    Support :
+      - name="lr"  -> LogisticRegression
+      - name="svc" -> LinearSVC (utile pour TF-IDF clairsemé)
+
+    Clés TOML reconnues (section [model]) :
+      name              = "lr" | "svc"
+      solver            = "saga" | "lbfgs" | "liblinear" | "newton-cg" | "sag"
+      penalty           = "l2" | "l1" | "elasticnet" | "none"
+      C                 = float
+      max_iter          = int
+      tol               = float
+      verbose           = int (0/1)
+      use_class_weight  = true/false   # -> "balanced" si true
+      fit_intercept     = true/false
+      l1_ratio          = float (0..1) # utilisé seulement si penalty="elasticnet"
+      multi_class       = "auto" | "ovr" | "multinomial"  # si omis: on laisse sklearn décider
+      ovr               = true/false   # envelopper en OneVsRestClassifier
+    """
+    model = cfg.get("model", {}) or {}
+    name  = str(model.get("name", "lr")).lower()
+
+    # lire le nombre de jobs global
+    n_jobs = int(cfg.get("compute", {}).get("n_jobs", -1))
+
+    # === LinearSVC (option texte) =============================================
     if name == "svc":
-        # Retourner un SVM linéaire (souvent performant sur TF-IDF sparse)
-        return LinearSVC(class_weight=cw)
+        cw = "balanced" if model.get("use_class_weight", False) else None
+        return LinearSVC(
+            C=float(model.get("C", 1.0)),
+            tol=float(model.get("tol", 1e-3)),
+            max_iter=int(model.get("max_iter", 2000)),
+            class_weight=cw,
+        )
 
-    # Configurer une LogisticRegression sparse-friendly (saga), 
-    # sans multi_class explicite (déprécié)
-    # Lire n_jobs depuis le TOML (section [compute])
-    n_jobs = int(cfg.get("compute", {}).get("n_jobs", 1))
+    # === LogisticRegression ====================================================
+    use_cw = bool(model.get("use_class_weight", False))
+    class_weight = "balanced" if use_cw else None
 
-    base_lr = LogisticRegression(
+    solver        = str(model.get("solver", "saga"))
+    penalty       = str(model.get("penalty", "l2"))
+    C             = float(model.get("C", 1.0))
+    max_iter      = int(model.get("max_iter", 3000))
+    tol           = float(model.get("tol", 1e-3))
+    verbose       = int(model.get("verbose", 0))
+    fit_intercept = bool(model.get("fit_intercept", True))
+
+    # multi_class : ne PAS forcer si absent (évite FutureWarning)
+    multi = model.get("multi_class", None)
+    if multi is not None:
+        multi = str(multi)
+
+    # l1_ratio : n’utiliser QUE si elasticnet (sinon éviter le warning)
+    l1_ratio = model.get("l1_ratio", None)
+    if penalty != "elasticnet":
+        l1_ratio = None
+    else:
+        l1_ratio = 0.0 if l1_ratio is None else float(l1_ratio)
+
+    # gardes-fous solver/penalty
+    if penalty == "l1" and solver not in {"liblinear", "saga"}:
+        raise ValueError("penalty='l1' nécessite solver 'liblinear' ou 'saga'.")
+    if penalty == "elasticnet" and solver != "saga":
+        raise ValueError("penalty='elasticnet' nécessite solver 'saga'.")
+
+    # construire les paramètres sans passer les clés inutiles
+    params = dict(
         solver=solver,
-        penalty="l2",
+        penalty=penalty,
         C=C,
         max_iter=max_iter,
         tol=tol,
-        class_weight=cw,
+        verbose=verbose,
+        class_weight=class_weight,
         random_state=seed,
-        n_jobs=1,
+        n_jobs=n_jobs,             # ignoré par certains solvers (OK)
+        fit_intercept=fit_intercept,
     )
-    if ovr:
-    # Envelopper en One-vs-Rest explicite et paralléliser les K classifieurs
+    if l1_ratio is not None:
+        params["l1_ratio"] = l1_ratio
+    if multi is not None and multi.lower() != "auto":
+        params["multi_class"] = multi
+
+    base_lr = LogisticRegression(**params)
+
+    # Option : envelopper en One-vs-Rest explicite
+    if bool(model.get("ovr", False)):
         from sklearn.multiclass import OneVsRestClassifier
         return OneVsRestClassifier(base_lr, n_jobs=n_jobs)
 
-    # Sinon, retourner la LR multinomiale “native”
     return base_lr
 
-
 # === Construire les pipelines baselines sans rééchantillonnage ==================
-def build_baseline_pipeline(kind: str, cfg: dict, seed: int):
+from typing import Optional
+import pandas as pd
+
+def build_baseline_pipeline(
+    kind: str,
+    cfg: dict,
+    seed: int,
+    y_train: Optional[pd.Series] = None,   # <- nouveau
+):
     """
-    Construire une pipeline baseline SANS rééchantillonnage.
-      - b0: Dummy most_frequent
-      - b1: Dummy stratified
-      - b2: Texte seul (TF-IDF -> LR)
-      - b3: Image seule (Image -> flatten -> PCA -> LR)
-    Retourner (pipe, need_cols) où need_cols est la liste des colonnes nécessaires de X.
+    Construire une pipeline baseline.
+    kind in {'b0','b1','b2','b3','b4'}
     """
     need_cols = ["designation", "description", "productid", "imageid"]
 
     if kind == "b0":
-        # Prédire toujours la classe majoritaire
         pipe = DummyClassifier(strategy="most_frequent")
-        return pipe, ["designation"]  # importer n'importe quelle colonne non vide
+        return pipe, ["designation"]
 
     if kind == "b1":
-        # Échantillonner des prédictions selon la distribution des classes
         pipe = DummyClassifier(strategy="stratified", random_state=seed)
         return pipe, ["designation"]
 
     if kind == "b2":
-        # Construire la branche texte seule (sans under/over), en lisant TOUTE la section [text]
         text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
-        
-        clf = LogisticRegression(
-            solver="saga",
-            penalty="l2",
-            C=1.0,
-            max_iter=3000,
-            tol=1e-3,
-            class_weight="balanced",
-            random_state=seed,
-            n_jobs=1,
-        )
-        pipe = SkPipeline([("text", text_branch), ("clf", clf)])
-        return pipe, need_cols
+        clf = build_classifier(cfg, seed)
+        return SkPipeline([("text", text_branch), ("clf", clf)]), ["designation", "description"]
 
     if kind == "b3":
-        # Construire la branche image seule : charger -> flatten -> PCA -> LR
-        img_size = tuple(cfg.get("images", {}).get("size", [64, 64]))
-        img_dir = cfg["images"]["train_dir"]
-        img_branch = create_image_pipeline(
-            image_dir=img_dir,
-            image_size=img_size,
-            dim_reduction={"enabled": False},  # placer la PCA juste après
-        )
-        pca_n = int(cfg.get("images", {}).get("dim_reduction", {}).get("n_components", 100))
-        img_pca = make_pipeline(img_branch, PCA(n_components=pca_n, random_state=seed))
-        clf = LogisticRegression(
-            solver="saga",
-            penalty="l2",
-            C=1.0,
-            max_iter=3000,
-            tol=1e-3,
-            class_weight="balanced",
-            random_state=seed,
-            n_jobs=1,
-        )
-        pipe = SkPipeline([("img", img_pca), ("clf", clf)])
-        return pipe, need_cols
+    # Si [images.cnn.enabled]=true → utiliser CNN, sinon pixels
+        use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
+        if use_cnn:
+            img_branch = create_cnn_branch_from_cfg(cfg["images"])
+        else:
+            img_branch = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
 
+        clf = build_classifier(cfg, seed)
+        return SkPipeline([("img", img_branch), ("clf", clf)]), ["productid", "imageid"]
+    
+    # ---------- B4 : multimodal (texte + image) avec sampling ----------
+    if kind == "b4":
+        if y_train is None:
+            raise ValueError("b4 a besoin de y_train pour calculer les stratégies d'échantillonnage.")
+        under, over = make_sampling_strategies(
+            y_train,
+            major_class=cfg["sampling"]["major_class"],
+            major_cap=cfg["sampling"]["major_cap"],
+            tail_min=cfg["sampling"]["tail_min"],
+        )
+        seed = int(cfg.get("random", {}).get("seed", 42))
+        pipe = create_combined_pipeline(cfg, under, over, seed)
+        return pipe, ["designation", "description", "productid", "imageid"]
+
+    # ---------- fin ----------
     raise ValueError(f"Baseline inconnue: {kind}")
 
 
 # === Exécuter une baseline et écrire un rapport CV ==============================
-def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict, outdir: str = "results"):
+def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="results"):
+    """Exécute la baseline avec validation croisée et diagnostics."""
+    logger.info(f"Évaluation baseline {kind}...")
     """
     Exécuter la baseline 'kind' en CV, puis écrire un résumé clair :
       - results/baseline_results_summary.csv (append)
@@ -299,17 +399,43 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
     shuffle = bool(cfg.get("cv", {}).get("shuffle", True))
     cv_seed = int(cfg.get("cv", {}).get("random_state", seed))
 
-    pipe, need_cols = build_baseline_pipeline(kind, cfg, seed)
+    pipe, need_cols = build_baseline_pipeline(kind, cfg, seed, y_train=y_train if kind=="b4" else None)
 
     # Construire une CV stratifiée
     cv = StratifiedKFold(n_splits=splits, shuffle=shuffle, random_state=cv_seed)
 
-    # Produire des prédictions out-of-fold pour obtenir un rapport global
-    t0 = time.time()
-    y_pred_cv = cross_val_predict(pipe, X_train[need_cols], y_train, cv=cv, n_jobs=1, method="predict")
-    dt = time.time() - t0
+    # ==== Prédictions OOF avec barre de progression ====
+    from sklearn.base import clone
+    import numpy as np
 
-    # Calculer les métriques
+    splits_iter = list(cv.split(X_train, y_train))
+    y_pred_cv = np.empty_like(y_train.values)
+
+    pbar = tqdm(
+    total=len(splits_iter),
+    desc=f"{kind.upper()} CV",
+    unit="fold",
+    dynamic_ncols=True,  # s’adapte à la largeur du terminal
+    leave=True
+)
+    t0_total = time.time()
+    try:
+        for fold_idx, (tr, va) in enumerate(splits_iter, 1):
+            logger.info(f"Fold {fold_idx}/{cv.get_n_splits()} | train={len(tr)} val={len(va)}")
+            logger.info("Classes train: %s", pd.Series(y_train.iloc[tr]).value_counts().to_dict())
+            logger.info("Classes val  : %s", pd.Series(y_train.iloc[va]).value_counts().to_dict())
+            t0 = time.time()
+            model = clone(pipe)
+            model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
+            y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
+            pbar.set_postfix(time=f"{time.time()-t0:.1f}s")
+            pbar.update(1)
+    finally:
+        pbar.close()
+
+    dt = time.time() - t0_total
+
+    # ==== Métriques & rapport ====
     f1_macro = f1_score(y_train, y_pred_cv, average="macro")
     f1_weighted = f1_score(y_train, y_pred_cv, average="weighted")
     report = classification_report(y_train, y_pred_cv, digits=4)
@@ -338,6 +464,158 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
     print(f"[{kind.upper()}] F1-macro={f1_macro:.4f} | F1-weighted={f1_weighted:.4f} | time={dt:.1f}s")
     print(f"> Résumé: {summary_csv}")
     print(f"> Rapport: {os.path.join(outdir, f'report_{kind}_cv.txt')}")
+    print(f"[CV] terminé ({splits} folds)")
+
+    # Ajouter monitoring
+    logger.info("Démarrage validation croisée...")
+    for i, (train_idx, val_idx) in enumerate(cv.split(X_train, y_train), start=1):
+        logger.info(f"Fold {i}/{cv.get_n_splits()} | train={len(train_idx)} val={len(val_idx)}")
+        logger.info("Classes train: %s", pd.Series(y_train.iloc[train_idx]).value_counts().to_dict())
+        logger.info("Classes val  : %s", pd.Series(y_train.iloc[val_idx]).value_counts().to_dict())
+        X_fold = X_train.iloc[train_idx]
+        y_fold = y_train.iloc[train_idx]
+        logger.info(f"Distribution classes fold {i+1}: {pd.Series(y_fold).value_counts()}")
+
+    # ---- Diagnostics (pour baselines images) ----
+    if kind in ("b3", "b4"):
+        logger.info("Exécution diagnostics baseline %s...", kind.upper())
+        sample_size = min(1000, len(X_train))
+        sample_idx = np.random.choice(len(X_train), sample_size, replace=False)
+        X_sample = X_train.iloc[sample_idx]
+        y_sample = y_train.iloc[sample_idx]
+
+    # Entraîner un modèle sur l'échantillon pour diagnostiquer
+        pipe.fit(X_sample[need_cols], y_sample)
+
+    # 1) Diagnostic réduction (PCA / SVD)
+        info = diagnostic_reduction(pipe)
+        logger.info("Diagnostic réduction (%s): %s", kind.upper(), info)
+
+    # 2) Autres diagnostics (classes prédites, proba, F1 sur l'échantillon)
+        diags = diagnostic_baseline(pipe, X_sample[need_cols], y_sample)
+        diags["reduction_info"] = info
+
+    # 2bis) Diagnostic CNN (si présent)
+        try:
+            feat_union = pipe.named_steps.get("features") if "features" in pipe.named_steps else None
+            if feat_union is not None:
+                for name, sub in feat_union.transformer_list:
+                    if name == "image_cnn" and "cnn" in sub.named_steps:
+                        cnn = sub.named_steps["cnn"]
+                        if hasattr(cnn, "get_diagnostics"):
+                            diags["cnn_info"] = cnn.get_diagnostics()
+                            logger.info("Diagnostic CNN: %s", diags["cnn_info"])
+        except Exception as e:
+            logger.warning("Impossible d'extraire le diagnostic CNN: %s", e)
+
+    # 3) Sauvegarder
+        diag_path = os.path.join(outdir, f"diagnostics_{kind}.json")
+        with open(diag_path, "w") as f:
+            json.dump(diags, f, indent=2)
+        logger.info("Diagnostics sauvegardés: %s", diag_path)
+
+def diagnostic_baseline(
+    pipe: Union[Pipeline, ImbPipeline],
+    X_sample: pd.DataFrame,
+    y_sample: pd.Series,
+    outdir: str = "results"
+) -> Dict[str, Any]:
+    """
+    Effectue des diagnostics sur le pipeline.
+    
+    Args:
+        pipe: Pipeline entraîné (sklearn ou imblearn)
+        X_sample: Échantillon de données
+        y_sample: Labels correspondants
+        outdir: Dossier de sortie des résultats
+        
+    Returns:
+        Dict contenant les métriques de diagnostic
+    """
+    logger.info("Exécution diagnostics pipeline...")
+    
+    diagnostics = {}
+    
+    try:
+        # 1. Vérification réduction dimension
+        if hasattr(pipe, "named_steps"):
+            for step_name, step in pipe.named_steps.items():
+                if hasattr(step, "explained_variance_ratio_"):
+                    var_ratio = step.explained_variance_ratio_.sum()
+                    diagnostics[f"{step_name}_variance_explained"] = var_ratio
+                    logger.info(f"Variance expliquée {step_name}: {var_ratio:.2%}")
+
+        # 1. Vérification réduction dimension SVD
+        if 'svd' in pipe.named_steps:
+            svd = pipe.named_steps['svd']
+            var_ratio = svd.explained_variance_ratio_.sum()
+            diagnostics["variance_explained"] = float(var_ratio)
+            logger.info(f"Variance expliquée SVD: {var_ratio:.2%}")
+        
+        # 2. Test prédictions
+        y_pred = pipe.predict(X_sample)
+        unique_classes = np.unique(y_pred)
+        diagnostics["n_predicted_classes"] = len(unique_classes)
+        diagnostics["predicted_classes"] = unique_classes.tolist()
+        logger.info(f"Classes uniques prédites: {unique_classes}")
+        
+        # 3. Vérification probabilités
+        if hasattr(pipe, "predict_proba"):
+            probs = pipe.predict_proba(X_sample)
+            max_prob = float(probs.max())
+            mean_prob = float(probs.mean())
+            diagnostics["max_probability"] = max_prob
+            diagnostics["mean_probability"] = mean_prob
+            logger.info(f"Probabilité max: {max_prob:.3f}, moyenne: {mean_prob:.3f}")
+            
+        # 4. Calcul F1-score sur échantillon
+        if y_sample is not None:
+            f1_macro = f1_score(y_sample, y_pred, average='macro')
+            diagnostics["sample_f1_macro"] = float(f1_macro)
+            logger.info(f"F1-macro sur échantillon: {f1_macro:.4f}")
+        
+        return diagnostics
+        
+    except Exception as e:
+        logger.error(f"Erreur durant diagnostic: {e}")
+        return {"error": str(e)}
+
+# === Construire la branche CNN depuis la config =================================
+# (avec post-réduction optionnelle)    
+def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
+    """
+    Construire la branche CNN (embedding ResNet) depuis [images.cnn] du TOML.
+    Support : post-réduction optionnelle (TruncatedSVD) + normalisation L2.
+    """
+    cnn_cfg = images_cfg.get("cnn", {}) or {}
+    if not bool(cnn_cfg.get("enabled", False)):
+        raise ValueError("CNN demandée mais [images.cnn.enabled] est false dans le TOML.")
+
+    image_dir = images_cfg["train_dir"]
+    featurizer = CNNFeaturizer(
+        image_dir=image_dir,
+        arch=str(cnn_cfg.get("arch", "resnet50")),
+        batch_size=int(cnn_cfg.get("batch_size", 16)),
+        device=str(cnn_cfg.get("device", "auto")),
+        use_imagenet_norm=bool(cnn_cfg.get("use_imagenet_norm", True)),
+        fallback_zero=bool(cnn_cfg.get("fallback_zero", True)),
+        dtype=str(cnn_cfg.get("dtype", "float32")),
+    )
+
+    steps = [("cnn", featurizer)]
+
+    dr = cnn_cfg.get("dim_reduction", {}) or {}
+    if bool(dr.get("enabled", False)):
+        n_comp = int(dr.get("n_components", 256))
+        rs = int(dr.get("random_state", 42))
+        steps += [
+            ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
+            ("l2norm", Normalizer(copy=False)),
+        ]
+    else:
+        steps += [("l2norm", Normalizer(copy=False))]
+
+    return SkPipeline(steps)
 
 
 # === Construire la pipeline multimodale complète ================================
@@ -346,17 +624,21 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
     # Utiliser la fabrique qui lit directement toutes les options depuis [text]
     text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
 
-    # Construire la branche IMAGES (pixels)
+    # Construire la branche IMAGES (pixels) depuis le TOML
+    image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
+
+    # On garde image_train_dir pour la branche "stats" (si activée)
     image_train_dir = cfg["images"]["train_dir"]
-    image_size = tuple(cfg.get("images", {}).get("size", [64, 64]))
-    image_pixels = create_image_pipeline(
-        image_dir=image_train_dir,
-        image_size=image_size,
-        dim_reduction=cfg.get("images", {}).get("dim_reduction", {}),
-    )
 
     # Ajouter éventuellement la branche IMAGES (stats)
     transformers = [("text", text_branch), ("image_pixels", image_pixels)]
+    # Ajouter éventuellement la branche CNN
+    try:
+        if bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False)):
+            image_cnn = create_cnn_branch_from_cfg(cfg["images"])
+            transformers.append(("image_cnn", image_cnn))
+    except Exception as e:
+        logger.warning("CNN désactivée (raison: %s)", e)
     stats_cfg = cfg.get("images", {}).get("stats", {})
     if bool(stats_cfg.get("enabled", False)):
         image_stats = ImageStatsFeaturizer(
@@ -371,7 +653,9 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
         transformers.append(("image_stats", image_stats))
 
     # Fusionner les branches
-    features = FeatureUnion(transformer_list=transformers)
+    fusion_weights = (cfg.get("fusion", {}) or {}).get("weights", None)
+    features = FeatureUnion(transformer_list=transformers,
+                            transformer_weights=fusion_weights)
 
     # Construire le classifieur final
     model = build_classifier(cfg, seed)
@@ -402,6 +686,7 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
     )
 
     # Construire la pipeline complète
+    seed = int(cfg.get("random", {}).get("seed", 42))
     pipe = create_combined_pipeline(cfg, under, over, seed)
 
     # Entraîner la pipeline
@@ -430,6 +715,15 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
         elif name == "image_stats":
             if hasattr(sub, "set_image_dir"):
                 sub.set_image_dir(image_test_dir)
+            new_list.append((name, sub))
+        elif name == "image_cnn":
+            # sub est une sklearn.Pipeline ; le featurizer est 'cnn'
+            if "cnn" in sub.named_steps:
+                cnn = sub.named_steps["cnn"]
+                if hasattr(cnn, "set_image_dir"):
+                    cnn.set_image_dir(image_test_dir)
+                else:
+                    cnn.image_dir = image_test_dir
             new_list.append((name, sub))
         else:
             new_list.append((name, sub))
@@ -496,8 +790,10 @@ def parse_args():
     p = argparse.ArgumentParser(description="Entraîner la pipeline texte+image avec rééchantillonnage ; comparer LR vs SVC en option")
     p.add_argument("--config", default=str(DEFAULT_CFG), help="Chemin vers le TOML (défaut: features/config.toml)")
     p.add_argument("--compare", action="store_true", help="Comparer LR vs SVC via CV sur X_train (F1-macro)")
-    p.add_argument("--baseline", choices=["b0", "b1", "b2", "b3"], help="Exécuter une baseline simple et sortir")
+    p.add_argument("--baseline", choices=["b0", "b1", "b2", "b3", "b4"], help="Exécuter une baseline simple et sortir")
     p.add_argument("--model", choices=["lr", "svc"], default=None, help="Forcer le modèle (écraser [model].name dans le TOML)")
+    p.add_argument("--compare-all", action="store_true", 
+                  help="Compare tous les modèles (B0-B4) et génère des graphiques")
     return p.parse_args()
 
 
@@ -506,9 +802,14 @@ def main():
     # Lire les arguments et la configuration
     args = parse_args()
     cfg = load_config(args.config) # Charger le TOML
+    validate_config(cfg)
     # Si --model est fourni, écraser le nom du modèle de la config
     if args.model:
         cfg.setdefault("model", {})["name"] = args.model
+    if args.compare_all:
+        from tools.compare_models import compare_all_models
+        compare_all_models()
+        return
 
     # Initialiser les graines pour la reproductibilité
     seed = int(cfg.get("random", {}).get("seed", 42))
@@ -541,6 +842,7 @@ def main():
         os.makedirs(os.path.dirname(out_cmp), exist_ok=True)
         df_cmp.to_csv(out_cmp, index=False)
         print(f">> Sauvegarder les résultats de comparaison : {out_cmp}")
+        return
 
     # Entraîner la pipeline complète et prédire sur X_test
     pipe, y_pred = train_and_predict_on_test(X_train[needed], y_train, X_test[needed], cfg)

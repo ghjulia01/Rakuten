@@ -30,19 +30,44 @@ seed = 42
 [compute]
 # Fixer le parallélisme (mettre 1 pour un debug plus lisible)
 # Utiliser plusieurs jobs en production si la machine le permet
-n_jobs = 1
+n_jobs = -1
 
 # --- Réglages branche texte
 [text]
-max_features = 40000  # monter à 100000 si l'ordi le permet
+max_features = 80000  # monter à 100000 si l'ordi le permet
 ngram_min = 1
-ngram_max = 2
-min_df = 2        # valeurs “prod” 2, valeurs “test” 0,
+ngram_max = 3
+min_df = 3        # valeurs “prod” 2, valeurs “test” 0,
 max_df = 0.95       # valeurs “prod” 0.95, valeurs “test” 1.0,
 sublinear_tf = true
 use_stem = true
+use_lemmatization = true
+remove_numbers = true
+strip_accents = "unicode"
 # si fichier de traduction :
 translate_map_path = "features/translate_map_starter_from_cleaned.json"
+
+# -->  "char"
+[text.char]
+enabled   = true
+analyzer  = "char_wb"   # "char" ou "char_wb" (char_wb = au niveau des mots, plus robuste au bruit)
+ngram_min = 2
+ngram_max = 6
+min_df    = 2
+max_df    = 0.95
+sublinear_tf = true
+
+# Pondération des branches (optionnel mais utile pour stabiliser)
+[text.weights]
+tfidf_word = 1.0
+tfidf_char = 0.4
+# text_stats = 0.3
+# language = 0.2
+
+[text.cleaner]
+clean_special = true
+handle_emojis = true
+use_stem = true
 
 # --- Paramètres liés aux images ---
 [images]
@@ -51,14 +76,16 @@ train_dir = "data/images/images/image_train"
 # Dossier contenant les images associées à X_test
 test_dir  = "data/images/images/image_test"
 # Taille cible des images avant vectorisation (hauteur, largeur)
-size = [32, 32]
+size = [128, 128]  # Taille des images
+batch_size = 32    # Réduire sipython -m main.train_model --compare-all OOM
+cache_enabled = true
 
 [images.dim_reduction]
 # Activer une PCA légère pour accélérer
 # Garder une PCA (80–120) pour compresser les pixels
 enabled = true
-method = "pca"          # "svd" ou "pca" (recommandé) 
-n_components = 100
+method = "pca"          # "svd" ou "pca" (recommandé) ou "truncated_svd"
+n_components = 400     # 90% de variance pour PCA, ou nombre fixe pour SVD
 random_state = 42
 
 # --- Statistiques des images ---
@@ -78,32 +105,82 @@ out_prefix = "auto"         # préfixe des noms de features (traçabilité) avan
 # Identifiant de la classe la plus fréquente
 major_class = 2583
 # Limite maximale d'échantillons pour la classe majoritaire après undersampling
-major_cap   = 6000
+major_cap   = 3000
 # Seuil minimum d'échantillons pour les petites classes après oversampling
-tail_min    = 1500
+tail_min    = 500
 
 # --- Paramètres du modèle ---
 # Choisir le modèle final (dev: LR avec saga) ; 
 # Choisir LR (saga) ou LinearSVC selon les meilleurs scores CV
 # NE PAS combiner class_weight et samplers
+
+
 [model]
-# Nom du modèle à utiliser : 'lr' (LogisticRegression) ou 'svc' (LinearSVC)
+# "lr" (LogisticRegression) ou "svc" (LinearSVC)
 name = "lr"
+
+# Pondération auto des classes
 # true  = appliquer class_weight="balanced"
 # false = class_weight=None (pas de pondération automatique des classes)
-use_class_weight = false  
-solver = "saga"
-C = 1.0
-max_iter = 3000
-tol = 0.001
-ovr = false          # passe à true pour tester One-vs-Rest
+use_class_weight = true          # si true, class_weight="balanced"
+class_weight     = "balanced"    # ignoré si use_class_weight=false
+
+# Hyperparamètres LR
+solver   = "lbfgs"                # "saga","lbfgs","liblinear","newton-cg","sag"
+# lbfgs, penalité: l2 / none, Multiclasse: oui (multinomial), Dense/Sparse plutôt dense et Quand l’utiliser: Rapide/stable sur features denses (ex: PCA images).
+# newton-cg, l2 / none, oui (multinomial), dense, Alternative à lbfgs sur dense; robuste.
+# sag,	l2 / none,	oui (multinomial),	plutôt sparse,	Grand jeu de données, seulement l2.
+# saga, l1, l2, elasticnet,  oui (multinomial), plutôt sparse, Le plus flexible (L1/EN, class_weight), très adapté au TF-IDF; peut nécessiter plus d’itérations.
+# liblinear, l1, l2, ovr uniquement,  sparse, Rapide sur petits/moyens problèmes; pas de multinomial “vrai”, pas d’elasticnet.
+penalty  = "l2"                  # "l2","l1","elasticnet","none"
+# la régularisation (contrôle la complexité du modèle) :
+# l2 (ridge) : rétrécir tous les coefficients → stable, quasi toujours un bon choix.
+# l1 (lasso) : pousse beaucoup de coefficients à 0 → sélection de variables (sparse), 
+# peut aider avec TF-IDF très haute dimension mais plus lent.
+# elasticnet : mélange l1 et l2 (il faut aussi l1_ratio entre 0 et 1).
+C        = 0.1
+max_iter = 8000
+tol      = 0.001
+verbose  = 0                     # 1..3 pour plus de logs
+#0 = silencieux (recommandé pour les runs normaux), 1 (ou plus) = affiche des messages d’entraînement (utile pour débugger une convergence lente).
+# Garder verbose=0 et passer à 1 seulement quand on veut diagnostiquer.
+multi_class = "auto"             # "auto","ovr","multinomial"
+fit_intercept = true
+l1_ratio = 0.0                   # utilisé si penalty="elasticnet"
+
+# Option enveloppe One-vs-Rest (plutôt pour liblinear)
+ovr = false
 # si ovr = true il faut garder use_class_weight = false et 
 # Continuer à rééchantillonner (under/over)
+
+# ---- SECTION CNN ---- Mettre true pour activer CNN et false pour le désactiver
+[images.cnn]
+enabled = false
+arch = "resnet50"       # "resnet18" | "resnet50" | "resnet101"
+batch_size = 16
+device = "auto"         # "auto" | "cpu" | "cuda"
+use_imagenet_norm = true
+fallback_zero = true
+dtype = "float32"
+
+[images.cnn.dim_reduction]
+enabled = false   
+method = "truncated_svd"
+n_components = 256
+random_state = 42
+
+
+# Peser la contribution texte vs image(s) sans toucher au code
+[fusion.weights]
+text  = 1.0
+image_pixels = 0.7
+image_stats  = 0.3
+image_cnn = 1.2
 
 # Paramètres pour la génération de fréquences et translate_map
 [text.vocab_build]
 top_k   = 20000            # ← nombre de tokens candidats triés par fréquence
-max_new = 400              # ← nb max de “placeholders” auto ajoutés (EN/DE)
+max_new = 800              # ← nb max de “placeholders” auto ajoutés (EN/DE)
 
 # --- Paramètres de la validation croisée ---
 [cv]

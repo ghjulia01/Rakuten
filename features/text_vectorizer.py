@@ -30,7 +30,8 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
         lowercase: bool = False,                # déjà en minuscules via TextCleaner
         token_pattern: str = r"(?u)\b\w+\b",
         dtype: Union[str, np.dtype] = "float64",
-        stop_words: StopWords = None,           # <-- AJOUT
+        stop_words: StopWords = None,
+        analyzer: str = "word",   # "word" | "char" | "char_wb"       
     ):
         # stocker explicitement chaque paramètre (clone-friendly)
         self.max_features = max_features
@@ -43,7 +44,8 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
         self.lowercase = lowercase
         self.token_pattern = token_pattern
         self.dtype = dtype
-        self.stop_words = stop_words            # <-- AJOUT
+        self.stop_words = stop_words
+        self.analyzer = analyzer           
 
         self.vectorizer: Optional[TfidfVectorizer] = None
 
@@ -59,9 +61,10 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
             norm=self.norm,
             strip_accents=self.strip_accents,
             lowercase=self.lowercase,
-            token_pattern=self.token_pattern,
+            analyzer=self.analyzer,
+            token_pattern=(None if self.analyzer != "word" else self.token_pattern),
             dtype=dtype,
-            stop_words=self.stop_words,         # <-- AJOUT
+            stop_words=self.stop_words,         
         )
 
     def fit(self, X, y=None):
@@ -93,6 +96,7 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
             "token_pattern": self.token_pattern,
             "dtype": self.dtype,
             "stop_words": self.stop_words,
+            "analyzer": self.analyzer,
         }
 
     def set_params(self, **params):

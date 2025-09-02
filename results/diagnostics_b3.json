@@ -1,0 +1,15 @@
+{
+  "n_predicted_classes": 1,
+  "predicted_classes": [
+    2583
+  ],
+  "max_probability": 0.04545758963386349,
+  "mean_probability": 0.03703703703703703,
+  "sample_f1_macro": 0.007995506657415666,
+  "reduction_info": {
+    "reducer_name": "pca",
+    "reducer_type": "PCA",
+    "n_components": 400,
+    "explained_variance_ratio_sum": NaN
+  }
+}

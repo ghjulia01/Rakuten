@@ -41,11 +41,11 @@ NEEDED_COLS  = ["productid", "imageid"]
 
 # Grille par défaut (tu peux changer ici)
 IMAGE_SIZES      = [(64, 64), (128, 128), (224, 224)]
-N_COMPONENTS_GRID = [50, 100, 200, 400]
-DIMRED_METHOD     = "svd"  # "svd" (TruncatedSVD, recommandé) ou "pca" (dense)
+N_COMPONENTS_GRID = [100, 150, 200, 400]
+DIMRED_METHOD     = "pca"  # "svd" (TruncatedSVD, recommandé) ou "pca" (dense)
 
 # Sous-échantillonnage optionnel pour aller plus vite (None = tout garder)
-SAMPLE_MAX = None  # ex: 10000
+SAMPLE_MAX = 10000  # ex: 10000 ou  None pour tout garder
 
 # =========================
 # 1) Lecture config + données (chemins robustes)
@@ -85,6 +85,35 @@ X_train = pd.read_csv(X_TRAIN_CSV, index_col=0)
 y_train = pd.read_csv(Y_TRAIN_CSV, index_col=0).squeeze()
 X_test  = pd.read_csv(X_TEST_CSV,  index_col=0)
 
+# --- Adapter 'imageid' au nom réel des fichiers: image_{imageid}_product_{productid}.jpg ---
+from pathlib import Path
+
+def _to_int_str(x):
+    """Nettoie l'ID (ex: '00123'/'123.0' -> '123')."""
+    try:
+        return str(int(float(str(x).strip())))
+    except Exception:
+        return str(x).strip()
+
+def _compose_stem(row):
+    # on génère le *stem* (sans extension)
+    iid = _to_int_str(row["imageid"])
+    pid = _to_int_str(row["productid"])
+    return f"image_{iid}_product_{pid}"
+
+# On ne garde que les colonnes utiles et on transforme 'imageid'
+X_train = X_train[["productid", "imageid"]].copy()
+X_test  = X_test[["productid", "imageid"]].copy()
+
+X_train["imageid"] = X_train.apply(_compose_stem, axis=1)
+X_test["imageid"]  = X_test.apply(_compose_stem,  axis=1)
+
+# (debug rapide) vérifier que le tout premier chemin existe bien
+from pathlib import Path
+_sample = Path(IMG_DIR_TRAIN) / f"{X_train['imageid'].iloc[0]}.jpg"
+print("[debug] sample image exists?:", _sample, _sample.exists())
+
+# ----------------------------------------
 for c in NEEDED_COLS:
     if c not in X_train.columns or c not in X_test.columns:
         raise ValueError(f"Colonne manquante '{c}' dans X_train/X_test.")
@@ -151,8 +180,7 @@ def bench_one_combo(image_size: tuple[int, int], n_components: int, method: str)
         image_dir=IMG_DIR_TEST, image_size=(H, W), dim_reduction=dimred_cfg
     )
     pipe_test = FeatureUnion([("image_pixels", img_branch_test)])
-    _ = pipe_test.fit_transform(X_test[NEEDED_COLS].head(5))
-
+    _ = pipe.transform(X_test[NEEDED_COLS].head(5))  # juste pour vérifier que ça passe
     print(f"      F1-macro={f1:.4f} | temps={dur:.1f}s")
     return {
         "image_size": f"{H}x{W}",
@@ -165,15 +193,16 @@ def bench_one_combo(image_size: tuple[int, int], n_components: int, method: str)
         "n_val": len(X_val),
     }
 
+import traceback  # <-- ajoute cet import en haut si absent
+
 results = []
 print("\n[run] Grid search tailles × n_components")
 for (H, W) in IMAGE_SIZES:
     for n_comp in N_COMPONENTS_GRID:
-        try:
-            res = bench_one_combo((H, W), n_comp, DIMRED_METHOD)
-            results.append(res)
-        except Exception as e:
-            print(f"   !! échec size={H}x{W} n_comp={n_comp}: {e}")
+        # --- enlever le try/except pour voir l'erreur réelle ---
+        print(f"   -> size={H}x{W} | n_comp={n_comp} | method={DIMRED_METHOD}")
+        res = bench_one_combo((H, W), n_comp, DIMRED_METHOD)
+        results.append(res)
 
 df = pd.DataFrame(results)
 print("\n=== Résultats (aperçu) ===")
