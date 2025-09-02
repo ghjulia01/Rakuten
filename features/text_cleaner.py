@@ -105,7 +105,9 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         use_stem: bool = True,
         stem_langs: Tuple[str, ...] = SUPPORTED_LANGUAGES,
         clean_special: bool = True,
-        handle_emojis: bool = True
+        handle_emojis: bool = True,
+        remove_numbers: bool = False,
+        use_lemmatization: bool = False,
     ):
         # Validation des langues supportées
         if not all(lang in SnowballStemmer.languages for lang in stem_langs):
@@ -120,6 +122,8 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         self.stem_langs = stem_langs
         self.clean_special = clean_special
         self.handle_emojis = handle_emojis
+        self.remove_numbers = remove_numbers
+        self.use_lemmatization = use_lemmatization
         
         # Initialisation des stemmers
         self._stemmers = {
@@ -141,6 +145,7 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         """
         # Log des paramètres
         logger.info(f"Fitting TextCleaner with parameters: stem={self.use_stem}, "
+                    f"TextCleaner: translate_map_path={self.translate_map_path} (n={len(self._translate_map)})",
                    f"clean_special={self.clean_special}, langs={self.stem_langs}")
         
         # Initialisation du dictionnaire de traduction
@@ -192,6 +197,8 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         """Normalisation basique du texte."""
         text = text.lower()
         text = re.sub(f"[{re.escape(string.punctuation)}]", " ", text)
+        if self.remove_numbers:
+            text = re.sub(r'\d+', ' ', text)
         return re.sub(r"\s+", " ", text).strip()
 
     def clean_text(self, text: str) -> str:
@@ -231,6 +238,14 @@ class TextCleaner(BaseEstimator, TransformerMixin):
                             for stemmer in self._stemmers.values()]
                     stemmed.append(min(forms, key=len))
                 tokens = stemmed
+            # (Optionnel) Lemmatization — placeholder : à activer/implémenter au besoin
+            # if self.use_lemmatization:
+            #     try:
+            #         from nltk.stem import WordNetLemmatizer
+            #         lemmatizer = WordNetLemmatizer()
+            #         tokens = [lemmatizer.lemmatize(t) for t in tokens]
+            #     except ImportError:
+            #         logger.warning("WordNetLemmatizer non disponible. Ignorer la lemmatization.")
 
             return " ".join(tokens) if tokens else "__empty__"
 

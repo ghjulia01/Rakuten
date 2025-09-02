@@ -96,19 +96,25 @@ def _coerce_df_param(val: Any, *, is_max: bool = False) -> float | int:
 
 def create_text_pipeline(
     *,
-    # Paramètres de nettoyage
+    # 1) Cleaner
     translate_map_path: Optional[str] = None,
     use_stem: bool = True,
-    # Paramètres TF-IDF
+    clean_special: bool = True,
+    handle_emojis: bool = True,
+    remove_numbers: bool = False,
+    use_lemmatization: bool = False,   # exposé pour usage ultérieur si besoin
+
+    # 2) TF-IDF (branche word)
     max_features: int = 100_000,
     ngram_min: int = 1,
-    ngram_max: int = 3,
-    min_df: float | int = 3,
-    max_df: float | int = 0.95,
+    ngram_max: int = 2,
+    min_df: int | float = 2,
+    max_df: int | float = 0.95,
     sublinear_tf: bool = True,
     norm: str = "l2",
-    strip_accents: Optional[str] = "unicode",
-    # Features additionnelles
+    strip_accents: str | None = "unicode",  # None | "ascii" | "unicode"
+
+    # 3) Features additionnelles
     use_language_detection: bool = True,
     use_text_stats: bool = True,
 ) -> FeatureUnion:
@@ -136,6 +142,9 @@ def create_text_pipeline(
             remove_html=True,
             translate_map_path=translate_map_path,
             use_stem=use_stem,
+            clean_special=clean_special,
+            handle_emojis=handle_emojis,
+            remove_numbers=remove_numbers,
         ),
         TextTfidfVectorizer(
             analyzer="word",
@@ -172,12 +181,25 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
 
     # 1) Construire la branche "word" complète (avec ses sous-transformeurs)
     word_branch = create_text_pipeline(
+        # cleaner
+        translate_map_path=cfg_text.get("translate_map_path", None),
+        use_stem=cfg_text.get("use_stem", True),
+        clean_special=cfg_text.get("clean_special", True),
+        handle_emojis=cfg_text.get("handle_emojis", True),
+        remove_numbers=cfg_text.get("remove_numbers", False),
+        use_lemmatization=cfg_text.get("use_lemmatization", False),
+        # tfidf
         max_features=cfg_text.get("max_features", 100_000),
         ngram_min=cfg_text.get("ngram_min", 1),
-        ngram_max=cfg_text.get("ngram_max", 3),
-        use_stem=cfg_text.get("use_stem", True),
+        ngram_max=cfg_text.get("ngram_max", 2),
+        min_df=cfg_text.get("min_df", 2),
+        max_df=cfg_text.get("max_df", 0.95),
+        sublinear_tf=cfg_text.get("sublinear_tf", True),
+        norm=cfg_text.get("norm", "l2"),
+        strip_accents=cfg_text.get("strip_accents", "unicode"),
+        # features additionnelles
         use_language_detection=cfg_text.get("use_language_detection", True),
-        use_text_stats=cfg_text.get("use_text_stats", True)
+        use_text_stats=cfg_text.get("use_text_stats", True),
     )
 
     # 2) Optionnel : ajouter la branche caractères
@@ -187,13 +209,24 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
         char_cfg = cfg_text["char"]
         logger.info("Ajout du pipeline de caractères...")
         char_pipeline = make_pipeline(
-            TextCleaner(use_stem=False),
+            TextCleaner(
+                use_stem=False,
+                translate_map_path=cfg_text.get("translate_map_path", None),
+                clean_special=cfg_text.get("clean_special", True),
+                handle_emojis=cfg_text.get("handle_emojis", True),
+                remove_numbers=cfg_text.get("remove_numbers", False),
+            ),
             TextTfidfVectorizer(
-                analyzer="char_wb",
-                ngram_range=(int(char_cfg.get("ngram_min", 2)), int(char_cfg.get("ngram_max", 6))),
+                analyzer=str(char_cfg.get("analyzer", "char_wb")),   # ← char_wb par défaut
+                ngram_range=(
+                    int(char_cfg.get("ngram_min", 2)),
+                    int(char_cfg.get("ngram_max", 6))
+                ),
                 min_df=char_cfg.get("min_df", 2),
                 max_df=char_cfg.get("max_df", 0.95),
-                sublinear_tf=True,
+                sublinear_tf=bool(char_cfg.get("sublinear_tf", True)),
+                # strip_accents est ignoré pour char en pratique, mais tu peux l'exposer :
+                strip_accents=char_cfg.get("strip_accents", None),
                 dtype=np.float64,
             ),
         )
