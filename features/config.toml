@@ -102,7 +102,7 @@ ext = ".jpg"
 [images.dim_reduction]
 # Activer une PCA légère pour accélérer
 # Garder une PCA (80–120) pour compresser les pixels
-enabled = false
+enabled = false         # Si CNN activé mettre false
 method = "pca"          # "svd" ou "pca" (recommandé) ou "truncated_svd"
 n_components = 300     # 90% de variance pour PCA, ou nombre fixe pour SVD
 random_state = 42
