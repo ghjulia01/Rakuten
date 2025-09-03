@@ -102,10 +102,33 @@ ext = ".jpg"
 [images.dim_reduction]
 # Activer une PCA légère pour accélérer
 # Garder une PCA (80–120) pour compresser les pixels
-enabled = true
+enabled = false
 method = "pca"          # "svd" ou "pca" (recommandé) ou "truncated_svd"
 n_components = 300     # 90% de variance pour PCA, ou nombre fixe pour SVD
 random_state = 42
+
+# ---- SECTION CNN ---- Mettre true pour activer CNN et false pour le désactiver
+[images.cnn]
+enabled = true
+arch = "resnet50"       # "resnet18" | "resnet50" | "resnet101"
+batch_size = 16
+device = "auto"         # "auto" | "cpu" | "cuda"
+use_imagenet_norm = true
+fallback_zero = true
+dtype = "float32"
+
+[images.cnn.dim_reduction]
+enabled = true   
+method = "truncated_svd"
+n_components = 256
+random_state = 42
+
+# Peser la contribution texte vs image(s) sans toucher au code
+[fusion.weights]
+text  = 1.0
+image_pixels = 0.7
+image_stats  = 0.3
+image_cnn = 1.2             # pris en compte si cnn =true SUPPRIMER / COMMENTER si CNN est désactivée
 
 # --- Statistiques des images ---
 # Features width/height/occupancy (hors blanc/noir)
@@ -171,30 +194,6 @@ l1_ratio = 0.0                   # utilisé si penalty="elasticnet"
 ovr = false
 # si ovr = true il faut garder use_class_weight = false et 
 # Continuer à rééchantillonner (under/over)
-
-# ---- SECTION CNN ---- Mettre true pour activer CNN et false pour le désactiver
-[images.cnn]
-enabled = false
-arch = "resnet50"       # "resnet18" | "resnet50" | "resnet101"
-batch_size = 16
-device = "auto"         # "auto" | "cpu" | "cuda"
-use_imagenet_norm = true
-fallback_zero = true
-dtype = "float32"
-
-[images.cnn.dim_reduction]
-enabled = false   
-method = "truncated_svd"
-n_components = 256
-random_state = 42
-
-
-# Peser la contribution texte vs image(s) sans toucher au code
-[fusion.weights]
-text  = 1.0
-image_pixels = 0.7
-image_stats  = 0.3
-image_cnn = 1.2             # pris en compte si cnn =true SUPPRIMER / COMMENTER si CNN est désactivée
 
 
 # Paramètres pour la génération de fréquences et translate_map

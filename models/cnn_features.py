@@ -47,7 +47,7 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         dtype: str = "float32",         # "float32" conseillé (mémoire)
     ):
         self.image_dir = image_dir
-        self.arch = arch.lower()
+        self.arch = arch
         self.batch_size = int(batch_size)
         self.device = device
         self.use_imagenet_norm = use_imagenet_norm
@@ -84,9 +84,10 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         return self._device_resolved
 
     def _build_model(self):
-        if self.arch not in ARCH_REGISTRY:
+        arch_key = str(self.arch).lower()
+        if arch_key not in ARCH_REGISTRY:
             raise ValueError(f"Architecture inconnue: {self.arch} (supportées: {list(ARCH_REGISTRY)})")
-        ctor, weights_enum, feat_dim = ARCH_REGISTRY[self.arch]
+        ctor, weights_enum, feat_dim = ARCH_REGISTRY[arch_key]
         weights = weights_enum
         model = ctor(weights=weights)
         # retirer la dernière couche de classification → embedding
