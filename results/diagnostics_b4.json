@@ -33,9 +33,21 @@
   "mean_probability": 0.037037037037037035,
   "sample_f1_macro": 1.0,
   "reduction_info": {
-    "reducer_name": "pca",
-    "reducer_type": "PCA",
-    "n_components": 300,
-    "explained_variance_ratio_sum": 0.95269775390625
+    "reducer_name": "svd",
+    "reducer_type": "TruncatedSVD",
+    "n_components": 256,
+    "explained_variance_ratio_sum": 0.8630633354187012
+  },
+  "cnn_info": {
+    "arch": "resnet50",
+    "device": "cpu",
+    "feat_dim": 2048,
+    "batch_size": 16,
+    "use_imagenet_norm": true,
+    "n_total": 1000,
+    "n_loaded": 1000,
+    "n_missing": 0,
+    "n_failed": 0,
+    "loaded_ratio": 1.0
   }
 }
