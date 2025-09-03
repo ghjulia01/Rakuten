@@ -28,3 +28,4 @@ B2,3,0.3953149715463461,0.41368306338563926,143.198,text_only=True | image_only=
 B3,3,0.18019658283188097,0.20240232454848253,802.161,text_only=False | image_only=True | dummy=False
 B4,3,0.6173871468778162,0.6587671624258289,77.167,text_only=False | image_only=False | dummy=False
 B2,3,0.34820220855414136,0.36523154138996505,97.294,text_only=True | image_only=False | dummy=False
+B4,3,0.5394388958551678,0.5912505591610069,1328.798,text_only=False | image_only=False | dummy=False
