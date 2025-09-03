@@ -33,13 +33,14 @@ seed = 42
 # Fixer le parallélisme (mettre 1 pour un debug plus lisible)
 # Utiliser plusieurs jobs en production si la machine le permet
 n_jobs = -1
+use_cache = true
 
 # --- Réglages branche texte
 [text]
-max_features = 80000  # monter à 100000 si l'ordi le permet
+max_features = 70000  # monter à 100000 si l'ordi le permet
 ngram_min = 1
 ngram_max = 2
-min_df = 2      # valeurs “prod” 2, valeurs “test” 0,
+min_df = 5      # valeurs “prod” 2, valeurs “test” 0,
 max_df = 0.95   # valeurs “prod” 0.95, valeurs “test” 1.0,
 sublinear_tf = true
 norm = "l2"
@@ -55,15 +56,15 @@ use_lemmatization = false
 
 # Active/désactive les features additionnelles
 use_text_stats = true
-use_language_detection = true
+use_language_detection = false      #couteux en calcul
 
 # -->  "char"
 [text.char]
 enabled   = true
 analyzer  = "char_wb"   # "char" ou "char_wb" (char_wb = au niveau des mots, plus robuste au bruit)
 ngram_min = 2
-ngram_max = 6
-min_df    = 2
+ngram_max = 4
+min_df    = 5
 max_df    = 0.95
 sublinear_tf = true
 # strip_accents = null     # inutile pour char, laisser null
@@ -75,7 +76,7 @@ tfidf_char = 0.4
 has_desc   = 0.2
 title_len  = 0.2
 text_stats = 0.2         # pris en compte si use_text_stats=true
-language   = 0.1         # pris en compte si use_language_detection=true
+#language   = 0.1         # pris en compte si use_language_detection=true SUPPRIMER / COMMENTER si la détection de langue est désactivée
 
 # [text.cleaner]
 # clean_special = true

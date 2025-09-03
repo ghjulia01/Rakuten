@@ -372,6 +372,16 @@ def build_classifier(cfg: dict, seed: int):
 # === Construire les pipelines baselines sans rééchantillonnage ==================
 from typing import Optional
 import pandas as pd
+from joblib import Memory
+
+def get_cache(cfg: dict):
+    """Retourne un objet Memory si use_cache=true dans [compute], sinon None."""
+    use_cache = bool(cfg.get("compute", {}).get("use_cache", False))
+    if not use_cache:
+        return None
+    cache_dir = os.path.join(cfg["outputs"]["log_dir"], "skcache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return Memory(cache_dir)
 
 def build_baseline_pipeline(
     kind: str,
@@ -396,7 +406,16 @@ def build_baseline_pipeline(
     if kind == "b2":
         text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
         clf = build_classifier(cfg, seed)
-        return SkPipeline([("text", text_branch), ("clf", clf)]), ["designation", "description"]
+
+        cache = get_cache(cfg)
+        if cache is not None and hasattr(cache, "location"):
+            logger.info(f"Cache sklearn activé: {cache.location}")
+
+        pipe = SkPipeline(
+            [("text", text_branch), ("clf", clf)],
+            memory=cache
+        )
+        return pipe, ["designation", "description"]
 
     if kind == "b3":
     # Si [images.cnn.enabled]=true → utiliser CNN, sinon pixels
@@ -407,7 +426,16 @@ def build_baseline_pipeline(
             img_branch = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
 
         clf = build_classifier(cfg, seed)
-        return SkPipeline([("img", img_branch), ("clf", clf)]), ["productid", "imageid"]
+
+        cache = get_cache(cfg)
+        if cache is not None and hasattr(cache, "location"):
+            logger.info(f"Cache sklearn activé: {cache.location}")
+
+        pipe = SkPipeline(
+            [("img", img_branch), ("clf", clf)],
+            memory=cache
+        )
+        return pipe, ["productid", "imageid"]
     
     # ---------- B4 : multimodal (texte + image) avec sampling ----------
     if kind == "b4":
@@ -698,8 +726,16 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
 
     # Fusionner les branches
     fusion_weights = (cfg.get("fusion", {}) or {}).get("weights", None)
-    features = FeatureUnion(transformer_list=transformers,
-                            transformer_weights=fusion_weights)
+
+    cache = get_cache(cfg)
+    if cache is not None and hasattr(cache, "location"):
+        logger.info(f"Cache sklearn activé: {cache.location}")
+
+
+    features = FeatureUnion(
+        transformer_list=transformers,
+        transformer_weights=fusion_weights,
+        memory=cache)
 
     # Construire le classifieur final
     model = build_classifier(cfg, seed)
@@ -866,6 +902,13 @@ def main():
     y_train = pd.read_csv(cfg["paths"]["y_train_csv"], index_col=0).squeeze()
     X_test = pd.read_csv(cfg["paths"]["x_test_csv"], index_col=0)
 
+    # Option de downsampling via variable d'environnement
+    max_n = int(os.environ.get("RAKUTEN_MAX_N", "0"))
+    if max_n > 0:
+        X_train = X_train.iloc[:max_n].copy()
+        y_train = y_train.iloc[:max_n].copy()
+        logger.info(f"Downsampling activé: RAKUTEN_MAX_N={max_n} -> X_train={len(X_train)} y_train={len(y_train)}")
+         
     # Vérifier les colonnes nécessaires
     needed = ["designation", "description", "productid", "imageid"]
     for col in needed:

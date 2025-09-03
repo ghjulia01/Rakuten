@@ -260,7 +260,8 @@ Exploiter le texte produit (**designation** + **description**) pour **prédire l
 - **`HasDescriptionFlag`** : binaire 0/1 sur la complétude.
 - **`DesignationLength`** : longueur/compte de tokens du titre (signal de qualité de saisie).
 - **`TextStatistics`** : ratios chiffres/majuscules/ponctuation, densité moyenne de tokens, etc.
-- **`LanguageDetector`** : FR/EN/… (utile pour pondérer le stemming/stopwords ou pour l’analyse).
+- **`LanguageDetector`** : FR/EN/… (utile pour pondérer le stemming/stopwords ou pour l’analyse). Attention c'est option est couteuse et peut être désactivée depuis tomlib, il faut
+aussi penser à enlever sont poid dans la ponderation dans tomlib également.
 
 ###### 3.6) Fusion & pondération (`FeatureUnion`)
 - Fusion des sous-branches : **TF-IDF (word)**, **TF-IDF (char)**, **has_desc**, **title_len**, **text_stats**, **language**.
@@ -688,6 +689,13 @@ python tools/plot_confusion_matrix.py --config features/config.toml --baseline b
 
 #### J — Bonnes pratiques & Dépannage
 
+- ##### Tester les scripts sur des échantillons en limitant la taille du train pour un test rapide
+$env:RAKUTEN_MAX_N=20000
+python -m main.train_model --config features/config.toml --baseline b2    # exemple de script
+**Supprimer le cache pour ne pas garder d'ancien problèmes**
+Remove-Item -Recurse -Force "C:\Users\colle\Desktop\rakuten-logs\skcache"
+
+
 - ##### Fixer les seeds ([random].seed) et le parallélisme ([compute].n_jobs).
 - ##### Import models introuvable : 
 lancer depuis la racine avec python -m main.train_model ... et vérifier les __init__.py.
@@ -736,6 +744,11 @@ python -m venv .venv311
 .venv311\Scripts\activate.bat
 
 #### (Sous Linux/Mac, utilisez `source .venv311/bin/activate`)
+
+#### Choisir le fichier dans tomlib ou enregister le cache 
+Il est important de choisir le repertoire local ou mettre les logs pour ne pas créer de latence avec la synchronisation
+[outputs]
+log_dir = "C:/Users/...."
 
 ### Installer les dépendances :
 python -m pip install --upgrade pip setuptools wheel

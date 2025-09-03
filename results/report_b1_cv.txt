@@ -1,7 +1,7 @@
 === Baseline B1 — CV (n_splits=3) ===
 F1-macro     : 0.0364
 F1-weighted  : 0.0519
-Time (sec)   : 0.06
+Time (sec)   : 0.05
 
               precision    recall  f1-score   support
 
