@@ -29,3 +29,6 @@ B3,3,0.18019658283188097,0.20240232454848253,802.161,text_only=False | image_onl
 B4,3,0.6173871468778162,0.6587671624258289,77.167,text_only=False | image_only=False | dummy=False
 B2,3,0.34820220855414136,0.36523154138996505,97.294,text_only=True | image_only=False | dummy=False
 B4,3,0.5394388958551678,0.5912505591610069,1328.798,text_only=False | image_only=False | dummy=False
+B0,3,0.00794977368958972,0.025805495655937392,0.031,text_only=False | image_only=False | dummy=True
+B1,3,0.03635043126933371,0.05193151580112361,0.066,text_only=False | image_only=False | dummy=True
+B2,3,0.7050529590904112,0.7217755784741176,4535.961,text_only=True | image_only=False | dummy=False
