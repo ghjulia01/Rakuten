@@ -194,7 +194,8 @@ random_state = 42
 text  = 1.0
 image_pixels = 0.7
 image_stats  = 0.3
-image_cnn = 1.2
+image_cnn = 1.2             # pris en compte si cnn =true SUPPRIMER / COMMENTER si CNN est désactivée
+
 
 # Paramètres pour la génération de fréquences et translate_map
 [text.vocab_build]

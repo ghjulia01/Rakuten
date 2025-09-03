@@ -569,14 +569,20 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
 
     # 2bis) Diagnostic CNN (si présent)
         try:
-            feat_union = pipe.named_steps.get("features") if "features" in pipe.named_steps else None
-            if feat_union is not None:
-                for name, sub in feat_union.transformer_list:
-                    if name == "image_cnn" and "cnn" in sub.named_steps:
+            features_step = pipe.named_steps.get("features") if "features" in pipe.named_steps else None
+            if features_step is not None:
+                if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
+                    feat_union = features_step.named_steps["union"]
+                else:
+                    feat_union = features_step
+                for name, sub in getattr(feat_union, "transformer_list", []):
+                    if name == "image_cnn" and hasattr(sub, "named_steps") and "cnn" in sub.named_steps:
                         cnn = sub.named_steps["cnn"]
                         if hasattr(cnn, "get_diagnostics"):
                             diags["cnn_info"] = cnn.get_diagnostics()
                             logger.info("Diagnostic CNN: %s", diags["cnn_info"])
+                    else:
+                        logger.debug("Pas de CNN dans le transformeur '%s' — ignoré pour le diagnostic.", name)
         except Exception as e:
             logger.warning("Impossible d'extraire le diagnostic CNN: %s", e)
 
@@ -725,29 +731,32 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
         transformers.append(("image_stats", image_stats))
 
     # Fusionner les branches
-    fusion_weights = (cfg.get("fusion", {}) or {}).get("weights", None)
+    fusion_cfg = (cfg.get("fusion", {}) or {}).get("weights", None)
+    present = {name for name, _ in transformers}
+    fusion_weights = {k: v for k, v in (fusion_cfg or {}).items() if k in present} or None
 
+    # 1) union SANS memory
+    union = FeatureUnion(
+        transformer_list=transformers,
+        transformer_weights=fusion_weights
+    )
+    # Construire le classifieur final
+    model = build_classifier(cfg, seed)
+
+    # 2) enveloppe AVEC memory
     cache = get_cache(cfg)
     if cache is not None and hasattr(cache, "location"):
         logger.info(f"Cache sklearn activé: {cache.location}")
 
 
-    features = FeatureUnion(
-        transformer_list=transformers,
-        transformer_weights=fusion_weights,
-        memory=cache)
-
-    # Construire le classifieur final
-    model = build_classifier(cfg, seed)
-
     # Construire la pipeline Imbalanced-Learn
     pipe = ImbPipeline(steps=[
-        ("features", features),
+        ("features", union),
         ("under", AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)),
         ("over", RandomOverSampler(sampling_strategy=over_strategy, random_state=seed)),
         ("scaler", StandardScaler(with_mean=False)),
         ("model", model),
-    ])
+    ], memory=cache)
     return pipe
 
 
@@ -775,7 +784,13 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
 
     # Re-pointer les dossiers images vers TEST pour l'inférence
     print(">> Re-pointer les lecteurs d'images vers le dossier TEST…")
-    feat_union = pipe.named_steps["features"]
+    features_step = pipe.named_steps["features"]  # peut être une FeatureUnion OU un Pipeline
+    # Si c’est un Pipeline avec la union dedans, aller chercher la union
+    if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
+        feat_union = features_step.named_steps["union"]
+    else:
+        feat_union = features_step  # c’est la FeatureUnion directement
+
     image_test_dir = cfg["images"]["test_dir"]
 
     # Parcourir les transformeurs et mettre à jour les répertoires d'images
