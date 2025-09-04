@@ -64,6 +64,7 @@ from typing import Dict, Any, Union, Optional, Tuple, List
 from tqdm.auto import tqdm
 from datetime import datetime
 
+
 import numpy as np
 import pandas as pd
 
@@ -93,6 +94,7 @@ from models.cnn_features import CNNFeaturizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
 from logging.handlers import RotatingFileHandler
+from tools.compare_models import compare_all_models
 
 logger = logging.getLogger(__name__)
 

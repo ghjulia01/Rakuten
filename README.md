@@ -642,7 +642,9 @@ python -m main.train_model --config features/config.toml --model svc   # ou: lr
 python -m main.train_model --config features/config.toml --compare-all
 
 ###### Comparaison complète avec toutes les visualisations
-python -m tools.compare_models --all
+python -m main.train_model --config features/config.toml --compare-all
+si il y avait d'autres résultats précédemment lancer ensuite:
+python -m tools.compare_models --csv results/baseline_results_summary_latest.csv
 
 ###### Ou sélectivement
 python -m tools.compare_models --confusion

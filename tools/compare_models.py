@@ -14,6 +14,8 @@ OUT_PNG2    = Path("results") / "figures" / "compare_f1_weighted.png"
 
 def load_agg(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
+    latest = df.groupby("baseline", as_index=False).tail(1)
+    latest.to_csv("results/baseline_results_summary_latest.csv", index=False)
     df["baseline"] = df["baseline"].astype(str).str.upper()
     agg = (
         df.groupby("baseline")[["f1_macro", "f1_weighted"]]
@@ -55,6 +57,26 @@ def main():
     agg = load_agg(csv_path)
     barplot(agg, "f1_macro_mean", "f1_macro_std", "f1_macro_n", OUT_PNG1, "Baselines — F1 macro")
     barplot(agg, "f1_weighted_mean", "f1_weighted_std", "f1_weighted_n", OUT_PNG2, "Baselines — F1 weighted")
+
+def compare_all_models(csv_path: str | Path = DEFAULT_CSV) -> dict:
+    """
+    API function used by main.train_model --compare-all.
+    Loads the aggregated results CSV and writes two comparison plots.
+    Returns the output paths for convenience.
+    """
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Results CSV not found: {csv_path}")
+
+    agg = load_agg(csv_path)
+
+    # Ensure output directory exists
+    OUT_PNG1.parent.mkdir(parents=True, exist_ok=True)
+
+    barplot(agg, "f1_macro_mean",    "f1_macro_std",    "f1_macro_n",    OUT_PNG1, "Baselines — F1 macro")
+    barplot(agg, "f1_weighted_mean", "f1_weighted_std", "f1_weighted_n", OUT_PNG2, "Baselines — F1 weighted")
+
+    return {"f1_macro_png": str(OUT_PNG1), "f1_weighted_png": str(OUT_PNG2)}
 
 if __name__ == "__main__":
     main()
