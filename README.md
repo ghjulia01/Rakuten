@@ -649,17 +649,13 @@ python -m tools.compare_models --csv results/baseline_results_summary_latest.csv
 python -m tools.rapport_complet --preds results/preds_b4.csv --labels-map features/labels_map.json --theme-map features/theme_map.json
 
 
-##### 1) Barres (une métrique) – F1 macro par défaut
-python tools/plot_baselines.py
-###### autre métrique & sortie
-python tools/plot_baselines.py --metric f1_weighted --out results/figures/baseline_f1_weighted.png
+##### 1)  Barres groupées – F1 macro vs F1 pondéré
 
-##### 2) Barres groupées – F1 macro vs F1 pondéré
 python tools/plot_baseline_bars.py
 ###### imposer l’ordre : B0→B4
 python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 
-##### 3) Matrice de confusion (top-K classes)
+##### 2) Matrice de confusion (top-K classes)
 
 python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map features/labels_map.json --normalize true --topN 40 --output results/figures/confusion_b4_top40.png
 
