@@ -667,11 +667,7 @@ python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 
 ##### 3) Matrice de confusion (top-K classes)
 
-python -m tools.plot_confusion_from_csv ^
-  --csv results/preds_b2.csv ^
-  --labels-map features/labels_map.json ^
-  --normalize true --topN 30 ^
-  --output results/figures/confusion_b2_top30.png
+python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map features/labels_map.json --normalize true --topN 40 --output results/figures/confusion_b4_top40.png
 
 ###### Texte seul (B2), 3 folds, normalisée, top 25 classes
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2

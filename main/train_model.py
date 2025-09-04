@@ -373,7 +373,6 @@ def build_classifier(cfg: dict, seed: int):
 
 # === Construire les pipelines baselines sans rééchantillonnage ==================
 from typing import Optional
-import pandas as pd
 from joblib import Memory
 
 def get_cache(cfg: dict):
@@ -485,6 +484,7 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     splits_iter = list(cv.split(X_train, y_train))
     y_pred_cv = np.empty_like(y_train.values)
 
+
     pbar = tqdm(
     total=len(splits_iter),
     desc=f"{kind.upper()} CV",
@@ -518,13 +518,60 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     preds_df.to_csv(preds_path, index=True)
     print(f"> Prédictions sauvegardées: {preds_path}")
 
+    # ==== Harmoniser les types pour éviter toute surprise int/str ====
+    yt = y_train.astype(str)
+    yp = pd.Series(y_pred_cv, index=y_train.index).astype(str)
 
     # ==== Métriques & rapport ====
-    f1_macro = f1_score(y_train, y_pred_cv, average="macro")
-    f1_weighted = f1_score(y_train, y_pred_cv, average="weighted")
-    report = classification_report(y_train, y_pred_cv, digits=4)
+    from sklearn.metrics import f1_score, classification_report, precision_recall_fscore_support
+
+    f1_macro = f1_score(yt, yp, average="macro")
+    f1_weighted = f1_score(yt, yp, average="weighted")
+
+    # --- mapping lisible ---
+    labels_map_path = os.path.join("features", "labels_map.json")
+    lblmap = None
+    if os.path.exists(labels_map_path):
+        import json
+        with open(labels_map_path, "r", encoding="utf-8") as f:
+            lblmap = {str(k): v for k, v in json.load(f).items()}
+
+    # Construire un tableau de labels (dans l'ordre trié) et leurs noms lisibles
+    labels_vec = np.array(sorted(np.unique(yt)), dtype=str)
+    target_names = [lblmap.get(l, l) for l in labels_vec] if lblmap else None
+
+    # Rapports sklearn (id + lisible)
+    report = classification_report(yt, yp, labels=labels_vec, digits=4, zero_division=0)
+
+    report_readable = None
+    if target_names is not None:
+        report_readable = classification_report(
+            yt, yp, labels=labels_vec, target_names=target_names, digits=4, zero_division=0
+        )
+
+    # === Rapport par classe (CSV propre) ===
+    prec, rec, f1, supp = precision_recall_fscore_support(yt, yp, labels=labels_vec, zero_division=0)
+    per_class = pd.DataFrame({
+        "class_id": labels_vec,
+        "precision": prec,
+        "recall": rec,
+        "f1": f1,
+        "support": supp
+    }).sort_values("support", ascending=False)
 
     # Sauvegarder le résumé
+
+
+    use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
+    notes = []
+    notes.append(f"dummy={kind in ['b0','b1']}")
+    notes.append(f"text_only={kind=='b2'}")
+    notes.append(f"image_only={kind=='b3'}")
+    notes.append(f"multimodal={kind=='b4'}")
+    if kind in ['b3','b4']:
+        notes.append(f"cnn={'true' if use_cnn else 'false'}")
+    notes_str = " | ".join(notes)
+
     summary_csv = os.path.join(outdir, "baseline_results_summary.csv")
     row = pd.DataFrame([{
         "baseline": kind.upper(),
@@ -532,9 +579,11 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
         "f1_macro": f1_macro,
         "f1_weighted": f1_weighted,
         "train_infer_time_sec": round(dt, 3),
-        "notes": f"text_only={kind=='b2'} | image_only={kind=='b3'} | dummy={kind in ['b0','b1']}"
+        "notes": notes_str,
+        "timestamp": datetime.now().isoformat(timespec="seconds")
     }])
     row.to_csv(summary_csv, index=False, mode="a", header=not os.path.exists(summary_csv))
+
 
     # Sauvegarder le rapport détaillé
     with open(os.path.join(outdir, f"report_{kind}_cv.txt"), "w", encoding="utf-8") as f:
@@ -549,21 +598,13 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     print(f"> Résumé: {summary_csv}")
     print(f"> Rapport: {os.path.join(outdir, f'report_{kind}_cv.txt')}")
     print(f"[CV] terminé ({splits} folds)")
+    if report_readable is not None:
+        with open(os.path.join(outdir, f"report_{kind}_cv_readable.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== Baseline {kind.upper()} — CV (n_splits={splits}) ===\n")
+            f.write(f"F1-macro     : {f1_macro:.4f}\n")
+            f.write(f"F1-weighted  : {f1_weighted:.4f}\n\n")
+            f.write(report_readable)
 
-    
-    # === Rapport par classe (CSV propre) ===
-    from sklearn.metrics import precision_recall_fscore_support
-    labels = np.unique(y_train)
-    prec, rec, f1, supp = precision_recall_fscore_support(y_train, y_pred_cv, labels=labels, zero_division=0)
-    per_class = pd.DataFrame({
-        "class_id": labels.astype(str),
-        "precision": prec,
-        "recall": rec,
-        "f1": f1,
-        "support": supp
-    }).sort_values("support", ascending=False)
-    per_class_csv = os.path.join(outdir, f"report_{kind}_per_class.csv")
-    per_class.to_csv(per_class_csv, index=False)
 
     # === Version lisible (mapping) ===
     labels_map_path = os.path.join("features", "labels_map.json")
@@ -577,7 +618,7 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
 
     # === Petit résumé Markdown (lisible) ===
     md_lines = [
-        f"# Baseline {kind.upper()} — CV ({splits} folds)",
+        f"# Baseline {kind.upper()} — CV ({splits} folds) — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"- **F1-macro**: {f1_macro:.4f}",
         f"- **F1-weighted**: {f1_weighted:.4f}",
         "",
