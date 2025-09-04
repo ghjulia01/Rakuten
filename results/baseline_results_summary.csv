@@ -34,3 +34,7 @@ B1,3,0.03635043126933371,0.05193151580112361,0.066,text_only=False | image_only=
 B2,3,0.7050529590904112,0.7217755784741176,4535.961,text_only=True | image_only=False | dummy=False
 B3,3,0.453787645045531,0.5115683606193994,20833.496,text_only=False | image_only=True | dummy=False
 B4,3,0.8205706009339623,0.8318964351426771,29813.35,text_only=False | image_only=False | dummy=False
+B2,3,0.3112018821827255,0.322759456345677,60.749,dummy=False | text_only=True | image_only=False | multimodal=False,2025-09-04T22:41:05
+B3,3,0.3036107178230552,0.3517790375262778,247.669,dummy=False | text_only=False | image_only=True | multimodal=False | cnn=true,2025-09-04T22:48:11
+B4,3,0.5394388958551678,0.5912505591610069,1744.356,dummy=False | text_only=False | image_only=False | multimodal=True | cnn=true,2025-09-04T23:28:00
+B2,3,0.3112018821827255,0.322759456345677,61.906,dummy=False | text_only=True | image_only=False | multimodal=False,2025-09-04T23:36:20

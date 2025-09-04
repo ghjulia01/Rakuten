@@ -69,8 +69,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.dummy import DummyClassifier
-from sklearn.pipeline import Pipeline  # Ajout de l'import manquant
-from sklearn.pipeline import make_pipeline, Pipeline as SkPipeline, FeatureUnion
+from sklearn.pipeline import Pipeline as SkPipeline, FeatureUnion, make_pipeline
 from sklearn.decomposition import PCA
 from sklearn.metrics import f1_score, classification_report
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
@@ -478,11 +477,12 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     cv = StratifiedKFold(n_splits=splits, shuffle=shuffle, random_state=cv_seed)
 
     # ===== Export features pour ACP/SHAP (OOF, même ordre que y_pred_cv) =====
-    export_features = True  # mets False si tu veux couper
+    export_features = True  # False pour couper
     feat_blocks = []        # liste de blocs (sparse/dense) par fold (validation uniquement)
     feat_indices = []       # index du jeu de validation, pour réordonner ensuite
     use_svd_for_preview = True   # compressions 2D/100D pour ACP rapide (optionnel)
-    svd_components_preview = 100 # 100 pour ACP exploratoire, 2 si tu veux projeter directement
+    svd_components_preview = 100 # 100 pour ACP exploratoire, 2 pour projeter directement
+    EXPORT_K = 256   # (128/256/512 au choix)
 
     # ==== Prédictions OOF avec barre de progression ====
     from sklearn.base import clone
@@ -507,26 +507,55 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
             logger.info("Classes val  : %s", pd.Series(y_train.iloc[va]).value_counts().to_dict())
             t0 = time.time()
             model = clone(pipe)
-            model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
-            y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
-            # ----- Export des features transformées du split de validation -----
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"This Pipeline instance is not fitted yet",
+                    category=FutureWarning,
+                    module=r"sklearn\.pipeline",
+                )
+                model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
+                y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
+
             # ----- Export des features transformées du split de validation -----
             if export_features:
                 try:
-                    Xv = X_train.iloc[va][need_cols]
-                    if kind == "b4":
-                        Z = model.named_steps["features"].transform(Xv)
-                        if "scaler" in model.named_steps:
-                            Z = model.named_steps["scaler"].transform(Z)
-                    elif kind == "b2":
-                        Z = model.named_steps["text"].transform(Xv)
-                    elif kind == "b3":
-                        Z = model.named_steps["img"].transform(Xv)
-                    else:
-                        Z = None  # b0/b1 : pas d'embeddings à exporter
+                    Xtr = X_train.iloc[tr][need_cols]
+                    Xv  = X_train.iloc[va][need_cols]
 
-                    if Z is not None:
-                        feat_blocks.append(Z)
+                    if kind == "b4":
+                        Ztr = model.named_steps["features"].transform(Xtr)
+                        if "scaler" in model.named_steps:
+                            Ztr = model.named_steps["scaler"].transform(Ztr)
+                        Zv = model.named_steps["features"].transform(Xv)
+                        if "scaler" in model.named_steps:
+                            Zv = model.named_steps["scaler"].transform(Zv)
+
+                    elif kind == "b2":
+                        Ztr = model.named_steps["text"].transform(Xtr)
+                        Zv  = model.named_steps["text"].transform(Xv)
+
+                    elif kind == "b3":
+                        Ztr = model.named_steps["img"].transform(Xtr)
+                        Zv  = model.named_steps["img"].transform(Xv)
+
+                    else:
+                        Ztr = Zv = None
+
+                    if Ztr is not None and Zv is not None:
+                        # SVD "local au fold" appris sur TRAIN → projette VAL vers une dimension fixe
+                        k = min(EXPORT_K, (Ztr.shape[1] - 1)) if hasattr(Ztr, "shape") else EXPORT_K
+                        if k < 2:  # garde-fou si très peu de colonnes
+                            k = 2
+                        svd_fold = TruncatedSVD(n_components=k, random_state=cv_seed)
+                        Ztr_red = svd_fold.fit_transform(Ztr)
+                        var_ratio = getattr(svd_fold, "explained_variance_ratio_", None)
+                        if var_ratio is not None:
+                            logger.debug("Fold %d SVD var_explained=%.2f%%", fold_idx, 100*var_ratio.sum())
+                        Zv_red  = svd_fold.transform(Zv)
+
+                        feat_blocks.append(Zv_red)            # (n_val, k) — dimension fixe
                         feat_indices.append(X_train.index[va])
                 except Exception as e:
                     logger.warning("Export features impossible sur fold %d: %s", fold_idx, e)
@@ -769,7 +798,7 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
         logger.info("Diagnostics sauvegardés: %s", diag_path)
 
 def diagnostic_baseline(
-    pipe: Union[Pipeline, ImbPipeline],
+    pipe: Union[SkPipeline, ImbPipeline],
     X_sample: pd.DataFrame,
     y_sample: pd.Series,
     outdir: str = "results"

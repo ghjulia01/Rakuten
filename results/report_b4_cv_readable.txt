@@ -1,0 +1,37 @@
+=== Baseline B4 — CV (n_splits=3) ===
+F1-macro     : 0.5394
+F1-weighted  : 0.5913
+
+                                            precision    recall  f1-score   support
+
+              Livres et ouvrages culturels     0.3291    0.2766    0.3006        94
+             Figurines Pop & licences geek     0.7059    0.5000    0.5854        96
+                    Cartes à collectionner     0.7165    0.7165    0.7165       127
+              Jeux de figurines & wargames     0.4000    0.1714    0.2400        35
+                    Jouets enfants & bébés     0.3850    0.4639    0.4208       166
+                   Jeux et loisirs enfants     0.1935    0.0923    0.1250        65
+                 Drones et modèles réduits     0.6468    0.7581    0.6980       186
+         Chaussettes & accessoires enfants     0.8462    0.5238    0.6471        21
+          Jouets divers & loisirs créatifs     0.4795    0.3500    0.4046       100
+            Puériculture & équipement bébé     0.5000    0.3905    0.4385       105
+             Mobilier & articles de maison     0.5202    0.6582    0.5811       196
+      Linge de maison & décoration textile     0.7820    0.7591    0.7704       137
+                   Alimentation & boissons     0.7778    0.2692    0.4000        26
+      Décoration & accessoires saisonniers     0.5546    0.7299    0.6303       174
+                  Accessoires pour animaux     0.6923    0.2432    0.3600        37
+              Magazines & journaux anciens     0.6667    0.6905    0.6784       168
+               Livres, mangas & partitions     0.5622    0.6011    0.5810       188
+               Lots jeux vidéo et consoles     0.5455    0.4800    0.5106        50
+                  Fournitures de papeterie     0.7092    0.7596    0.7335       183
+         Mobilier et accessoires de jardin     0.4211    0.4211    0.4211        95
+         Accessoires pour piscines et spas     0.7817    0.9222    0.8462       334
+        Outils et équipements de jardinage     0.5231    0.3505    0.4198        97
+                Essais & livres d’histoire     0.7593    0.8039    0.7810       102
+Jeux PC à télécharger & éditions spéciales     0.8800    0.7586    0.8148        29
+                 Jeux vidéo et accessoires     0.3014    0.2444    0.2699        90
+                        Accessoires gaming     0.5484    0.4789    0.5113        71
+                            Consoles rétro     0.7200    0.6429    0.6792        28
+
+                                  accuracy                         0.6033      3000
+                                 macro avg     0.5907    0.5206    0.5394      3000
+                              weighted avg     0.5953    0.6033    0.5913      3000

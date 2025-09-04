@@ -36,7 +36,7 @@
     "reducer_name": "svd",
     "reducer_type": "TruncatedSVD",
     "n_components": 256,
-    "explained_variance_ratio_sum": 0.8577713966369629
+    "explained_variance_ratio_sum": 0.8630633354187012
   },
   "cnn_info": {
     "arch": "resnet50",

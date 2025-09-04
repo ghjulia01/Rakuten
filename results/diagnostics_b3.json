@@ -29,13 +29,13 @@
     2705,
     2905
   ],
-  "max_probability": 0.1581119460065425,
+  "max_probability": 0.17286608529690395,
   "mean_probability": 0.037037037037037035,
-  "sample_f1_macro": 0.4510445789246091,
+  "sample_f1_macro": 0.42768186486418536,
   "reduction_info": {
     "reducer_name": "svd",
     "reducer_type": "TruncatedSVD",
     "n_components": 256,
-    "explained_variance_ratio_sum": 0.8577713966369629
+    "explained_variance_ratio_sum": 0.8631750345230103
   }
 }

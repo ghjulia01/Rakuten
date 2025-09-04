@@ -639,21 +639,15 @@ python -m main.train_model --config features/config.toml --model svc   # ou: lr
 > Avant d’appeler les scripts de visu, lance au moins une fois les **baselines** et/ ou le **multimodal** pour alimenter `results/` et `reports/`.
 
 **Comparaison intégrée (depuis train_model) : B0→B4 + figures de base**
-python -m main.train_model --config features/config.toml --compare-all
+
 
 ###### Comparaison complète avec toutes les visualisations
-python -m main.train_model --config features/config.toml --compare-all
-si il y avait d'autres résultats précédemment lancer ensuite:
+
 python -m tools.compare_models --csv results/baseline_results_summary_latest.csv
 
 ###### Rapport complet
-python -m tools.rapport_complet --preds results/preds_b4.csv `
-  --labels-map features/labels_map.json `
-  --theme-map features/theme_map.json
+python -m tools.rapport_complet --preds results/preds_b4.csv --labels-map features/labels_map.json --theme-map features/theme_map.json
 
-###### Ou sélectivement
-python -m tools.compare_models --confusion
-python -m tools.compare_models --baselines
 
 ##### 1) Barres (une métrique) – F1 macro par défaut
 python tools/plot_baselines.py
@@ -668,13 +662,6 @@ python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 ##### 3) Matrice de confusion (top-K classes)
 
 python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map features/labels_map.json --normalize true --topN 40 --output results/figures/confusion_b4_top40.png
-
-###### Texte seul (B2), 3 folds, normalisée, top 25 classes
-python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2
-
-###### Multimodal (B4), 5 folds, non normalisée, top 30
-
-python tools/plot_confusion_matrix.py --config features/config.toml --baseline b4 --splits 5 --normalize false --topk 30
 
 
 ##### Sorties & Organisation des résultats
