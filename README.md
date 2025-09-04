@@ -636,7 +636,20 @@ python -m main.train_model --config features/config.toml --model svc   # ou: lr
 
 #### I — Visualisations & Rapports
 
-> Avant d’appeler les scripts de visu, lance au moins une fois les **baselines** et/ ou le **multimodal** pour alimenter `results/` et `reports/`.
+# Explication des étapes
+python -m notebooks.rapport_pipeline_visualisation
+
+# ACP + top confusions pour B2 (texte)
+python -m tools.diagnostics_acp_shap --kind b2
+
+# ACP + top confusions + SHAP pour B4 (multimodal)
+python -m tools.diagnostics_acp_shap --kind b4 --model results/models/final_b4.joblib
+
+# Limiter l'échantillon PCA (plus rapide)
+python -m tools.diagnostics_acp_shap --kind b3 --max-sample 4000
+
+
+> Avant d’appeler les scripts de visu, lancer au moins une fois les **baselines** et/ ou le **multimodal** pour alimenter `results/` et `reports/`.
 
 **Comparaison intégrée (depuis train_model) : B0→B4 + figures de base**
 
