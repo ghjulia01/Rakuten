@@ -33,3 +33,4 @@ B0,3,0.00794977368958972,0.025805495655937392,0.031,text_only=False | image_only
 B1,3,0.03635043126933371,0.05193151580112361,0.066,text_only=False | image_only=False | dummy=True
 B2,3,0.7050529590904112,0.7217755784741176,4535.961,text_only=True | image_only=False | dummy=False
 B3,3,0.453787645045531,0.5115683606193994,20833.496,text_only=False | image_only=True | dummy=False
+B4,3,0.8205706009339623,0.8318964351426771,29813.35,text_only=False | image_only=False | dummy=False
