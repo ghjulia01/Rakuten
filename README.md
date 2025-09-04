@@ -646,6 +646,11 @@ python -m main.train_model --config features/config.toml --compare-all
 si il y avait d'autres résultats précédemment lancer ensuite:
 python -m tools.compare_models --csv results/baseline_results_summary_latest.csv
 
+###### Rapport complet
+python -m tools.rapport_complet --preds results/preds_b4.csv `
+  --labels-map features/labels_map.json `
+  --theme-map features/theme_map.json
+
 ###### Ou sélectivement
 python -m tools.compare_models --confusion
 python -m tools.compare_models --baselines
@@ -661,6 +666,13 @@ python tools/plot_baseline_bars.py
 python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 
 ##### 3) Matrice de confusion (top-K classes)
+
+python -m tools.plot_confusion_from_csv ^
+  --csv results/preds_b2.csv ^
+  --labels-map features/labels_map.json ^
+  --normalize true --topN 30 ^
+  --output results/figures/confusion_b2_top30.png
+
 ###### Texte seul (B2), 3 folds, normalisée, top 25 classes
 python tools/plot_confusion_matrix.py --config features/config.toml --baseline b2
 

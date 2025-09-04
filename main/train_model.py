@@ -94,7 +94,7 @@ from models.cnn_features import CNNFeaturizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
 from logging.handlers import RotatingFileHandler
-from tools.compare_models import compare_all_models
+
 
 logger = logging.getLogger(__name__)
 
@@ -509,6 +509,16 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
 
     dt = time.time() - t0_total
 
+    preds_df = pd.DataFrame({
+        "y_true": y_train,
+        "y_pred": y_pred_cv
+    }, index=y_train.index)
+
+    preds_path = os.path.join(outdir, f"preds_{kind}.csv")
+    preds_df.to_csv(preds_path, index=True)
+    print(f"> Prédictions sauvegardées: {preds_path}")
+
+
     # ==== Métriques & rapport ====
     f1_macro = f1_score(y_train, y_pred_cv, average="macro")
     f1_weighted = f1_score(y_train, y_pred_cv, average="weighted")
@@ -540,15 +550,54 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     print(f"> Rapport: {os.path.join(outdir, f'report_{kind}_cv.txt')}")
     print(f"[CV] terminé ({splits} folds)")
 
-    # Ajouter monitoring
-    logger.info("Démarrage validation croisée...")
-    for i, (train_idx, val_idx) in enumerate(cv.split(X_train, y_train), start=1):
-        logger.info(f"Fold {i}/{cv.get_n_splits()} | train={len(train_idx)} val={len(val_idx)}")
-        logger.info("Classes train: %s", pd.Series(y_train.iloc[train_idx]).value_counts().to_dict())
-        logger.info("Classes val  : %s", pd.Series(y_train.iloc[val_idx]).value_counts().to_dict())
-        X_fold = X_train.iloc[train_idx]
-        y_fold = y_train.iloc[train_idx]
-        logger.info(f"Distribution classes fold {i+1}: {pd.Series(y_fold).value_counts()}")
+    
+    # === Rapport par classe (CSV propre) ===
+    from sklearn.metrics import precision_recall_fscore_support
+    labels = np.unique(y_train)
+    prec, rec, f1, supp = precision_recall_fscore_support(y_train, y_pred_cv, labels=labels, zero_division=0)
+    per_class = pd.DataFrame({
+        "class_id": labels.astype(str),
+        "precision": prec,
+        "recall": rec,
+        "f1": f1,
+        "support": supp
+    }).sort_values("support", ascending=False)
+    per_class_csv = os.path.join(outdir, f"report_{kind}_per_class.csv")
+    per_class.to_csv(per_class_csv, index=False)
+
+    # === Version lisible (mapping) ===
+    labels_map_path = os.path.join("features", "labels_map.json")
+    if os.path.exists(labels_map_path):
+        import json
+        with open(labels_map_path, "r", encoding="utf-8") as f:
+            lblmap = {str(k): v for k, v in json.load(f).items()}
+        per_class_readable = per_class.assign(class_name=per_class["class_id"].map(lblmap).fillna(per_class["class_id"]))
+        cols = ["class_id", "class_name", "support", "precision", "recall", "f1"]
+        per_class_readable[cols].to_csv(os.path.join(outdir, f"report_{kind}_per_class_readable.csv"), index=False)
+
+    # === Petit résumé Markdown (lisible) ===
+    md_lines = [
+        f"# Baseline {kind.upper()} — CV ({splits} folds)",
+        f"- **F1-macro**: {f1_macro:.4f}",
+        f"- **F1-weighted**: {f1_weighted:.4f}",
+        "",
+        "## Top 20 classes (par support)",
+    ]
+    top20 = per_class.head(20).copy()
+    if os.path.exists(labels_map_path):
+        top20["name"] = top20["class_id"].map(lblmap).fillna(top20["class_id"])
+        md_lines.append("| id | nom | support | precision | recall | f1 |")
+        md_lines.append("|---:|:-----|-------:|----------:|-------:|----:|")
+        for _, r in top20.iterrows():
+            md_lines.append(f"| {r['class_id']} | {top20.loc[_,'name']} | {int(r['support'])} | {r['precision']:.3f} | {r['recall']:.3f} | {r['f1']:.3f} |")
+    else:
+        md_lines.append("| id | support | precision | recall | f1 |")
+        md_lines.append("|---:|--------:|----------:|-------:|----:|")
+        for _, r in top20.iterrows():
+            md_lines.append(f"| {r['class_id']} | {int(r['support'])} | {r['precision']:.3f} | {r['recall']:.3f} | {r['f1']:.3f} |")
+
+    with open(os.path.join(outdir, f"report_{kind}_summary.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(md_lines))
 
     # ---- Diagnostics (pour baselines images) ----
     if kind in ("b3", "b4"):
