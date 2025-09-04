@@ -684,7 +684,7 @@ python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map 
 
 - ##### Tester les scripts sur des échantillons en limitant la taille du train pour un test rapide
 
-- $env:RAKUTEN_MAX_N=20000
+- $env:RAKUTEN_MAX_N=2000
 - python -m main.train_model --config features/config.toml --baseline b2    # exemple de script
 **Supprimer le cache pour ne pas garder d'ancien problèmes**
 Remove-Item -Recurse -Force "C:\Users\colle\Desktop\rakuten-logs\skcache"
