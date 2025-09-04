@@ -477,6 +477,13 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     # Construire une CV stratifiée
     cv = StratifiedKFold(n_splits=splits, shuffle=shuffle, random_state=cv_seed)
 
+    # ===== Export features pour ACP/SHAP (OOF, même ordre que y_pred_cv) =====
+    export_features = True  # mets False si tu veux couper
+    feat_blocks = []        # liste de blocs (sparse/dense) par fold (validation uniquement)
+    feat_indices = []       # index du jeu de validation, pour réordonner ensuite
+    use_svd_for_preview = True   # compressions 2D/100D pour ACP rapide (optionnel)
+    svd_components_preview = 100 # 100 pour ACP exploratoire, 2 si tu veux projeter directement
+
     # ==== Prédictions OOF avec barre de progression ====
     from sklearn.base import clone
     import numpy as np
@@ -502,6 +509,27 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
             model = clone(pipe)
             model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
             y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
+            # ----- Export des features transformées du split de validation -----
+            # ----- Export des features transformées du split de validation -----
+            if export_features:
+                try:
+                    Xv = X_train.iloc[va][need_cols]
+                    if kind == "b4":
+                        Z = model.named_steps["features"].transform(Xv)
+                        if "scaler" in model.named_steps:
+                            Z = model.named_steps["scaler"].transform(Z)
+                    elif kind == "b2":
+                        Z = model.named_steps["text"].transform(Xv)
+                    elif kind == "b3":
+                        Z = model.named_steps["img"].transform(Xv)
+                    else:
+                        Z = None  # b0/b1 : pas d'embeddings à exporter
+
+                    if Z is not None:
+                        feat_blocks.append(Z)
+                        feat_indices.append(X_train.index[va])
+                except Exception as e:
+                    logger.warning("Export features impossible sur fold %d: %s", fold_idx, e)
             pbar.set_postfix(time=f"{time.time()-t0:.1f}s")
             pbar.update(1)
     finally:
@@ -517,6 +545,64 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     preds_path = os.path.join(outdir, f"preds_{kind}.csv")
     preds_df.to_csv(preds_path, index=True)
     print(f"> Prédictions sauvegardées: {preds_path}")
+
+    # ===== Sauvegarde finale des features OOF =====
+    if export_features and len(feat_blocks) == len(splits_iter):
+        try:  
+            from scipy import sparse        
+            # Empilement en respectant l'ordre OOF
+            # On réordonne avec l'index global de X_train
+            all_idx = np.concatenate([np.asarray(idx) for idx in feat_indices])   # index pandas des lignes
+            # Concaténer les blocs (sparse compatible)
+            if sparse.issparse(feat_blocks[0]):
+                Z_all = sparse.vstack(feat_blocks, format="csr")
+            else:
+                Z_all = np.vstack(feat_blocks)
+
+            # Réordonner Z_all selon l'ordre de y_train (OOF dans l'ordre de l'index)
+            # astuce : on crée une position pour chaque index
+            pos = pd.Series(np.arange(len(all_idx)), index=all_idx)
+            order = pos.loc[y_train.index].values   # positions correspondant à l'ordre de y_train
+            if sparse.issparse(Z_all):
+                Z_all = Z_all[order]
+            else:
+                Z_all = Z_all[order, :]
+
+            # Sauvegarde sparse + une version "preview" compressée pour ACP
+            os.makedirs(outdir, exist_ok=True)
+            base = os.path.join(outdir, f"features_{kind}")
+
+            # 3.1) Sauvegarde sparse (si applicable)
+            try:
+                from scipy.sparse import save_npz
+                if sparse.issparse(Z_all):
+                    save_npz(base + "_oof.npz", Z_all)
+                    logger.info("Features OOF sauvegardées (sparse): %s_oof.npz", base)
+                else:
+                    np.save(base + "_oof.npy", Z_all)
+                    logger.info("Features OOF sauvegardées (npy): %s_oof.npy", base)
+            except Exception as e:
+                logger.warning("Impossible de sauver en sparse/NPY: %s", e)
+
+            # 3.2) Aperçu SVD 100D pour ACP rapide (optionnel)
+            if use_svd_for_preview:
+                try:
+                    # Si déjà scalé (with_mean=False), on peut appliquer directement SVD
+                    svd = TruncatedSVD(n_components=svd_components_preview, random_state=cv_seed)
+                    Z_svd = svd.fit_transform(Z_all)
+                    # Sauvegarder un CSV léger (avec y_true/y_pred pour colorer en ACP)
+                    svd_df = pd.DataFrame(Z_svd, index=y_train.index,
+                                      columns=[f"svd_{i+1}" for i in range(svd_components_preview)])
+                    svd_df["y_true"] = y_train.astype(str).values
+                    svd_df["y_pred"] = pd.Series(y_pred_cv, index=y_train.index).astype(str).values
+                    svd_csv = base + f"_svd{svd_components_preview}_preview.csv"
+                    svd_df.to_csv(svd_csv, index=True)
+                    logger.info("Aperçu SVD %dD sauvegardé: %s", svd_components_preview, svd_csv)
+                except Exception as e:
+                    logger.warning("SVD preview impossible: %s", e)
+
+        except Exception as e:
+            logger.warning("Consolidation features OOF échouée: %s", e)
 
     # ==== Harmoniser les types pour éviter toute surprise int/str ====
     yt = y_train.astype(str)
@@ -607,12 +693,10 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
 
 
     # === Version lisible (mapping) ===
-    labels_map_path = os.path.join("features", "labels_map.json")
-    if os.path.exists(labels_map_path):
-        import json
-        with open(labels_map_path, "r", encoding="utf-8") as f:
-            lblmap = {str(k): v for k, v in json.load(f).items()}
-        per_class_readable = per_class.assign(class_name=per_class["class_id"].map(lblmap).fillna(per_class["class_id"]))
+    if lblmap is not None:
+        per_class_readable = per_class.assign(
+            class_name=per_class["class_id"].map(lblmap).fillna(per_class["class_id"])
+        )
         cols = ["class_id", "class_name", "support", "precision", "recall", "f1"]
         per_class_readable[cols].to_csv(os.path.join(outdir, f"report_{kind}_per_class_readable.csv"), index=False)
 
