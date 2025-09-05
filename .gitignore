@@ -34,4 +34,9 @@ data/raw/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.dbresults/*.npy
+results/*.npz
+results/*_oof.npy
+results/*_oof.npz
+results/*svd*_preview.csv
+results/*svd*_preview.csv.gz
