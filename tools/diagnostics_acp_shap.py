@@ -13,6 +13,22 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+def _load_ok_mask(preds_csv: str, index_like=None):
+    """
+    Charge un CSV de prédictions OOF avec colonnes y_true / y_pred.
+    Retourne un masque booléen ok=(y_true==y_pred) aligné à index_like si fourni.
+    """
+    if not preds_csv or not os.path.exists(preds_csv):
+        return None
+    df = pd.read_csv(preds_csv, index_col=0)
+    if not {"y_true", "y_pred"}.issubset(df.columns):
+        return None
+    ok = (df["y_true"].astype(str) == df["y_pred"].astype(str))
+    if index_like is not None:
+        # réaligne sur l’index cible si nécessaire
+        ok = ok.reindex(index_like, fill_value=False)
+    return ok.values
+
 def ensure_dirs():
     Path("results/figures").mkdir(parents=True, exist_ok=True)
     Path("results/reports").mkdir(parents=True, exist_ok=True)
@@ -47,49 +63,69 @@ def do_acp(kind, max_n=8000):
     Fait une ACP 2D:
     - Priorité au CSV SVD preview (rapide) -> results/features_<kind>_svd100_preview.csv
     - Sinon PCA 2D sur la matrice OOF (npz/npy)
-    Génère results/figures/acp_<kind>_2d.png
+    Génère:
+      - results/figures/acp_<kind>_2d.png (SVD preview ou PCA OOF)
+      - results/figures/acp_<kind>_ok_error.png (si y_true/y_pred dispo)
     """
     ensure_dirs()
 
     preds_csv = Path("results") / f"preds_{kind}.csv"
-    if not preds_csv.exists():
-        print(f"[WARN] {preds_csv} introuvable (y_true/y_pred). L'ACP colorée ne sera pas annotée.")
-        preds = None
-    else:
-        preds = pd.read_csv(preds_csv)
-        assert {"y_true", "y_pred"}.issubset(preds.columns), "preds CSV doit contenir y_true,y_pred."
-        preds["y_true"] = preds["y_true"].astype(str)
-        preds["y_pred"] = preds["y_pred"].astype(str)
-        preds["ok"] = (preds["y_true"] == preds["y_pred"]).astype(int)
+    preds = None
+    if preds_csv.exists():
+        preds = pd.read_csv(preds_csv, index_col=0)
+        if {"y_true", "y_pred"}.issubset(preds.columns):
+            preds["y_true"] = preds["y_true"].astype(str)
+            preds["y_pred"] = preds["y_pred"].astype(str)
+            preds["ok"] = (preds["y_true"] == preds["y_pred"]).astype(int)
+        else:
+            preds = None
+            print(f"[WARN] {preds_csv} ne contient pas y_true,y_pred → pas de coloration OK/Erreur.")
 
     svd_csv = Path("results") / f"features_{kind}_svd100_preview.csv"
-    fig_path = Path("results/figures") / f"acp_{kind}_2d.png"
+    fig_svd = Path("results/figures") / f"acp_{kind}_2d.png"
+    fig_ok  = Path("results/figures") / f"acp_{kind}_ok_error.png"
 
+    # --- Cas 1 : SVD preview disponible (rapide) ---
     if svd_csv.exists():
         print(f"[INFO] SVD preview trouvé: {svd_csv}")
         df = pd.read_csv(svd_csv, index_col=0)
-        if {"y_true","y_pred"}.issubset(df.columns):
-            base = df
-        else:
-            if preds is None:
-                base = df
-                base["y_true"] = ""
-                base["y_pred"] = ""
-                base["ok"] = 0
-            else:
-                base = df.join(preds, how="left")
 
-        # Scatter SVD 2D
-        plt.figure()
-        plt.scatter(base["svd_1"], base["svd_2"])
+        # Figure simple (tous docs)
+        plt.figure(figsize=(9,6))
+        plt.scatter(df["svd_1"], df["svd_2"], s=8, alpha=0.20)
         plt.xlabel("svd_1"); plt.ylabel("svd_2")
         plt.title(f"ACP (SVD preview) — {kind.upper()}")
         plt.tight_layout()
-        plt.savefig(fig_path, dpi=180)
-        print(f"[OK] ACP (SVD preview) → {fig_path}")
-        return True
+        plt.savefig(fig_svd, dpi=180)
+        plt.close()
+        print(f"[OK] ACP (SVD preview) → {fig_svd}")
 
-    # Sinon: PCA sur OOF
+        # Figure OK/Erreur si on a y_true/y_pred (dans le SVD ou via preds_*.csv)
+        ok_mask = None
+        if {"y_true","y_pred"}.issubset(df.columns):
+            ok_mask = (df["y_true"].astype(str) == df["y_pred"].astype(str)).values
+        elif preds is not None:
+            # réaligne au besoin sur l’index du SVD
+            ok_mask = preds.reindex(df.index).assign(
+                ok=lambda d: (d["y_true"].astype(str) == d["y_pred"].astype(str)).astype(int)
+            )["ok"].fillna(0).astype(bool).values
+
+        if ok_mask is not None:
+            XY = df[["svd_1","svd_2"]].values
+            plt.figure(figsize=(9,6))
+            plt.scatter(XY[ok_mask,0], XY[ok_mask,1], s=8, alpha=0.15, label="OK (y_true = y_pred)")
+            plt.scatter(XY[~ok_mask,0], XY[~ok_mask,1], s=8, alpha=0.35, label="Erreur")
+            plt.xlabel("svd_1"); plt.ylabel("svd_2")
+            plt.title(f"ACP (SVD preview) — {kind.upper()} : OK vs Erreur")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(fig_ok, dpi=180)
+            plt.close()
+            print(f"[OK] ACP colorée → {fig_ok}")
+
+        return True  # on s'arrête là si SVD preview
+
+    # --- Cas 2 : pas de SVD preview → PCA 2D sur OOF ---
     Z, is_sparse, src = try_load_oof_features(kind)
     if Z is None:
         print("[WARN] Aucune feature trouvée (ni SVD preview, ni OOF).")
@@ -118,13 +154,14 @@ def do_acp(kind, max_n=8000):
     pca = PCA(n_components=2, random_state=42)
     XY = pca.fit_transform(Zs_std)
 
-    plt.figure()
-    plt.scatter(XY[:, 0], XY[:, 1])
+    plt.figure(figsize=(9,6))
+    plt.scatter(XY[:, 0], XY[:, 1], s=8, alpha=0.20)
     plt.xlabel("PC1"); plt.ylabel("PC2")
     plt.title(f"ACP (PCA 2D) — {kind.upper()} — {take}/{n}")
     plt.tight_layout()
-    plt.savefig(fig_path, dpi=180)
-    print(f"[OK] ACP (PCA 2D) → {fig_path}")
+    plt.savefig(fig_svd, dpi=180)
+    plt.close()
+    print(f"[OK] ACP (PCA 2D) → {fig_svd}")
     return True
 
 def top_confusions(kind, topk=20, labels_map=None):
@@ -159,71 +196,9 @@ def top_confusions(kind, topk=20, labels_map=None):
     df.to_csv(out, index=False)
     print(f"[OK] Top confusions → {out}")
 
-def do_shap(kind, model_path, bg_size=2000, explain_size=300):
-    """
-    Démo SHAP:
-    - charge le pipeline .joblib
-    - prend un échantillon des features OOF comme background + points à expliquer
-    - LinearExplainer si LogisticRegression, sinon KernelExplainer (plus lent)
-    """
-    try:
-        import joblib, shap  # shap est optionnel, installer si besoin
-    except Exception as e:
-        print("[WARN] SHAP indisponible (installe 'shap'): ", e)
-        return False
-
-    model_path = Path(model_path)
-    if not model_path.exists():
-        print(f"[WARN] Modèle introuvable: {model_path}")
-        return False
-
-    Z, _, src = try_load_oof_features(kind)
-    if Z is None:
-        print("[WARN] Pas de features OOF pour SHAP.")
-        return False
-
-    print(f"[INFO] Chargement du pipeline: {model_path}")
-    pipe = joblib.load(model_path)
-
-    # Estimator final dans le pipeline
-    clf = getattr(pipe, "named_steps", {}).get("model", None)
-    if clf is None:
-        print("[WARN] Étape 'model' introuvable dans le pipeline.")
-        return False
-
-    n = Z.shape[0]
-    bg = min(bg_size, n)
-    ex = min(explain_size, n)
-    rng = np.random.default_rng(0)
-    bg_idx = np.sort(rng.choice(n, size=bg, replace=False))
-    ex_idx = np.sort(rng.choice(n, size=ex, replace=False))
-
-    X_bg = Z[bg_idx] if not hasattr(Z, "tocsr") else Z[bg_idx]
-    X_ex = Z[ex_idx] if not hasattr(Z, "tocsr") else Z[ex_idx]
-
-    # LinearExplainer pour LogisticRegression, sinon Kernel (lent)
-    name = clf.__class__.__name__
-    print(f"[INFO] Estimator final: {name}")
-    try:
-        if name == "LogisticRegression":
-            explainer = shap.LinearExplainer(clf, X_bg)
-            sv = explainer.shap_values(X_ex)
-            print("[OK] SHAP LinearExplainer calculé (LogReg). Ouvre un notebook et fais shap.summary_plot(sv, X_ex).")
-        else:
-            f = clf.decision_function if hasattr(clf, "decision_function") else clf.predict_proba
-            # background plus petit pour accélérer
-            if hasattr(X_bg, "tocsr"):
-                X_bg_small = X_bg[:200]
-            else:
-                X_bg_small = X_bg[:200]
-            explainer = shap.KernelExplainer(f, X_bg_small)
-            sv = explainer.shap_values(X_ex[:50])
-            print("[OK] SHAP KernelExplainer calculé (estimation non linéaire). "
-                  "Ouvre un notebook et fais shap.summary_plot(sv, X_ex[:50]).")
-        return True
-    except Exception as e:
-        print("[WARN] SHAP a échoué:", e)
-        return False
+######
+# Endroit pour ajouter Shap si besoin
+######
 
 def main():
     parser = argparse.ArgumentParser()
@@ -239,8 +214,6 @@ def main():
     ok_acp = do_acp(args.kind, max_n=args.max_sample)
     top_confusions(args.kind, topk=args.topk, labels_map=lblmap)
 
-    if args.model:
-        do_shap(args.kind, args.model)
 
 if __name__ == "__main__":
     main()
