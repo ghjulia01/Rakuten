@@ -1,0 +1,6 @@
+=== TEXTE EXEMPLE ===
+[RAW]
+Olivia: Personalisiertes Notizbuch / 150 Seiten / Punktraster / Ca Din A5 / Rosen-Design
+
+[CLEAN]
+olivi personalisiert notizbuch 150 seit punktrast ca din a5 ros

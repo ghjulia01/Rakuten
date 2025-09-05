@@ -58,7 +58,14 @@ MODULE_TO_PYPI = {
     "torch": "torch",
     "torchvision": "torchvision",
 }
-
+# Ajouts pour la branche 
+MODULE_TO_PYPI.update({
+    "shap": "shap",
+    "lime": "lime",
+    "umap": "umap-learn",
+    "plotly": "plotly",
+})
+# --- Regex pour extraire les imports ---
 RE_IMPORT = re.compile(
     r'^\s*(?:from\s+([A-Za-z0-9_\.]+)\s+import|import\s+([A-Za-z0-9_\.]+))',
     flags=re.MULTILINE
