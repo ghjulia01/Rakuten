@@ -40,3 +40,8 @@ results/*_oof.npy
 results/*_oof.npz
 results/*svd*_preview.csv
 results/*svd*_preview.csv.gz
+data/X_train_update_with_imgstats.csv
+data/image_object_dims.csv
+data/X_train_update
+models/*.joblib
+notebooks/df.csv

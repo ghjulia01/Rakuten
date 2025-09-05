@@ -1,0 +1,21 @@
+true_id,pred_id,count,true_name,pred_name
+1280,1300,23,Jouets enfants & bébés,Drones et modèles réduits
+1560,2060,23,Mobilier & articles de maison,Décoration & accessoires saisonniers
+2582,1560,23,Mobilier et accessoires de jardin,Mobilier & articles de maison
+1281,1280,19,Jeux et loisirs enfants,Jouets enfants & bébés
+2280,2403,19,Magazines & journaux anciens,"Livres, mangas & partitions"
+10,2280,18,Livres et ouvrages culturels,Magazines & journaux anciens
+1302,1280,16,Jouets divers & loisirs créatifs,Jouets enfants & bébés
+2585,2583,16,Outils et équipements de jardinage,Accessoires pour piscines et spas
+2060,1560,14,Décoration & accessoires saisonniers,Mobilier & articles de maison
+2403,2280,14,"Livres, mangas & partitions",Magazines & journaux anciens
+1320,1560,13,Puériculture & équipement bébé,Mobilier & articles de maison
+1920,2060,13,Linge de maison & décoration textile,Décoration & accessoires saisonniers
+1302,1560,12,Jouets divers & loisirs créatifs,Mobilier & articles de maison
+1920,1560,12,Linge de maison & décoration textile,Mobilier & articles de maison
+10,2403,11,Livres et ouvrages culturels,"Livres, mangas & partitions"
+1560,2582,11,Mobilier & articles de maison,Mobilier et accessoires de jardin
+2403,10,11,"Livres, mangas & partitions",Livres et ouvrages culturels
+40,2403,11,Jeux vidéo et accessoires,"Livres, mangas & partitions"
+1300,1280,10,Drones et modèles réduits,Jouets enfants & bébés
+1320,1280,10,Puériculture & équipement bébé,Jouets enfants & bébés

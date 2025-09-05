@@ -148,7 +148,7 @@ tfidf = TextTfidfVectorizer(
     analyzer="word",
     max_features=int(text_cfg.get("max_features", 100_000)),
     ngram_range=(int(text_cfg.get("ngram_min", 1)), int(text_cfg.get("ngram_max", 2))),
-    min_df=float(text_cfg.get("min_df", 2)),
+    min_df=int(text_cfg.get("min_df", 2)),   # corrigé : entier
     max_df=float(text_cfg.get("max_df", 0.95)),
     sublinear_tf=bool(text_cfg.get("sublinear_tf", True)),
     norm=str(text_cfg.get("norm", "l2")),
@@ -159,7 +159,6 @@ tfidf = TextTfidfVectorizer(
 corpus_clean = (X_train['designation'].fillna("") + " " + X_train['description'].fillna("")).map(tc.clean_text)
 Xtf = tfidf.fit_transform(corpus_clean)
 feat_names = np.array(tfidf.get_feature_names_out())
-# poids moyen (approx visuelle)
 weights = np.asarray(Xtf.mean(axis=0)).ravel()
 top_idx = weights.argsort()[-30:]
 top_feat = pd.Series(weights[top_idx], index=feat_names[top_idx]).sort_values()
@@ -195,7 +194,7 @@ with_ids = X_train.dropna(subset=["imageid","productid"])
 sample = with_ids.sample(n=min(6, len(with_ids)), random_state=42)
 n = len(sample)
 if n > 0:
-    cols = 2  # original vs preprocess
+    cols = 2
     rows = n
     fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*3))
     if rows == 1:
@@ -215,7 +214,7 @@ if n > 0:
     plt.savefig(out_dir / "image_examples_before_after.png", dpi=160)
     plt.close()
 
-# Boxplots RGB sur images prétraitées (échantillon)
+# Boxplots RGB sur images prétraitées
 rgb_vals = []
 for _, row in sample.iterrows():
     p = img_path_for(row)
@@ -227,7 +226,7 @@ for _, row in sample.iterrows():
 if rgb_vals:
     rgb = np.vstack(rgb_vals)
     plt.figure(figsize=(6,4))
-    plt.boxplot([rgb[:,0], rgb[:,1], rgb[:,2]], labels=["R","G","B"])
+    plt.boxplot([rgb[:,0], rgb[:,1], rgb[:,2]], tick_labels=["R","G","B"])  # corrigé : tick_labels
     plt.title("Distribution RGB après normalisation [0,1]")
     plt.tight_layout()
     plt.savefig(out_dir / "image_rgb_boxplot.png", dpi=160)
@@ -243,15 +242,39 @@ if len(with_ids) > 0:
         out_prefix="auto",
         use_cache=False,
     ).fit(with_ids)
-    vals = stats.transform(with_ids.iloc[:100])  # petit échantillon
+    vals = stats.transform(with_ids.iloc[:100])
     df_stats = pd.DataFrame(vals, columns=getattr(stats, "columns_", ["width","height","occupancy","white_ratio","black_ratio"]))
     df_stats.describe().to_csv(out_dir / "image_stats_describe.csv", index=True)
 
-    plt.figure(figsize=(7,4))
-    plt.hist(df_stats["occupancy"], bins=30)
-    plt.title("Histogramme occupancy (100 échantillons)")
-    plt.tight_layout()
-    plt.savefig(out_dir / "image_occupancy_hist.png", dpi=160)
-    plt.close()
+    # Cherche dynamiquement les colonnes avec suffixes
+    def _find_suffix(col_list, suffix, default_idx=None):
+        for c in col_list:
+            if c.endswith(suffix):
+                return c
+        return col_list[default_idx] if default_idx is not None and default_idx < len(col_list) else None
+
+    occ_col = _find_suffix(df_stats.columns.tolist(), "occupancy", default_idx=2)
+    wr_col  = _find_suffix(df_stats.columns.tolist(), "white_ratio", default_idx=3)
+    br_col  = _find_suffix(df_stats.columns.tolist(), "black_ratio", default_idx=4)
+
+    print("[image-stats] colonnes =", df_stats.columns.tolist())
+    print(f"[image-stats] occupancy:{occ_col} | white_ratio:{wr_col} | black_ratio:{br_col}")
+
+    if occ_col is not None:
+        plt.figure(figsize=(7,4))
+        plt.hist(df_stats[occ_col].astype(float), bins=30)
+        plt.title("Histogramme occupancy (100 échantillons)")
+        plt.tight_layout()
+        plt.savefig(out_dir / "image_occupancy_hist.png", dpi=160)
+        plt.close()
+
+    for col, title in [(wr_col, "white_ratio"), (br_col, "black_ratio")]:
+        if col is not None:
+            plt.figure(figsize=(7,4))
+            plt.hist(df_stats[col].astype(float), bins=30)
+            plt.title(f"Histogramme {title} (100 échantillons)")
+            plt.tight_layout()
+            plt.savefig(out_dir / f"image_{title}_hist.png", dpi=160)
+            plt.close()
 
 print(f"Figures et fichiers écrits dans: {out_dir}")

@@ -644,6 +644,7 @@ python -m tools.diagnostics_acp_shap --kind b2
 
 # ACP + top confusions + SHAP pour B4 (multimodal)
 python -m tools.diagnostics_acp_shap --kind b4 --model results/models/final_b4.joblib
+python -m tools.diagnostics_acp_shap --kind b4
 
 # Limiter l'échantillon PCA (plus rapide)
 python -m tools.diagnostics_acp_shap --kind b3 --max-sample 4000
@@ -659,46 +660,67 @@ python -m tools.diagnostics_acp_shap --kind b3 --max-sample 4000
 python -m tools.compare_models --csv results/baseline_results_summary_latest.csv
 
 ###### Rapport complet
+
 python -m tools.rapport_complet --preds results/preds_b4.csv --labels-map features/labels_map.json --theme-map features/theme_map.json
 
-
-##### 1)  Barres groupées – F1 macro vs F1 pondéré
+##### Barres groupées – F1 macro vs F1 pondéré
 
 python tools/plot_baseline_bars.py
 ###### imposer l’ordre : B0→B4
 python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 
-##### 2) Matrice de confusion (top-K classes)
+#####  Matrice de confusion (top-K classes)
 
 python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map features/labels_map.json --normalize true --topN 40 --output results/figures/confusion_b4_top40.png
 
+# Biplot texte (B2) — 30 termes les plus "chargés"
+python -m tools.plot_pca_biplot --config features/config.toml --out results/figures/biplot_b2.png --top-terms 30 --sample 12000
 
+# Biplot image stats sans coloration
+python -m tools.plot_image_stats_biplot --config features/config.toml --out results/figures/biplot_image_stats.png
+
+# Avec coloration OK/Erreur à partir des OOF B4
+python -m tools.plot_image_stats_biplot --config features/config.toml --out results/figures/biplot_image_stats_ok_error.png --preds results/preds_b4.csv
 ##### Sorties & Organisation des résultats
 
-###### Baselines
+###### Baselines (B0–B4)
 
-- `results/baseline_results_summary.csv` — cumul des runs (append)
-- `reports/report_b0_cv.txt`, `reports/report_b1_cv.txt`, … — `classification_report` par baseline (CV)
-- `results/figures/*.png` — bar charts & matrices de confusion (+ CSV agrégés)
+- `results/baseline_results_summary.csv` — cumul de tous les runs (append, avec timestamp & notes).  
+- `results/preds_<baseline>.csv` — prédictions OOF (out-of-fold) sauvegardées avec `y_true`/`y_pred`.  
+- `results/features_<baseline>_oof.(npz|npy)` — features OOF complètes (pour ACP/SHAP).  
+- `results/features_<baseline>_svd100_preview.csv` — réduction SVD (100D) avec `y_true`/`y_pred` (exploration ACP rapide).  
+- `reports/report_<baseline>_cv.txt` — `classification_report` par baseline (CV, version brute).  
+- `reports/report_<baseline>_cv_readable.txt` — version lisible avec noms de classes (labels_map).  
+- `reports/report_<baseline>_per_class_readable.csv` — métriques par classe (id + nom).  
+- `reports/report_<baseline>_summary.md` — résumé Markdown (top 20 classes).  
+- `results/diagnostics_<baseline>.json` — diagnostics (réduction, CNN, prédictions sur échantillon).  
 
 **Exemples :**
-- `results/figures/baseline_f1_macro.png`, `results/figures/baseline_f1_bars.png`
-- `results/figures/cm_<baseline>.png`, `results/figures/cm_<baseline>_full.csv`
-- `reports/report_<baseline>_cv.txt`
+- `results/features_b2_svd100_preview.csv`  
+- `results/features_b4_oof.npz`  
+- `reports/report_b2_cv_readable.txt`  
+- `reports/report_b4_summary.md`  
 
 ###### Modèle complet (B4)
 
-- `models/text_image_classifier.joblib` — pipeline entraînée
-- `results/predictions_test.csv` — prédictions sur `X_test` (si génération activée)
-- `results/compare_cv_results.csv` — comparaison LR vs SVC (si `--compare` ou via `tools.compare_models`)
+- `models/text_image_classifier.joblib` — pipeline entraînée (texte + image).  
+- `results/predictions_test.csv` — prédictions sur `X_test` (si génération activée).  
+- `results/compare_cv_results.csv` — comparaison LR vs SVC (via `--compare` ou `tools.compare_models`).  
 
+###### Logs & Figures
 
-#### J — Bonnes pratiques & Dépannage
+- `results/logs/training.log` — log général (entrainement & CV).  
+- `results/logs/image_processing.log` — log dédié image/CNN.  
+- `results/figures/…` — bar charts, matrices de confusion, agrégats CSV.  
 
-- ##### Tester les scripts sur des échantillons en limitant la taille du train pour un test rapide
+---
 
-- $env:RAKUTEN_MAX_N=2000
-- python -m main.train_model --config features/config.toml --baseline b2    # exemple de script
+##### Bonnes pratiques & Dépannage
+
+- **Tester rapidement sur échantillon** :  
+  ```powershell
+  $env:RAKUTEN_MAX_N=2000
+  python -m main.train_model --config features/config.toml --baseline b2
 **Supprimer le cache pour ne pas garder d'ancien problèmes**
 Remove-Item -Recurse -Force "C:\Users\colle\Desktop\rakuten-logs\skcache"
 
@@ -764,7 +786,7 @@ python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 
 #### Sinon, générer d'abord le fichier requirements.txt avec le script fourni :
-python tools/generate_requirements.py
+python tools/generate_requirements.py --root . --out requirements.txt
 pip install -r requirements.txt
 
 #### Télécharger  les stopwords NLTK :
