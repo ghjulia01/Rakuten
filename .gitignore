@@ -47,6 +47,6 @@ models/*.joblib
 notebooks/df.csvresults/Sorties_�_enregistrer/
 results/*_oof.*
 results/*svd*_preview.csv*
-notebooks/df.csvresults/Sorties_a_enregistrer/
-results/desktop.ini
+notebooks/df.csv
 results/Sorties_a_enregistrer/
+results/desktop.ini
