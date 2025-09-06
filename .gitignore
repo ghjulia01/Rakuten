@@ -44,6 +44,8 @@ data/X_train_update_with_imgstats.csv
 data/image_object_dims.csv
 data/X_train_update
 models/*.joblib
-notebooks/df.csvresults/Sorties_à_enregistrer/
+notebooks/df.csvresults/Sorties_ï¿½_enregistrer/
 results/*_oof.*
 results/*svd*_preview.csv*
+notebooks/df.csvresults/Sorties_a_enregistrer/
+results/desktop.ini

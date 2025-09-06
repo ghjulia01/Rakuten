@@ -639,15 +639,16 @@ python -m main.train_model --config features/config.toml --model svc   # ou: lr
 # Explication des étapes
 python -m notebooks.rapport_pipeline_visualisation
 
-# ACP + top confusions pour B2 (texte)
-python -m tools.diagnostics_acp_shap --kind b2
+###### ACP + top confusions pour B2 (texte)
+python -m tools.diagnostics_acp --kind b2
 
-# ACP + top confusions + SHAP pour B4 (multimodal)
-python -m tools.diagnostics_acp_shap --kind b4 --model results/models/final_b4.joblib
-python -m tools.diagnostics_acp_shap --kind b4
+###### ACP + top confusions + SHAP pour B4 (multimodal)
+python -m tools.diagnostics_acp_shap --kind b4 --color okerr
+python -m tools.diagnostics_acp_shap --kind b4 --color theme
 
-# Limiter l'échantillon PCA (plus rapide)
-python -m tools.diagnostics_acp_shap --kind b3 --max-sample 4000
+###### Limiter l'échantillon PCA (plus rapide)
+python -m tools.diagnostics_acp --kind b3 --max-sample 4000
+
 
 
 > Avant d’appeler les scripts de visu, lancer au moins une fois les **baselines** et/ ou le **multimodal** pour alimenter `results/` et `reports/`.
@@ -671,15 +672,81 @@ python tools/plot_baseline_bars.py --order B0 B1 B2 B3 B4
 
 #####  Matrice de confusion (top-K classes)
 
-python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map features/labels_map.json --normalize true --topN 40 --output results/figures/confusion_b4_top40.png
+python -m tools.plot_confusion_from_csv --csv results/preds_b4.csv --labels-map features/labels_map.json --normalize true --topN 30 --output results/figures/confusion_b4_top30.png
 
-# Biplot texte (B2) — 30 termes les plus "chargés"
+** Exemple pour le modèle textuel B2**
+python -m tools.plot_confusion_from_csv `
+  --csv results/preds_b2.csv `
+  --labels-map features/labels_map.json `
+  --normalize true `
+  --topN 30 `
+  --title "Matrice de confusion — Baseline B2 (top 30 classes)" `
+  --output results/figures/confusion_b2_top30.png `
+  --export-par-classe results/reports/metrics_b2_par_classe.csv `
+  --problems-prefix results/reports/b2 `
+  --worst-by f1 `
+  --min-support 200 `
+  --worst-k 10 `
+  --top-mis 3 `
+  --heatmap-problemes results/figures/confusion_b2_problemes.png
+  
+** Exemple pour le modèle multimodal B4**
+python -m tools.plot_confusion_from_csv `
+  --csv results/preds_b4.csv `
+  --labels-map features/labels_map.json `
+  --normalize true `
+  --topN 30 `
+  --title "Matrice de confusion — Modèle B4 (multimodal, top 30 classes)" `
+  --output results/figures/confusion_b4_top30.png `
+  --export-par-classe results/reports/metrics_b4_par_classe.csv `
+  --problems-prefix results/reports/b4 `
+  --worst-by f1 `
+  --min-support 200 `
+  --worst-k 10 `
+  --top-mis 3 `
+  --heatmap-problemes results/figures/confusion_b4_problemes.png
+
+python -m tools.compare_b2_b4 `
+--b2 results/preds_b2.csv `
+--b4 results/preds_b4.csv `
+--labels-map features/labels_map.json `
+--out-prefix results/reports/b2_vs_b4 `
+--topK 27
+
+**Explications des options** 
+
+- csv results/preds_b2.csv → ton CSV de prédictions (doit contenir y_true,y_pred).
+- labels-map features/labels_map.json → fichier JSON qui traduit les IDs en noms lisibles.
+- normalize true → affiche les taux (par ligne = rappel).
+- topN 30 → garde uniquement les 30 classes avec le plus de support.
+- export-par-classe … → exporte un CSV avec précision, rappel, F1, support par classe.
+- problems-prefix … → génère deux fichiers :
+…_problemes.csv → les pires classes (par F1, rappel ou précision).
+…_top_confusions.csv → pour chaque classe problématique, les confusions principales.
+- worst-by f1 → tri des classes problématiques par F1-score.
+- min-support 200 → ignore les classes trop rares (<200).
+- worst-k 10 → liste les 10 pires classes.
+- top-mis 3 → montre les 3 confusions principales par classe problématique.
+- heatmap-problemes … → mini-heatmap centrée sur les classes problématiques.
+
+python -m tools.compare_b2_b4 `
+  --b2 results/preds_b2.csv `
+  --b4 results/preds_b4.csv `
+  --labels-map features/labels_map.json `
+  --out-prefix results/reports/b2_vs_b4 `
+  --topK 15 `
+  --key-column productid
+
+###### Biplot texte (B2) — 30 termes les plus "chargés"
 python -m tools.plot_pca_biplot --config features/config.toml --out results/figures/biplot_b2.png --top-terms 30 --sample 12000
+python -m tools.plot_pca_biplot --config features/config.toml --out results/figures/biplot_b2.png
+python -m tools.plot_pca_biplot --config features/config.toml --out results/figures/biplot_b2_theme.png --color-theme
 
-# Biplot image stats sans coloration
+###### Biplot image stats sans coloration
 python -m tools.plot_image_stats_biplot --config features/config.toml --out results/figures/biplot_image_stats.png
+python -m tools.plot_image_stats_biplot --config features/config.toml --preds results/preds_b4.csv --out results/figures/biplot_image_stats.png
 
-# Avec coloration OK/Erreur à partir des OOF B4
+###### Avec coloration OK/Erreur à partir des OOF B4
 python -m tools.plot_image_stats_biplot --config features/config.toml --out results/figures/biplot_image_stats_ok_error.png --preds results/preds_b4.csv
 ##### Sorties & Organisation des résultats
 
