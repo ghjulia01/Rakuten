@@ -21,7 +21,8 @@ from sklearn.pipeline import make_pipeline, FeatureUnion
 
 from features.text_cleaner import TextCleaner, HasDescriptionFlag, DesignationLength
 from features.text_vectorizer import TextTfidfVectorizer
-from features.text_features import TextStatistics, LanguageDetector
+from features.text_features import ( TextStatistics, TextStatisticsPro, LanguageDetector, Chi2LexiconFeatures
+)
 
 # Configuration du logging
 logger = logging.getLogger(__name__)
@@ -117,6 +118,11 @@ def create_text_pipeline(
     # 3) Features additionnelles
     use_language_detection: bool = True,
     use_text_stats: bool = True,
+    use_text_stats_pro: bool = False,      
+    use_lexicon: bool = False,             
+    lexicon_top_k: int = 20,               
+    lexicon_min_df: int | float = 3,
+    lexicon_max_df: int | float = 0.95,
 ) -> FeatureUnion:
     """
     Crée le pipeline complet de traitement textuel.
@@ -170,9 +176,18 @@ def create_text_pipeline(
 
     if use_text_stats:
         transformers.append(("text_stats", TextStatistics()))
+
+    if use_text_stats_pro:
+        transformers.append(("text_stats_pro", TextStatisticsPro()))
     
     if use_language_detection:
         transformers.append(("language", LanguageDetector()))
+
+    if use_lexicon:
+        transformers.append((
+            "lexicon",
+            Chi2LexiconFeatures(top_k=lexicon_top_k, binary=True, min_df=lexicon_min_df, max_df=lexicon_max_df)
+        ))
 
     return FeatureUnion(transformers)
 
@@ -207,6 +222,11 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
         # Features additionnelles
         use_language_detection=cfg_text.get("use_language_detection", True),
         use_text_stats=cfg_text.get("use_text_stats", True),
+        use_text_stats_pro=cfg_text.get("use_text_stats_pro", False),
+        use_lexicon=cfg_text.get("lexicon", {}).get("enabled", False),
+        lexicon_top_k=cfg_text.get("lexicon", {}).get("top_k", 20),
+        lexicon_min_df=cfg_text.get("lexicon", {}).get("min_df", 3),
+        lexicon_max_df=cfg_text.get("lexicon", {}).get("max_df", 0.95)
     )
 
     # 2) Optionnel : ajouter la branche caractères
@@ -241,7 +261,7 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
         logger.info(f"Application des poids (config): {raw_weights}")
 
     # noms internes de la branche word_branch
-    inner_names = {"tfidf", "has_desc", "title_len", "text_stats", "language"}
+    inner_names = {"tfidf", "has_desc", "title_len", "text_stats", "text_stats_pro", "language", "lexicon"}
 
     top_weights   = {}
     inner_weights = {}

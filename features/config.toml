@@ -17,11 +17,14 @@ x_test_csv  = "data/X_test_update.csv"
 # --- Chemins de sortie ---
 [outputs]
 # Fichier .joblib pour sauvegarder le pipeline entraîné
-model_out   = "models/text_image_classifier.joblib"
+model_out   = "artifacts/b4.joblib"
 # Fichier CSV contenant les prédictions sur X_test
-pred_out    = "models/y_test_pred.csv"
+pred_out    = "results/preds_b4.csv"
 # Fichier CSV des résultats de comparaison LR vs SVC
 compare_out = "models/compare_cv_results.csv"
+export_features = true
+oof_out         = "results/preds_oof_b4.csv"  
+svd_preview_b4  = "results/features_b4_svd100_preview.csv" 
 # Dropbox: choisir le repertoire local ou mettre les logs pour ne pas créer de latence avec la synchronisation
 log_dir = "C:/Users/colle/Desktop/rakuten-logs"   
 
@@ -32,7 +35,7 @@ seed = 42
 [compute]
 # Fixer le parallélisme (mettre 1 pour un debug plus lisible)
 # Utiliser plusieurs jobs en production si la machine le permet
-n_jobs = -1
+n_jobs = 1      # 1 pour éviter la parallélisation au moment du hstack
 use_cache = true
 
 # --- Réglages branche texte
@@ -56,7 +59,14 @@ use_lemmatization = false
 
 # Active/désactive les features additionnelles
 use_text_stats = true
-use_language_detection = false      #couteux en calcul
+use_text_stats_pro   = true    
+use_language_detection = true      #couteux en calcul
+
+[text.lexicon]       # bloc chi2
+enabled = true
+top_k   = 40
+min_df  = 3
+max_df  = 0.98
 
 # -->  "char"
 [text.char]
@@ -72,10 +82,12 @@ sublinear_tf = true
 # Pondération des branches (optionnel mais utile pour stabiliser)
 [text.weights]
 tfidf_word = 1.0
-tfidf_char = 0.4
+tfidf_char = 0.7
 has_desc   = 0.2
 title_len  = 0.2
-text_stats = 0.2         # pris en compte si use_text_stats=true
+text_stats = 0.25    # pris en compte si use_text_stats=true
+text_stats_pro=0.35  # pris en compte si use_text_stats_pro=true
+lexicon=0.4         # pris en compte si [text.lexicon] enabled=true
 #language   = 0.1         # pris en compte si use_language_detection=true SUPPRIMER / COMMENTER si la détection de langue est désactivée
 
 # [text.cleaner]
@@ -87,6 +99,12 @@ remove_numbers = true
 clean_special = true
 handle_emojis = true
 
+[text.svd]
+enabled = true
+n_components = 600      # 400–600 : 600 si on a aussi la CNN ; 400 si RAM serrée
+random_state = 42
+l2norm = true
+
 # --- Paramètres liés aux images ---
 [images]
 # Dossier contenant les images associées à X_train
@@ -94,7 +112,7 @@ train_dir = "data/images/images/image_train"
 # Dossier contenant les images associées à X_test
 test_dir  = "data/images/images/image_test"
 # Taille cible des images avant vectorisation (hauteur, largeur)
-size = [96, 96]  # Taille des images
+size = [128, 128]  # Taille des images
 batch_size = 32    # Réduire sipython -m main.train_model --compare-all OOM
 cache_enabled = true
 ext = ".jpg"
@@ -126,19 +144,23 @@ random_state = 42
 # Peser la contribution texte vs image(s) sans toucher au code
 [fusion.weights]
 text  = 1.0
-image_pixels = 0.7
-image_stats  = 0.3
-image_cnn = 1.2             # pris en compte si cnn =true SUPPRIMER / COMMENTER si CNN est désactivée
+image_pixels = 0                        # mettre 0 si image_cnn
+image_stats  = 0                        # mettre 0 si le pipe est combiné
+image_cnn = 1.2
+image_stats_combined = 0.35             # branche stats images
 
 # --- Statistiques des images ---
 # Features width/height/occupancy (hors blanc/noir)
 # Activer les features de stats (5 colonnes)
-[images.stats]
+
+[images.stats_combined]
 enabled = true              # true = on ajoute la branche de features automatiques
 white_threshold = 230       # pixels >= 230 -> fond (blanc)
 black_threshold = 25        # pixels <= 25  -> fond (noir)
 min_area = 16               # surface min pour éviter le bruit
 out_prefix = "auto"         # préfixe des noms de features (traçabilité) avant "img_w230_b25_"
+prefix_basic = "img_"
+prefix_pro   = "pro_"
 
 # --- Stratégies de rééchantillonnage ---
 # Paramétrer le rééchantillonnage (under adaptatif + over tail )
@@ -159,12 +181,12 @@ tail_min    = 500
 
 [model]
 # "lr" (LogisticRegression) ou "svc" (LinearSVC)
-name = "lr"
+name = "svc"
 
 # Pondération auto des classes
 # true  = appliquer class_weight="balanced"
 # false = class_weight=None (pas de pondération automatique des classes)
-use_class_weight = true          # si true, class_weight="balanced"
+use_class_weight = false          # si true, class_weight="balanced"
 class_weight     = "balanced"    # ignoré si use_class_weight=false
 
 # Hyperparamètres LR
@@ -174,13 +196,15 @@ solver   = "lbfgs"                # "saga","lbfgs","liblinear","newton-cg","sag"
 # sag,	l2 / none,	oui (multinomial),	plutôt sparse,	Grand jeu de données, seulement l2.
 # saga, l1, l2, elasticnet,  oui (multinomial), plutôt sparse, Le plus flexible (L1/EN, class_weight), très adapté au TF-IDF; peut nécessiter plus d’itérations.
 # liblinear, l1, l2, ovr uniquement,  sparse, Rapide sur petits/moyens problèmes; pas de multinomial “vrai”, pas d’elasticnet.
-penalty  = "l2"                  # "l2","l1","elasticnet","none"
+loss = "squared_hinge"          # ou "squared_hinge" (défaut sklearn)
+dual = false            # voir règle ci-dessous
+penalty = "l2"          # garder l2 au début; l1 seulement si dual=false ,"l2","l1","elasticnet","none"         
 # la régularisation (contrôle la complexité du modèle) :
 # l2 (ridge) : rétrécir tous les coefficients → stable, quasi toujours un bon choix.
 # l1 (lasso) : pousse beaucoup de coefficients à 0 → sélection de variables (sparse), 
 # peut aider avec TF-IDF très haute dimension mais plus lent.
 # elasticnet : mélange l1 et l2 (il faut aussi l1_ratio entre 0 et 1).
-C        = 0.1
+C        = 1      #0.1 avant pour LR avec lbfgs
 max_iter = 8000
 tol      = 0.001
 verbose  = 0                     # 1..3 pour plus de logs

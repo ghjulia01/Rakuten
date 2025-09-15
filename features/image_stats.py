@@ -1,104 +1,82 @@
 # features/image_stats.py
+from math import hypot
 from pathlib import Path
 from PIL import Image
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
-
-class ImageStatsFeaturizer(BaseEstimator, TransformerMixin):
+class ImageStatsCombinedFeaturizer(BaseEstimator, TransformerMixin):
     """
-    Extrait 5 features par image AVANT tout resize :
-      - width  : largeur de l'objet détecté (px)
-      - height : hauteur de l'objet détecté (px)
-      - occupancy : surface objet / surface image ∈ [0,1]
-      - white_ratio : part de pixels >= white_threshold
-      - black_ratio : part de pixels <= black_threshold
-    L'objet est tout pixel dont le niveau de gris est ∈ (black_threshold, white_threshold).
+    Combine les features BASIC (width,height,occupancy,white_ratio,black_ratio)
+    et PRO (gray_mean/std, p10/p90, dyn_range, entropy, lap_var, edge_density,
+    aspect_ratio, bbox_center_offset, sat_mean, colorfulness, border_white_ratio, file_bpp)
+    en une seule lecture par image.
     """
-
-    def __init__(
-        self,
-        image_dir: str = None,
-        imgid_col: str = "imageid",
-        pid_col: str = "productid",
-        white_threshold: int = 230,
-        black_threshold: int = 25,
-        min_area: int = 16,
-        out_prefix: str = "auto",  # "auto" nomme les colonnes selon les seuils
-        use_cache: bool = True,
-        cache_filename: str | None = None,
-    ):
-        # Ne rien faire d'autre que stocker les paramètres tels quels (sklearn clone-friendly)
+    def __init__(self, image_dir=None, imgid_col="imageid", pid_col="productid",
+                 white_threshold=230, black_threshold=25, min_area=16,
+                 prefix_basic="img_", prefix_pro="pro_"):
         self.image_dir = image_dir
         self.imgid_col = imgid_col
         self.pid_col = pid_col
         self.white_threshold = int(white_threshold)
         self.black_threshold = int(black_threshold)
         self.min_area = int(min_area)
-        self.out_prefix = out_prefix
-        self.use_cache = use_cache
-        self.cache_filename = cache_filename
-
-    def set_image_dir(self, new_dir: str):
-        """Permet de re-pointer le dossier (utile pour X_test)."""
-        self.image_dir = new_dir
-        if hasattr(self, "image_dir_"):
-            self.image_dir_ = Path(new_dir)
-        return self
+        self.prefix_basic = str(prefix_basic)
+        self.prefix_pro = str(prefix_pro)
 
     def fit(self, X, y=None):
-        # Toute dérivation/validation ici (pas dans __init__)
         self.image_dir_ = Path(self.image_dir) if self.image_dir is not None else None
-        # Gérer le préfixe des noms de colonnes
-        if self.out_prefix in (None, "auto"):
-            self.out_prefix_ = f"img_w{self.white_threshold}_b{self.black_threshold}_"
-        else:
-            self.out_prefix_ = str(self.out_prefix)
-
-        self.columns_ = np.array([
-            f"{self.out_prefix_}width",
-            f"{self.out_prefix_}height",
-            f"{self.out_prefix_}occupancy",
-            f"{self.out_prefix_}white_ratio",
-            f"{self.out_prefix_}black_ratio",
-        ])
+        self.basic_cols_ = [
+            f"{self.prefix_basic}width",
+            f"{self.prefix_basic}height",
+            f"{self.prefix_basic}occupancy",
+            f"{self.prefix_basic}white_ratio",
+            f"{self.prefix_basic}black_ratio",
+        ]
+        self.pro_cols_ = [
+            f"{self.prefix_pro}gray_mean", f"{self.prefix_pro}gray_std",
+            f"{self.prefix_pro}p10", f"{self.prefix_pro}p90", f"{self.prefix_pro}dyn_range",
+            f"{self.prefix_pro}entropy", f"{self.prefix_pro}lap_var", f"{self.prefix_pro}edge_density",
+            f"{self.prefix_pro}aspect_ratio", f"{self.prefix_pro}bbox_center_offset",
+            f"{self.prefix_pro}sat_mean", f"{self.prefix_pro}colorfulness",
+            f"{self.prefix_pro}border_white_ratio", f"{self.prefix_pro}file_bpp",
+        ]
+        self.columns_ = np.array(self.basic_cols_ + self.pro_cols_)
         return self
+    
+    def set_image_dir(self, image_dir):
+        self.image_dir = image_dir
+        if hasattr(self, "image_dir_"):
+            self.image_dir_ = Path(image_dir)
+    
+    @staticmethod
+    def _entropy(gray):
+        hist, _ = np.histogram(gray, bins=256, range=(0,255), density=True)
+        hist = hist[hist>0]
+        return float(-(hist * np.log2(hist)).sum())
 
-    def _measure_one(self, img_path: Path):
-        try:
-            with Image.open(img_path) as im:
-                im = im.convert("L")  # grayscale
-                arr = np.asarray(im, dtype=np.uint8)
+    @staticmethod
+    def _lap_var(gray):
+        k = np.array([[0,1,0],[1,-4,1],[0,1,0]], dtype=np.float32)
+        from scipy.signal import convolve2d
+        g = convolve2d(gray.astype(np.float32), k, mode="same", boundary="symm")
+        return float(g.var())
 
-            H, W = arr.shape[:2]
-            if H == 0 or W == 0:
-                return 0, 0, 0.0, 0.0, 0.0
+    @staticmethod
+    def _edge_density(gray, thr=20.0):
+        gx = np.zeros_like(gray, dtype=np.float32)
+        gy = np.zeros_like(gray, dtype=np.float32)
+        gx[:,1:-1] = (gray[:,2:].astype(np.float32) - gray[:,:-2].astype(np.float32)) * 0.5
+        gy[1:-1,:] = (gray[2:,:].astype(np.float32) - gray[:-2,:].astype(np.float32)) * 0.5
+        mag = np.hypot(gx, gy)
+        return float((mag > thr).mean())
 
-            white_mask = (arr >= self.white_threshold)
-            black_mask = (arr <= self.black_threshold)
-            mid_mask = (~white_mask) & (~black_mask)
-
-            area = int(mid_mask.sum())
-            # ratios globaux (rapport de pixels)
-            white_ratio = float(white_mask.mean())
-            black_ratio = float(black_mask.mean())
-
-            if area < self.min_area:
-                # Trop petit signal -> 0 pour width/height/occupancy,
-                # mais on garde les ratios globaux utiles
-                return 0, 0, 0.0, white_ratio, black_ratio
-
-            ys, xs = np.nonzero(mid_mask)
-            h = int(ys.max() - ys.min() + 1)
-            w = int(xs.max() - xs.min() + 1)
-            occ = float(area) / float(H * W)
-
-            return w, h, occ, white_ratio, black_ratio
-
-        except Exception:
-            # Image manquante ou corrompue
-            return 0, 0, 0.0, 0.0, 0.0
+    @staticmethod
+    def _colorfulness(rgb):
+        R,G,B = rgb[...,0].astype(np.float32), rgb[...,1].astype(np.float32), rgb[...,2].astype(np.float32)
+        rg, yb = np.abs(R-G), np.abs(0.5*(R+G)-B)
+        return float(np.sqrt(rg.var()+yb.var()) + 0.3*np.sqrt(rg.mean()**2 + yb.mean()**2))
 
     def transform(self, X: pd.DataFrame):
         if self.imgid_col not in X.columns or self.pid_col not in X.columns:
@@ -107,23 +85,100 @@ class ImageStatsFeaturizer(BaseEstimator, TransformerMixin):
             raise RuntimeError("image_dir_ non défini : as-tu appelé fit() ?")
 
         n = len(X)
-        data = np.zeros((n, 5), dtype=np.float32)
+        out = np.zeros((n, len(self.columns_)), dtype=np.float32)
         idxs = []
 
         for i, (idx, row) in enumerate(X[[self.imgid_col, self.pid_col]].iterrows()):
-            try:
-                imgid = int(row[self.imgid_col])
-                pid = int(row[self.pid_col])
-                name = f"image_{imgid}_product_{pid}.jpg"
-                path = self.image_dir_ / name
-                w, h, occ, wr, br = self._measure_one(path)
-                data[i, :] = (w, h, occ, wr, br)
-            except Exception:
-                # ligne déjà à zéro
-                pass
             idxs.append(idx)
+            try:
+                imgid = int(row[self.imgid_col]); pid = int(row[self.pid_col])
+                path = self.image_dir_ / f"image_{imgid}_product_{pid}.jpg"
 
-        return pd.DataFrame(data, index=idxs, columns=self.columns_)
+                with Image.open(path) as im:
+                    im_rgb = im.convert("RGB")
+                    rgb = np.asarray(im_rgb)
+                    gray = np.asarray(im_rgb.convert("L"))
+
+                H, W = gray.shape
+                if H == 0 or W == 0:
+                    continue
+
+                # masques
+                white_mask = (gray >= self.white_threshold)
+                black_mask = (gray <= self.black_threshold)
+                mid = (~white_mask) & (~black_mask)
+
+                # BASIC
+                area = int(mid.sum())
+                white_ratio = float(white_mask.mean())
+                black_ratio = float(black_mask.mean())
+                if area >= self.min_area:
+                    ys, xs = np.nonzero(mid)
+                    h = int(ys.max() - ys.min() + 1)
+                    w = int(xs.max() - xs.min() + 1)
+                    occ = float(area) / float(H * W)
+                else:
+                    h = w = 0
+                    occ = 0.0
+
+                # PRO
+                p10, p90 = np.percentile(gray, [10, 90])
+                gray_mean, gray_std = float(gray.mean()), float(gray.std())
+                dyn = float(p90 - p10)
+                ent = self._entropy(gray)
+                lapv = self._lap_var(gray)
+                edged = self._edge_density(gray)
+
+                if area >= self.min_area and h > 0:
+                    aspect = (w / max(1, h))
+                    ys, xs = np.nonzero(mid)
+                    cy, cx = float(ys.mean()), float(xs.mean())
+                    off = hypot(cx - (W-1)/2.0, cy - (H-1)/2.0) / hypot(W/2.0, H/2.0)
+                else:
+                    aspect, off = 0.0, 1.0
+
+                # saturation moyenne (sous-échantillonnée si gros)
+                try:
+                    import colorsys
+                    flat = rgb.reshape(-1,3)/255.0
+                    step = max(1, flat.shape[0]//5000)
+                    s = 0.0
+                    for r,g,b in flat[::step]:
+                        s += colorsys.rgb_to_hsv(r,g,b)[1]
+                    sat_mean = float(s / (flat[::step].shape[0]))
+                except Exception:
+                    sat_mean = 0.0
+
+                cf = self._colorfulness(rgb)
+
+                # bordures blanches (5% de bande)
+                bw = int(max(1, 0.05*min(H,W)))
+                top = (gray[:bw,:] >= self.white_threshold).mean()
+                bottom = (gray[-bw:,:] >= self.white_threshold).mean()
+                left = (gray[:,:bw] >= self.white_threshold).mean()
+                right = (gray[:,-bw:] >= self.white_threshold).mean()
+                border_white = float(np.mean([top,bottom,left,right]))
+
+                try:
+                    fsize = path.stat().st_size
+                    bpp = float(fsize) / float(max(1, H*W*3))
+                except Exception:
+                    bpp = 0.0
+
+                # write row
+                out[i, :len(self.basic_cols_)] = [w, h, occ, white_ratio, black_ratio]
+                out[i, len(self.basic_cols_):] = [
+                    gray_mean, gray_std, float(p10), float(p90), dyn,
+                    ent, lapv, edged,
+                    aspect, off,
+                    sat_mean, cf,
+                    border_white, bpp
+                ]
+            except Exception:
+                # ligne à zéro si problème d'I/O
+                pass
+
+        return pd.DataFrame(out, index=idxs, columns=self.columns_)
 
     def get_feature_names_out(self, input_features=None):
         return self.columns_

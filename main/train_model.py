@@ -87,7 +87,7 @@ from features.image_loader import ImageLoader
 from models.text_pipeline import create_text_pipeline_from_cfg
 from models.image_pipeline import create_image_pipeline
 from models.image_pipeline import create_image_pipeline_from_cfg 
-from features.image_stats import ImageStatsFeaturizer
+from features.image_stats import ImageStatsCombinedFeaturizer
 from models.image_pipeline import diagnostic_reduction
 from models.cnn_features import CNNFeaturizer
 from sklearn.decomposition import TruncatedSVD
@@ -273,7 +273,18 @@ class AdaptiveUnderSampler(BaseSampler):
 
     def _more_tags(self):
         return {"allow_nan": False, "X_types": ["2darray", "sparse"]}
-    
+
+# --- utils mémoire : caster en float32 pour réduire l'empreinte ---
+from scipy import sparse
+class ToFloat32:
+    def fit(self, X, y=None): 
+        return self
+    def transform(self, X):
+        try:
+            return X.astype("float32") if sparse.issparse(X) else X.astype(np.float32)
+        except Exception:
+            return X  # garde-fou si un bloc ne supporte pas astype 
+          
 # === Fabriquer le classifieur à partir de la config =============================
 def build_classifier(cfg: dict, seed: int):
     """
@@ -306,11 +317,18 @@ def build_classifier(cfg: dict, seed: int):
     # === LinearSVC (option texte) =============================================
     if name == "svc":
         cw = "balanced" if model.get("use_class_weight", False) else None
+        loss = str(model.get("loss", "squared_hinge"))   # "hinge" ou "squared_hinge"
+        dual = bool(model.get("dual", True))             # voir note ci-dessous
+        penalty = str(model.get("penalty", "l2"))        # "l2" (par défaut) ou "l1" (avec dual=False)
         return LinearSVC(
             C=float(model.get("C", 1.0)),
             tol=float(model.get("tol", 1e-3)),
             max_iter=int(model.get("max_iter", 2000)),
             class_weight=cw,
+            loss=loss,
+            dual=dual,
+            penalty=penalty,
+
         )
 
     # === LogisticRegression ====================================================
@@ -425,16 +443,26 @@ def build_baseline_pipeline(
         else:
             img_branch = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
 
+        img_union = FeatureUnion([("img", img_branch)])
+
+        stats_c = cfg.get("images", {}).get("stats_combined", {})
+        if bool(stats_c.get("enabled", False)):
+            img_union.transformer_list.append((
+                "image_stats_combined",
+                ImageStatsCombinedFeaturizer(
+                    image_dir=cfg["images"]["train_dir"],
+                    imgid_col="imageid", pid_col="productid",
+                    white_threshold=int(stats_c.get("white_threshold", 230)),
+                    black_threshold=int(stats_c.get("black_threshold", 25)),
+                    min_area=int(stats_c.get("min_area", 16)),
+                    prefix_basic=str(stats_c.get("prefix_basic", "img_")),
+                    prefix_pro=str(stats_c.get("prefix_pro", "pro_")),
+                )
+            ))
+
         clf = build_classifier(cfg, seed)
-
         cache = get_cache(cfg)
-        if cache is not None and hasattr(cache, "location"):
-            logger.info(f"Cache sklearn activé: {cache.location}")
-
-        pipe = SkPipeline(
-            [("img", img_branch), ("clf", clf)],
-            memory=cache
-        )
+        pipe = SkPipeline([("img", img_union), ("clf", clf)], memory=cache)
         return pipe, ["productid", "imageid"]
     
     # ---------- B4 : multimodal (texte + image) avec sampling ----------
@@ -907,6 +935,19 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
     # Utiliser la fabrique qui lit directement toutes les options depuis [text]
     text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
 
+    # --- NEW: SVD global sur la branche texte (optionnel via [text.svd]) ---
+    svd_cfg = (cfg.get("text", {}).get("svd", {}) or {})
+    if bool(svd_cfg.get("enabled", True)):
+        n_comp = int(svd_cfg.get("n_components", 600))   # 400–600 typiquement
+        rs     = int(svd_cfg.get("random_state", seed))
+        l2norm = bool(svd_cfg.get("l2norm", True))
+        from sklearn.pipeline import Pipeline as _SkPipe
+        steps_txt = [("to32", ToFloat32()),
+                     ("svd", TruncatedSVD(n_components=n_comp, random_state=rs))]
+        if l2norm:
+            steps_txt.append(("l2", Normalizer(copy=False)))
+        text_branch = _SkPipe([("text", text_branch), *steps_txt])
+
     # Construire la branche IMAGES (pixels) depuis le TOML
     image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
 
@@ -922,18 +963,19 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
             transformers.append(("image_cnn", image_cnn))
     except Exception as e:
         logger.warning("CNN désactivée (raison: %s)", e)
-    stats_cfg = cfg.get("images", {}).get("stats", {})
-    if bool(stats_cfg.get("enabled", False)):
-        image_stats = ImageStatsFeaturizer(
+        
+    # Ajouter la branche IMAGES (stats combinées)
+    stats_c = cfg.get("images", {}).get("stats_combined", {})
+    if bool(stats_c.get("enabled", False)):
+        transformers.append(("image_stats_combined", ImageStatsCombinedFeaturizer(
             image_dir=image_train_dir,
-            imgid_col="imageid",
-            pid_col="productid",
-            white_threshold=int(stats_cfg.get("white_threshold", 230)),
-            black_threshold=int(stats_cfg.get("black_threshold", 25)),
-            min_area=int(stats_cfg.get("min_area", 16)),
-            out_prefix=str(stats_cfg.get("out_prefix", "auto")),
-        )
-        transformers.append(("image_stats", image_stats))
+            imgid_col="imageid", pid_col="productid",
+            white_threshold=int(stats_c.get("white_threshold", 230)),
+            black_threshold=int(stats_c.get("black_threshold", 25)),
+            min_area=int(stats_c.get("min_area", 16)),
+            prefix_basic=str(stats_c.get("prefix_basic", "img_")),
+            prefix_pro=str(stats_c.get("prefix_pro", "pro_")),
+        )))
 
     # Fusionner les branches
     fusion_cfg = (cfg.get("fusion", {}) or {}).get("weights", None)
@@ -943,7 +985,8 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
     # 1) union SANS memory
     union = FeatureUnion(
         transformer_list=transformers,
-        transformer_weights=fusion_weights
+        transformer_weights=fusion_weights,
+        n_jobs=1                          # <— clé pour la stabilité mémoire pendant fit
     )
     # Construire le classifieur final
     model = build_classifier(cfg, seed)
@@ -1012,10 +1055,14 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
                 else:
                     raise RuntimeError("ImageLoader n'avoir ni 'set_image_dir' ni attribut 'image_dir'.")
             new_list.append((name, sub))
-        elif name == "image_stats":
+
+        elif name == "image_stats_combined":   # NEW
             if hasattr(sub, "set_image_dir"):
                 sub.set_image_dir(image_test_dir)
+            else:
+                sub.image_dir = image_test_dir
             new_list.append((name, sub))
+    
         elif name == "image_cnn":
             # sub est une sklearn.Pipeline ; le featurizer est 'cnn'
             if "cnn" in sub.named_steps:

@@ -169,10 +169,76 @@ def top_confusions(kind, topk=20, labels_map=None):
     out = Path("results/reports") / f"top_confusions_{kind}.csv"
     df.to_csv(out, index=False)
     print(f"[OK] Top confusions → {out}")
+def do_shap(kind, model_path, bg_size=2000, explain_size=300):
+    """
+    Démo SHAP:
+    - charge le pipeline .joblib
+    - prend un échantillon des features OOF comme background + points à expliquer
+    - LinearExplainer si LogisticRegression, sinon KernelExplainer (plus lent)
+    """
+    try:
+        import joblib, shap  # shap est optionnel, installer si besoin
+    except Exception as e:
+        print("[WARN] SHAP indisponible (installe 'shap'): ", e)
+        return False
+
+    model_path = Path(model_path)
+    if not model_path.exists():
+        print(f"[WARN] Modèle introuvable: {model_path}")
+        return False
+
+    Z, _, src = try_load_oof_features(kind)
+    if Z is None:
+        print("[WARN] Pas de features OOF pour SHAP.")
+        return False
+
+    print(f"[INFO] Chargement du pipeline: {model_path}")
+    pipe = joblib.load(model_path)
+
+    # Estimator final dans le pipeline
+    clf = getattr(pipe, "named_steps", {}).get("model", None)
+    if clf is None:
+        print("[WARN] Étape 'model' introuvable dans le pipeline.")
+        return False
+
+    n = Z.shape[0]
+    bg = min(bg_size, n)
+    ex = min(explain_size, n)
+    rng = np.random.default_rng(0)
+    bg_idx = np.sort(rng.choice(n, size=bg, replace=False))
+    ex_idx = np.sort(rng.choice(n, size=ex, replace=False))
+
+    X_bg = Z[bg_idx] if not hasattr(Z, "tocsr") else Z[bg_idx]
+    X_ex = Z[ex_idx] if not hasattr(Z, "tocsr") else Z[ex_idx]
+
+    # LinearExplainer pour LogisticRegression, sinon Kernel (lent)
+    name = clf.__class__.__name__
+    print(f"[INFO] Estimator final: {name}")
+    try:
+        if name == "LogisticRegression":
+            explainer = shap.LinearExplainer(clf, X_bg)
+            sv = explainer.shap_values(X_ex)
+            print("[OK] SHAP LinearExplainer calculé (LogReg). Ouvre un notebook et fais shap.summary_plot(sv, X_ex).")
+        else:
+            f = clf.decision_function if hasattr(clf, "decision_function") else clf.predict_proba
+            # background plus petit pour accélérer
+            if hasattr(X_bg, "tocsr"):
+                X_bg_small = X_bg[:200]
+            else:
+                X_bg_small = X_bg[:200]
+            explainer = shap.KernelExplainer(f, X_bg_small)
+            sv = explainer.shap_values(X_ex[:50])
+            print("[OK] SHAP KernelExplainer calculé (estimation non linéaire). "
+                  "Ouvre un notebook et fais shap.summary_plot(sv, X_ex[:50]).")
+        return True
+    except Exception as e:
+        print("[WARN] SHAP a échoué:", e)
+        return False
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kind", required=True, choices=["b2","b3","b4"])
+    ap.add_argument("--model", default=None, help="Chemin du pipeline .joblib pour SHAP (optionnel)")
     ap.add_argument("--max-sample", type=int, default=8000)
     ap.add_argument("--topk", type=int, default=20)
     ap.add_argument("--color", choices=["okerr","theme","none"], default="okerr",
@@ -183,6 +249,9 @@ def main():
     lblmap = load_labels_map()
     do_acp(args.kind, color_mode=args.color, max_n=args.max_sample)
     top_confusions(args.kind, topk=args.topk, labels_map=lblmap)
+
+    if args.model:
+        do_shap(args.kind, args.model)
 
 if __name__ == "__main__":
     main()

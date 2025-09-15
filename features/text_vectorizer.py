@@ -28,7 +28,7 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
         norm: str = "l2",
         strip_accents: Optional[str] = "unicode",
         lowercase: bool = False,                # déjà en minuscules via TextCleaner
-        token_pattern: str = r"(?u)\b\w+\b",
+        token_pattern: str = r"(?u)\b(?=\w*[A-Za-z])\w+\b",
         dtype: Union[str, np.dtype] = "float64",
         stop_words: StopWords = None,
         analyzer: str = "word",   # "word" | "char" | "char_wb"       

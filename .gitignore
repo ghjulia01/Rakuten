@@ -58,5 +58,8 @@ models/*.joblib
 *.npz
 *.pt
 *.h5
-
+# Bytecode / caches
+__pycache__/
+*.pyc
+*.pyo
 
