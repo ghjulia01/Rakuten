@@ -240,7 +240,7 @@ Il est traité en **plusieurs pipelines parallèles** qui sont ensuite fusionné
 - **Statistiques textuelles** :  
   - Présence/absence d’une description (`HasDescriptionFlag`).  
   - Longueur du titre (`DesignationLength`).  
-  - Ratios (chiffres, majuscules, ponctuation), diversité lexicale, etc. (`TextStatistics`, `TextStatisticsPro`).  
+  - Ratios (chiffres, majuscules, ponctuation), diversité lexicale, etc. (`TextStatisticsPro`).  
   - Détection de langue (`LanguageDetector`).  
   - Lexiques spécifiques par catégorie (`Chi2LexiconFeatures`).  
 
