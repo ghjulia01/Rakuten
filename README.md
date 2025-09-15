@@ -570,10 +570,10 @@ Ce projet utilise des données propriétaires de Rakuten, mises à disposition u
 
 #### M — Streamlit
 
-
 Cette app sert à **explorer visuellement** le dataset (texte + images), **montrer la méthode** (pas à pas B2/B3/B4) et **simuler** l’affichage d’exemples. 
 Elle fonctionne avec un petit **jeu d’images de démo** (facile à créer).  
 Par défaut, l’app lit `streamlit_app/demo_images/demo_images.csv` et les images du dossier `streamlit_app/demo_images/`. 
+
 ---
 
 ### 1) Créer un mini-jeu d’images de démo (recommandé)
