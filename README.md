@@ -326,22 +326,22 @@ Architecture du projet
 - │
 - ├── features/
 - │ ├── config.toml # configuration centrale (texte, images, sampling, model, cv…)
+- │ ├── text_cleaner.py
+- │ ├── text_vectorizer.py
+- │ ├── text_features.py # HasDescription, DesignationLength, TextStatistics, LanguageDetector...
+- │ ├── image_loader.py
+- │ ├── image_stats.py 
 - │ └── make_cleaned_frequencies_and_map.py
 - │
 - ├── models/ # transformeurs & pipelines
-- │ ├── text_cleaner.py
-- │ ├── text_vectorizer.py
-- │ ├── text_features.py # HasDescription, DesignationLength, TextStatistics, LanguageDetector
 - │ ├── text_pipeline.py
-- │ ├── image_loader.py
-- │ ├── image_stats.py # ImageStatsFeaturizer
 - │ ├── image_pipeline.py # pixels → flatten → (PCA)
 - │ └── cnn_features.py # embeddings ResNet → L2 → (SVD)
 - │
 - ├── main/
 - │ └── train_model.py # orchestration (baselines, CV, pipeline complet, compare)
 - │
-- ├── results/
+- ├── results/ # toutes les sorties générées pour l'analyse
 - │ ├── baseline_results_summary.csv
 - │ ├── compare_cv_results.csv
 - │ ├── predictions_test.csv
@@ -349,16 +349,25 @@ Architecture du projet
 - │ ├── baseline_f1_macro.png
 - │ └── confusion_matrix_b4.png
 - │
-- ├── reports/
-- │ └── report_b*_cv.txt
-- │
 - ├── tools/ # scripts de reporting
+- │ ├── compare_b2_b4.py
+- │ ├── compare_models.py       # comparaisons & visus globales
+- │ ├── diagnostics_acp_shap.py
+- │ ├── diagnostics_acp.py
+- │ ├── generate_requirements.py # génère un requirements.txt depuis l’environnement courant
+- │ ├── gridsearch_svc.py # génère les meilleurs paramètres pour SVC
+- │ ├── peek_features.py # Inspecte la taille/nnz/mémoire des features par branche avant la fusion
+- │ ├── rapport_complet.py
 - │ ├── plot_baselines.py
 - │ ├── plot_baseline_bars.py
 - │ ├── plot_confusion_matrix.py
-- │ ├── generate_requirements.py # génère un requirements.txt depuis l’environnement courant
-- │ └── compare_models.py # comparaisons & visus globales
+- ├── streamlit_app/
+- │ └── config.py
 - └── README.md
+- └── gitignore
+- └── requirements.txt
+
+---
 
 
 #### F — Baselines & protocole d’évaluation
@@ -370,8 +379,8 @@ Elles servent de **points de comparaison** pour mesurer l’apport du texte, des
 |------|---------------------|-----------------|
 | **B0** | Naïf (majoritaire) | Toujours prédire la classe la plus fréquente. |
 | **B1** | Naïf (stratifié)   | Tirer au hasard, mais en respectant la distribution des classes. |
-| **B2** | Texte seul         | Nettoyage texte → TF-IDF (mots et éventuellement caractères) → Logistic Regression. |
-| **B3** | Image seule        | Pixels (flatten + PCA) ou CNN → Logistic Regression. |
+| **B2** | Texte seul         | Nettoyage texte → TF-IDF (mots et éventuellement caractères) → Logistic Regression ou Linear SVC. |
+| **B3** | Image seule        | Pixels (flatten + PCA) ou CNN → Logistic Regression ou Linear SVC. |
 | **B4** | Multimodal         | Texte + Image (pixels **ou** CNN) + Statistiques d’images → Logistic Regression ou Linear SVC. |
 
 **Pourquoi ces baselines ?**  
@@ -420,6 +429,9 @@ python -m main.train_model --config features/config.toml --model svc   # ou lr
 ```bash
 python -m main.train_model --config features/config.toml --compare
 ```
+
+---
+
 
 #### H — Rapports et visualisations
 
@@ -487,6 +499,9 @@ python -m tools.rapport_complet --preds results/preds_b4.csv \
   --out-md results/reports/b4_summary.md
 ```
 
+---
+
+
 #### I — Organisation des sorties
 
 - **results/** → CSV, matrices de confusion, ACP, comparaisons.
@@ -494,6 +509,7 @@ python -m tools.rapport_complet --preds results/preds_b4.csv \
 - **artifacts/** → modèles sauvegardés (.joblib).
 - **results/logs/** → logs d’entraînement et logs spécifiques image.
 
+---
 
 #### J — Bonnes pratiques & Dépannage
 
@@ -508,7 +524,9 @@ python -m tools.rapport_complet --preds results/preds_b4.csv \
   ```
   
 **Supprimer le cache pour ne pas garder d'ancien problèmes**
+```powershell
 Remove-Item -Recurse -Force "C:\Users\colle\Desktop\rakuten-logs\skcache"
+ ```
 
 - ##### Fixer les seeds ([random].seed) et le parallélisme ([compute].n_jobs).
 - ##### Convergence LR : 
@@ -518,6 +536,9 @@ augmenter max_iter (ex. 5000) ou relâcher tol.
 Préférer PCA dense,
 Réduire images.size si nécessaire.
 Pour les images : size=32 (dev) → 64 (prod) ; n_components=80–120.
+
+---
+
 
 
 #### K — Installation
@@ -563,6 +584,7 @@ Il est obligatoire de s'enregistrer au challenge pour pouvoir accéder aux donn�
 - X_train.csv, Y_train.csv, X_test.csv
 - images.zip à extraire dans ./data/images/
 
+---
 
 #### L — License
 

@@ -35,7 +35,7 @@ seed = 42
 [compute]
 # Fixer le parallélisme (mettre 1 pour un debug plus lisible)
 # Utiliser plusieurs jobs en production si la machine le permet
-n_jobs = 1      # 1 pour éviter la parallélisation au moment du hstack
+n_jobs = 2      # 1 pour éviter la parallélisation au moment du hstack
 use_cache = true
 
 # --- Réglages branche texte
