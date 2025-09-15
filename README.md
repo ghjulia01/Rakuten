@@ -133,7 +133,7 @@ subgraph P3["3) Pipeline multimodale (B4) — entraînement"]
 
   %% Texte
   T0a["TextCleaner<br/>(normaliser, traduire, stopwords, stemmer)"]:::tool
-  T0b["Pré-traitement"<br/>(normaliser)"]:::tool
+  T0b["Pré-traitement<br/>(normaliser)"]:::tool
   T1["TF-IDF (word)"]:::tool
   T1b["TF-IDF (char/char_wb) <i>option</i>"]:::tool
   T2["HasDescription / TitleLength"]:::tool
@@ -161,7 +161,7 @@ subgraph P3["3) Pipeline multimodale (B4) — entraînement"]
   SCAL["StandardScaler(with_mean=false)"]:::step
   CLF["Classifier : LogisticRegression(saga)<br/>ou LinearSVC"]:::step
 end
-class P3,T0,T1,T1b,T2,T3,T4,T5,I1,I2,I3,C1,C2,S1,FU,SAMP,SCAL,CLF phase;
+class P3,T0a,T0b,T1,T1b,T2,T3,T4,T5,I1,I2,I3,C1,C2,S1,FU,SAMP,SCAL,CLF phase;
 
 %% Branching & fusion (texte)
 T0a --> T1
