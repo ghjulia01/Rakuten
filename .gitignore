@@ -50,3 +50,12 @@ results/*svd*_preview.csv*
 notebooks/df.csv
 results/Sorties_a_enregistrer/
 results/desktop.ini
+results/GREG B4 PCA
+artifacts/
+# outputs lourds
+models/*.joblib
+*.npy
+*.npz
+*.pt
+*.h5
+
