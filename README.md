@@ -132,11 +132,12 @@ class P2,B0,B1,B2,B3,B4 phase;
 subgraph P3["3) Pipeline multimodale (B4) — entraînement"]
 
   %% Texte
-  T0["TextCleaner<br/>(normaliser, traduire, stopwords, stemmer)"]:::tool
+  T0a["TextCleaner<br/>(normaliser, traduire, stopwords, stemmer)"]:::tool
+  T0b["Pré-traitement"<br/>(normaliser)"]:::tool
   T1["TF-IDF (word)"]:::tool
   T1b["TF-IDF (char/char_wb) <i>option</i>"]:::tool
   T2["HasDescription / TitleLength"]:::tool
-  T3["TextStatistics / TextStatisticsPro"]:::tool
+  T3["TextStatisticsPro"]:::tool
   T4["LanguageDetector / LexiconFeatures"]:::tool
   T5["SVD global (optionnel)<br/>réduction dim. + L2 norm"]:::tool
 
@@ -163,11 +164,11 @@ end
 class P3,T0,T1,T1b,T2,T3,T4,T5,I1,I2,I3,C1,C2,S1,FU,SAMP,SCAL,CLF phase;
 
 %% Branching & fusion (texte)
-T0 --> T1
-T0 --> T1b
-T0 --> T2
-T0 --> T3
-T0 --> T4
+T0a --> T1
+T0a --> T1b
+T0b --> T2
+T0b --> T3
+T0b --> T4
 T1 --> FU
 T1b --> FU
 T2 --> FU
