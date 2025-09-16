@@ -144,11 +144,11 @@ random_state = 42
 
 # Peser la contribution texte vs image(s) sans toucher au code
 [fusion.weights]
-text  = 1.0
+text  = 1.2
 image_pixels = 0                        # mettre 0 si image_cnn
 image_stats  = 0                        # mettre 0 si le pipe est combiné
-image_cnn = 1.2
-image_stats_combined = 0.35             # branche stats images
+image_cnn = 1
+image_stats_combined = 0.1             # branche stats images
 
 # --- Statistiques des images ---
 # Features width/height/occupancy (hors blanc/noir)
@@ -159,8 +159,8 @@ enabled = true
 fast = true                 # <— nouveau
 fast_size = 96 
 entropy_bins = 128              # true = on ajoute la branche de features automatiques
-white_threshold = 230       # pixels >= 230 -> fond (blanc)
-black_threshold = 25        # pixels <= 25  -> fond (noir)
+white_threshold = 255       # pixels >= 230 -> fond (blanc)
+black_threshold = 0        # pixels <= 25  -> fond (noir)
 min_area = 16               # surface min pour éviter le bruit
 out_prefix = "auto"         # préfixe des noms de features (traçabilité) avant "img_w230_b25_"
 prefix_basic = "img_"
