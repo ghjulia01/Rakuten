@@ -174,8 +174,7 @@ def main():
           out_fig / "b4_stats_topnegpos.png")
 
     # --- Top-K stats par classe (optionnel) ---
-    import pandas as pd
-
+    
     pc = pd.read_csv(out_reports / "b4_stats_contribs_per_class.csv")
     K = int(args.top or 10)  # réutilise --top si fourni
 
