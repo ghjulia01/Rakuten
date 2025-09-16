@@ -64,10 +64,6 @@ __pycache__/
 *.pyo
 
 
-# caches & gros outputs
-__pycache__/
-*.pyc
-*.pyo
 results/
 reports/
 models/*.joblib
