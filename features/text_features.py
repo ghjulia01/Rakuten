@@ -17,8 +17,11 @@ import unicodedata
 from langdetect import DetectorFactory
 DetectorFactory.seed = 0
 
+from main.profiling_tools import profile_func
+
 logger = logging.getLogger(__name__)
 
+@profile_func
 def _fold(s: str) -> str:
     # lower + suppression des accents
     s = s.lower()
@@ -63,9 +66,11 @@ class TextStatistics(BaseEstimator, TransformerMixin):
     Sortie: ndarray (n_samples, 4) = [n_mots, len_moyenne, diversité_lexicale, ratio_majuscules]
     """
 
+    @profile_func
     def fit(self, X, y=None):
         return self
 
+    @profile_func
     def transform(self, X) -> np.ndarray:
         s = _to_text_series(X)  # normaliser l'entrée
         features = []
@@ -86,6 +91,7 @@ class TextStatistics(BaseEstimator, TransformerMixin):
 
         return np.asarray(features, dtype=np.float32)
     
+    @profile_func
     def get_feature_names_out(self, input_features=None):
         return np.array(["n_words","avg_word_len","lex_div","caps_ratio"], dtype=object)
 
@@ -93,14 +99,17 @@ class LanguageDetector(BaseEstimator, TransformerMixin):
     """Détecter la langue et renvoyer un one-hot (fr, en, de par défaut).
     Sortie: ndarray (n_samples, n_langues)
     """
+    @profile_func
     def __init__(self, languages: Optional[List[str]] = None, min_length: int = 10, max_chars: int = 500):
         self.languages = languages or ["fr", "en", "de"]
         self.min_length = int(min_length)
         self.max_chars = int(max_chars)
 
+    @profile_func
     def fit(self, X, y=None):
         return self
 
+    @profile_func
     def transform(self, X) -> np.ndarray:
         s = _to_text_series(X)  # normaliser l'entrée
         out = np.zeros((len(s), len(self.languages)), dtype=np.float32)

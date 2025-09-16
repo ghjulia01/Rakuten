@@ -93,7 +93,7 @@ from models.cnn_features import CNNFeaturizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
 from logging.handlers import RotatingFileHandler
-
+from main.profiling_tools import profile_func, print_function_stats, list_debug_add, print_list_debug, write_function_stats_to_file, write_list_debug_to_file 
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,7 @@ class TqdmLoggingHandler(logging.StreamHandler):
         except Exception:
             super().emit(record)
 
+@profile_func
 def setup_logging(log_dir: str = "results/logs", level=logging.INFO):
     log_dir = os.path.expanduser(os.path.expandvars(log_dir))
     os.makedirs(log_dir, exist_ok=True)
@@ -151,6 +152,7 @@ def setup_logging(log_dir: str = "results/logs", level=logging.INFO):
 
 # Importer ImageLoader depuis le module features
 
+@profile_func
 def validate_config(cfg: Dict[str, Any]) -> None:
     """
     Valide la configuration en vérifiant la présence des sections requises.
@@ -165,7 +167,8 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     for key in required:
         if key not in cfg:
             raise ValueError(f"Configuration manquante: {key}")
-            
+
+@profile_func            
 def train_model(config_path: str = "features/config.toml"):
     """Entraîne le modèle avec la configuration spécifiée."""
     logger.info("Chargement de la configuration...")
@@ -192,6 +195,7 @@ except ModuleNotFoundError:  # fallback si environnement < 3.11
     import tomli as tomllib
 
 
+@profile_func
 def load_config(config_path: str | Path | None = None) -> dict:
     """Charger le fichier TOML et retourner un dict Python."""
     cfg_path = Path(config_path) if config_path else DEFAULT_CFG
@@ -201,6 +205,7 @@ def load_config(config_path: str | Path | None = None) -> dict:
 
 
 # === Initialiser les graines de hasard (reproductibilité) =======================
+@profile_func
 def init_seeds(seed: int) -> None:
     """Fixer les graines pour numpy, random et Python hash."""
     np.random.seed(seed)
@@ -209,6 +214,7 @@ def init_seeds(seed: int) -> None:
 
 
 # === Construire les stratégies d'échantillonnage ================================
+@profile_func
 def make_sampling_strategies(y_train: pd.Series,
                              major_class: int = 2583,
                              major_cap: int = 6000,
@@ -244,12 +250,14 @@ class AdaptiveUnderSampler(BaseSampler):
     }
     _sampling_type = "under-sampling"  # requis par BaseSampler
 
+    @profile_func
     def __init__(self, cap_dict=None, random_state=None, sampling_strategy="auto"):
         self.cap_dict = cap_dict or {}
         self.random_state = random_state
         # requis par BaseSampler.fit_resample (même si non utilisé ensuite)
         self.sampling_strategy = sampling_strategy
 
+    @profile_func
     def _fit_resample(self, X, y):
         # sécuriser y en 1D
         y_arr = np.asarray(y).ravel()
@@ -271,6 +279,7 @@ class AdaptiveUnderSampler(BaseSampler):
         X_res, y_res = rus.fit_resample(X, y_arr)
         return X_res, y_res
 
+    @profile_func
     def _more_tags(self):
         return {"allow_nan": False, "X_types": ["2darray", "sparse"]}
 
@@ -286,6 +295,7 @@ class ToFloat32:
             return X  # garde-fou si un bloc ne supporte pas astype 
           
 # === Fabriquer le classifieur à partir de la config =============================
+@profile_func
 def build_classifier(cfg: dict, seed: int):
     """
     Construire le classifieur final depuis la section [model] du TOML.
@@ -392,6 +402,7 @@ def build_classifier(cfg: dict, seed: int):
 from typing import Optional
 from joblib import Memory
 
+@profile_func
 def get_cache(cfg: dict):
     """Retourne un objet Memory si use_cache=true dans [compute], sinon None."""
     use_cache = bool(cfg.get("compute", {}).get("use_cache", False))
@@ -401,6 +412,7 @@ def get_cache(cfg: dict):
     os.makedirs(cache_dir, exist_ok=True)
     return Memory(cache_dir)
 
+@profile_func
 def build_baseline_pipeline(
     kind: str,
     cfg: dict,
@@ -484,6 +496,7 @@ def build_baseline_pipeline(
 
 
 # === Exécuter une baseline et écrire un rapport CV ==============================
+@profile_func
 def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="results"):
     """Exécute la baseline avec validation croisée et diagnostics."""
     logger.info(f"Évaluation baseline {kind}...")
@@ -825,6 +838,7 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
             json.dump(diags, f, indent=2)
         logger.info("Diagnostics sauvegardés: %s", diag_path)
 
+@profile_func
 def diagnostic_baseline(
     pipe: Union[SkPipeline, ImbPipeline],
     X_sample: pd.DataFrame,
@@ -893,6 +907,7 @@ def diagnostic_baseline(
 
 # === Construire la branche CNN depuis la config =================================
 # (avec post-réduction optionnelle)    
+@profile_func
 def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
     """
     Construire la branche CNN (embedding ResNet) depuis [images.cnn] du TOML.
@@ -911,6 +926,7 @@ def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
         use_imagenet_norm=bool(cnn_cfg.get("use_imagenet_norm", True)),
         fallback_zero=bool(cnn_cfg.get("fallback_zero", True)),
         dtype=str(cnn_cfg.get("dtype", "float32")),
+        num_workers=int(cnn_cfg.get("num_workers", 0)),
     )
 
     steps = [("cnn", featurizer)]
@@ -930,74 +946,79 @@ def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
 
 
 # === Construire la pipeline multimodale complète ================================
+@profile_func
 def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dict, seed: int):
-    """Construire la pipeline texte+image, rééchantillonner, scaler, et ajouter le modèle final."""
-    # Utiliser la fabrique qui lit directement toutes les options depuis [text]
+    # --- Texte ---
     text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
-
-    # --- NEW: SVD global sur la branche texte (optionnel via [text.svd]) ---
+    # (SVD text optionnel conservé tel quel)
     svd_cfg = (cfg.get("text", {}).get("svd", {}) or {})
     if bool(svd_cfg.get("enabled", True)):
-        n_comp = int(svd_cfg.get("n_components", 600))   # 400–600 typiquement
+        n_comp = int(svd_cfg.get("n_components", 600))
         rs     = int(svd_cfg.get("random_state", seed))
         l2norm = bool(svd_cfg.get("l2norm", True))
         from sklearn.pipeline import Pipeline as _SkPipe
-        steps_txt = [("to32", ToFloat32()),
+        steps_txt = [("to32_pre", ToFloat32()),
                      ("svd", TruncatedSVD(n_components=n_comp, random_state=rs))]
         if l2norm:
             steps_txt.append(("l2", Normalizer(copy=False)))
+        steps_txt.append(("to32_post", ToFloat32())) 
         text_branch = _SkPipe([("text", text_branch), *steps_txt])
 
-    # Construire la branche IMAGES (pixels) depuis le TOML
-    image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
+    # --- LIRE les poids de fusion en amont ---
+    fusion_cfg = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
+    want_pixels = not (fusion_cfg.get("image_pixels", None) == 0)
 
-    # On garde image_train_dir pour la branche "stats" (si activée)
-    image_train_dir = cfg["images"]["train_dir"]
+    transformers = [("text", text_branch)]
 
-    # Ajouter éventuellement la branche IMAGES (stats)
-    transformers = [("text", text_branch), ("image_pixels", image_pixels)]
-    # Ajouter éventuellement la branche CNN
+    # --- Pixels : NE PAS AJOUTER si poids=0 (pruning) ---
+    if want_pixels:
+        image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
+        transformers.append(("image_pixels", image_pixels))
+    else:
+        logger.info("Branche 'image_pixels' PRUNÉE (poids=0) — non construite et non concaténée.")
+
+    # --- CNN (inchangé, + log ajouté plus haut) ---
     try:
         if bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False)):
             image_cnn = create_cnn_branch_from_cfg(cfg["images"])
+            arch = cfg["images"]["cnn"].get("arch", "resnet50")
+            dr   = cfg["images"]["cnn"].get("dim_reduction", {}) or {}
+            logger.info("CNN activée: arch=%s, svd=%s/%s", arch, bool(dr.get("enabled", False)), dr.get("n_components", None))
             transformers.append(("image_cnn", image_cnn))
     except Exception as e:
         logger.warning("CNN désactivée (raison: %s)", e)
-        
-    # Ajouter la branche IMAGES (stats combinées)
-    stats_c = cfg.get("images", {}).get("stats_combined", {})
-    if bool(stats_c.get("enabled", False)):
+
+    # --- Stats image (inchangé) ---
+    stats_cfg = cfg.get("images", {}).get("stats_combined", {})
+    if bool(stats_cfg.get("enabled", False)):
         transformers.append(("image_stats_combined", ImageStatsCombinedFeaturizer(
-            image_dir=image_train_dir,
-            imgid_col="imageid", pid_col="productid",
-            white_threshold=int(stats_c.get("white_threshold", 230)),
-            black_threshold=int(stats_c.get("black_threshold", 25)),
-            min_area=int(stats_c.get("min_area", 16)),
-            prefix_basic=str(stats_c.get("prefix_basic", "img_")),
-            prefix_pro=str(stats_c.get("prefix_pro", "pro_")),
-        )))
+        image_dir=cfg["images"]["train_dir"],
+        imgid_col="imageid", pid_col="productid",
+        white_threshold=int(stats_cfg.get("white_threshold", 230)),
+        black_threshold=int(stats_cfg.get("black_threshold", 25)),
+        min_area=int(stats_cfg.get("min_area", 16)),
+        prefix_basic="img_", prefix_pro="pro_",
+        fast=bool(stats_cfg.get("fast", False)),
+        fast_size=int(stats_cfg.get("fast_size", 96)),
+        entropy_bins=int(stats_cfg.get("entropy_bins", 256)),
+    )))
 
-    # Fusionner les branches
-    fusion_cfg = (cfg.get("fusion", {}) or {}).get("weights", None)
+    # --- Appliquer les poids uniquement pour les branches présentes ---
     present = {name for name, _ in transformers}
-    fusion_weights = {k: v for k, v in (fusion_cfg or {}).items() if k in present} or None
+    fusion_weights = {k: v for k, v in fusion_cfg.items() if k in present} or None
 
-    # 1) union SANS memory
+    logger.info("Branches fusionnées: %s | weights=%s", [n for n, _ in transformers], fusion_weights)
+
     union = FeatureUnion(
         transformer_list=transformers,
         transformer_weights=fusion_weights,
-        n_jobs=1                          # <— clé pour la stabilité mémoire pendant fit
+        n_jobs=1
     )
-    # Construire le classifieur final
     model = build_classifier(cfg, seed)
-
-    # 2) enveloppe AVEC memory
     cache = get_cache(cfg)
     if cache is not None and hasattr(cache, "location"):
         logger.info(f"Cache sklearn activé: {cache.location}")
 
-
-    # Construire la pipeline Imbalanced-Learn
     pipe = ImbPipeline(steps=[
         ("features", union),
         ("under", AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)),
@@ -1009,6 +1030,7 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
 
 
 # === Entraîner sur le train, prédire sur le test ================================
+@profile_func
 def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
     """Entraîner la pipeline complète sur X_train/Y_train puis prédire y_test (labels) pour X_test."""
     # Lire les seeds
@@ -1092,6 +1114,7 @@ def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
 
 
 # === Comparer LR et SVC en CV stratifiée =======================================
+@profile_func
 def compare_models_cv(X_train, y_train, cfg: dict):
     """Comparer LR et LinearSVC avec la même pipeline (sauf le classifieur), en CV F1-macro."""
     seed = int(cfg.get("random", {}).get("seed", 42))
@@ -1132,6 +1155,7 @@ def compare_models_cv(X_train, y_train, cfg: dict):
 
 
 # === Parser les arguments CLI ===================================================
+@profile_func
 def parse_args():
     """Définir les arguments CLI et retourner l'objet Namespace."""
     p = argparse.ArgumentParser(description="Entraîner la pipeline texte+image avec rééchantillonnage ; comparer LR vs SVC en option")
@@ -1145,6 +1169,7 @@ def parse_args():
 
 
 # === Fonction principale ========================================================
+@profile_func
 def main():
     # Lire les arguments et la configuration
     args = parse_args()
@@ -1215,3 +1240,5 @@ def main():
 # === Entrée script ==============================================================
 if __name__ == "__main__":
     main()
+    write_function_stats_to_file(outdir="results")
+    write_list_debug_to_file(outdir="results")

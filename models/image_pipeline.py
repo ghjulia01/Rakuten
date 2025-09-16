@@ -14,16 +14,18 @@ from sklearn.preprocessing import FunctionTransformer, StandardScaler, Normalize
 from sklearn.decomposition import PCA, TruncatedSVD
 from features.image_loader import ImageLoader
 
+from main.profiling_tools import profile_func
+
 logger = logging.getLogger(__name__)
 
 
 # ---------- Helpers picklables (nécessaires aux FunctionTransformer) ----------
-
+@profile_func
 def _to_float32(X: np.ndarray) -> np.ndarray:
     """Convertir en float32 (éviter les copies inutiles)."""
     return X.astype(np.float32, copy=False)
 
-
+@profile_func
 def _flatten_images(X: np.ndarray) -> np.ndarray:
     """Aplatir (n, H, W, C) -> (n, H*W*C). Lever une erreur si dimensions inattendues."""
     X = np.asarray(X)
@@ -33,7 +35,7 @@ def _flatten_images(X: np.ndarray) -> np.ndarray:
 
 
 # ---------- Recherche récursive d’un réducteur (PCA / TruncatedSVD) ----------
-
+@profile_func
 def _iter_pipeline_steps(obj: Any) -> Iterable[tuple[str, Any]]:
     """Itérer sur les (name, step) d’un objet type Pipeline/FeatureUnion (récursif)."""
     # Pipeline sklearn
@@ -53,7 +55,7 @@ def _iter_pipeline_steps(obj: Any) -> Iterable[tuple[str, Any]]:
             if inner is not obj:
                 yield from _iter_pipeline_steps(inner)
 
-
+@profile_func
 def _find_reducer(obj: Any) -> Optional[tuple[str, Union[PCA, TruncatedSVD]]]:
     """Trouver la première étape PCA/TruncatedSVD rencontrée (récursif)."""
     for name, step in _iter_pipeline_steps(obj):
@@ -63,7 +65,7 @@ def _find_reducer(obj: Any) -> Optional[tuple[str, Union[PCA, TruncatedSVD]]]:
 
 
 # ---------- Fabriques de pipelines ----------
-
+@profile_func
 def create_image_pipeline(
     image_dir: str,
     image_size: Tuple[int, int] = (128, 128),
@@ -144,7 +146,7 @@ def create_image_pipeline(
 
     return SkPipeline(steps=steps, memory=memory)
 
-
+@profile_func
 def create_image_pipeline_from_cfg(
     images_cfg: Dict[str, Any],
     *,
@@ -191,7 +193,7 @@ def create_image_pipeline_from_cfg(
 
 
 # ---------- Diagnostic (réduction / compression) ----------
-
+@profile_func
 def diagnostic_reduction(pipe: SkPipeline) -> Dict[str, Any]:
     """
     Calculer des métriques de réduction **après fit** :

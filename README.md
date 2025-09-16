@@ -448,22 +448,29 @@ Une fois les baselines entraînées, on peut générer des rapports et figures.
 
 **Exemple B2 (texte seul) :**
 
-```bash
-python -m tools.plot_confusion_from_csv \
-  --csv results/preds_b2.csv \
-  --labels-map features/labels_map.json \
-  --normalize true --topN 30 \
-  --output results/figures/confusion_b2_top30.png
+```powershell
+ python tools/plot_confusion_from_csv.py `
+  --csv results/preds_b2.csv `
+  --labels-map features/labels_map.json `
+  --normalize true `
+  --topN 30 `
+  --worst-by f1 --min-support 200 --worst-k 6 --top-mis 3 `
+  --heatmap-problemes results/figures/confusion_b2_problemes.png `
+  --mini-wrap 18 --mini-fontsize 8
+
 ```
 
 **Exemple B4 (multimodal) :**
 
-```bash
-python -m tools.plot_confusion_from_csv \
-  --csv results/preds_b4.csv \
-  --labels-map features/labels_map.json \
-  --normalize true --topN 30 \
-  --output results/figures/confusion_b4_top30.png
+```powershell
+ python tools/plot_confusion_from_csv.py `
+  --csv results/preds_b4.csv `
+  --labels-map features/labels_map.json `
+  --normalize true `
+  --topN 30 `
+  --worst-by f1 --min-support 200 --worst-k 6 --top-mis 3 `
+  --heatmap-problemes results/figures/confusion_b4_problemes.png `
+  --mini-wrap 18 --mini-fontsize 8
 ```
 
 ##### 3) ACP (réduction dimensionnelle pour visualiser les données)
@@ -586,9 +593,55 @@ Il est obligatoire de s'enregistrer au challenge pour pouvoir accéder aux donn�
 
 ---
 
+#### L — Debuguer avec Visual studio Code
+
+##### Prérequis
+
+Installer VS Code
+
+Installer l'extension Python :
+
+- Ouvrir VS Code.
+- Aller dans l'onglet Extensions (icône en forme de carré en bas de la barre latérale).
+- Chercher "Python" (par Microsoft) et installer-la.
+
+##### Ouvrir le projet dans VS Code
+
+Ouvrir le dossier racine du projet dans VS Code (jul25_bootcamp_ds_classification-de-produits-e--commerce-rakuten).
+
+##### Configurer le fichier `.vscode/launch.json`
+
+- Ouvrir le fichier `.vscode/launch.json`
+- Modifier la baseline au besoin
+
+##### Ajouter des point d'arrêt
+
+- Ouvrir le fichier Python dans VS Code.
+- Ajouter des points d'arrêt (breakpoints) en cliquant à gauche du numéro de ligne où l'on veux que l'exécution s'arrête.
+
+##### Lancer le débogage pas à pas
+
+- F5 : Démarrer/Continuer.
+- F10 : Exécute la ligne courante et passe à la suivante (sans entrer dans les fonctions).
+- F11 : Entre dans la fonction appelée sur la ligne courante.
+- Shift+F11 : Termine l'exécution de la fonction courante et retourne à l'appelant.
+- F5 : Reprend l'exécution jusqu'au prochain breakpoint.
+
+##### Inspecter les variables
+
+Pendant le débogage, on peut voir les valeurs des variables dans :
+
+- La section VARIABLES (à gauche).
+- En survolant les variables avec la souris dans le code.
+- Dans la console de débogage pour exécuter des commandes Python à la volée.
+
+---
+
 #### L — License
 
 Ce projet utilise des données propriétaires de Rakuten, mises à disposition uniquement à des fins de formation et de compétition. Toute réutilisation est interdite sans autorisation.
+
+---
 
 #### M — Streamlit
 

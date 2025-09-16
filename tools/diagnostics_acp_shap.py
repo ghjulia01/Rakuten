@@ -13,6 +13,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.compose import ColumnTransformer
 
 import warnings
 warnings.filterwarnings(
@@ -21,13 +23,97 @@ warnings.filterwarnings(
     category=FutureWarning,
 )
 
-# --- ensure project packages are importable when unpickling ---
+# chemins pour importer des modules de main/ et features/
 import sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 for p in (ROOT, ROOT / "main", ROOT / "features"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
+
+# === Helpers robustes pour retrouver les branches dans les pipelines ===
+
+def _get_text_union_from_model(model):
+    """
+    Retourne l'objet FeatureUnion/Transformer de la branche texte quelle que soit la baseline :
+    - B2 : step top-level 'text'
+    - B4 : FeatureUnion 'features' qui contient un step 'text'
+    """
+    # Cas B2 : Pipeline([("text", <FeatureUnion texte>), ("clf", ...)])
+    if hasattr(model, "named_steps"):
+        text = model.named_steps.get("text")
+        if text is not None:
+            return text
+
+        # Cas B4 : Pipeline([("features", <FeatureUnion>), ("sampler", ...), ("scaler", ...), ("clf", ...)])
+        feat_union = model.named_steps.get("features")
+        if feat_union is not None and hasattr(feat_union, "transformer_list"):
+            for name, tr in feat_union.transformer_list:
+                if name == "text":
+                    return tr
+            # recherche en profondeur si jamais la branche texte est nichée
+            for _, tr in feat_union.transformer_list:
+                if hasattr(tr, "transformer_list"):
+                    for subname, subtr in tr.transformer_list:
+                        if subname == "text":
+                            return subtr
+    return None
+
+
+def _get_img_union_from_model(model):
+    """
+    Retourne la FeatureUnion image pour B3 (step 'img') ou B4 (step 'features' puis 'image_*').
+    Ici on vise B3 pour le nouveau bloc (--blocks-b3).
+    """
+    if hasattr(model, "named_steps"):
+        img = model.named_steps.get("img")  # B3: Pipeline([("img", FeatureUnion([...])) , ("clf", ...)])
+        if img is not None:
+            return img
+    return None
+
+def _find_feat_scaler_clf(model):
+    """
+    Retourne (feat_union, scaler, clf, names) depuis un Pipeline, 
+    en scannant les étapes au lieu de supposer des noms fixes.
+    """
+    feat_union = None
+    scaler = None
+    clf = None
+    names = {"features": None, "scaler": None, "clf": None}
+
+    # 1) accès direct si les noms standards existent
+    if hasattr(model, "named_steps"):
+        feat_union = model.named_steps.get("features")
+        scaler = model.named_steps.get("scaler")
+        clf = (model.named_steps.get("clf")
+               or model.named_steps.get("model")
+               or model.named_steps.get("final_estimator"))
+        if feat_union is not None: names["features"] = "features"
+        if scaler is not None: names["scaler"] = "scaler"
+        if clf is not None: names["clf"] = "clf/model/final_estimator"
+
+    # 2) si l’un manque, on scanne toutes les étapes
+    if isinstance(getattr(model, "steps", None), list):
+        for nm, step in model.steps:
+            # chercher la feature union (ou un ColumnTransformer)
+            if feat_union is None and (
+                isinstance(step, FeatureUnion) or isinstance(step, ColumnTransformer) or hasattr(step, "transformer_list")
+            ):
+                feat_union = step
+                names["features"] = nm
+            # scaler
+            if scaler is None and nm.lower() in ("scaler", "standardscaler"):
+                scaler = step
+                names["scaler"] = nm
+            # classifieur : quelque chose qui a coef_ ou decision_function/predict_proba
+            if clf is None and (
+                hasattr(step, "coef_") or hasattr(step, "classes_") or
+                hasattr(step, "decision_function") or hasattr(step, "predict_proba")
+            ):
+                clf = step
+                names["clf"] = nm
+
+    return feat_union, scaler, clf, names
 
 def _load_ok_mask(preds_csv: str, index_like=None):
     """
@@ -213,7 +299,7 @@ def top_confusions(kind, topk=20, labels_map=None):
     print(f"[OK] Top confusions → {out}")
 
 ######
-# ===== SHAP / explications texte =====
+#   SHAP helpers (pour B2/B3/B4)
 def _walk_estimators(est):
     yield est
     # Pipelines
@@ -392,44 +478,76 @@ def do_shap(kind, model_path, data_csv=None, text_col="designation",
             print("[WARN] Ni SHAP ni coef_ disponibles → SHAP ignoré.")
             return False
 
-        # --- Localiser l'offset de la tranche TF-IDF mots dans la FeatureUnion texte ---
-        def _ncols(transformer, df_small):
-            Xs = transformer.transform(_ensure_input_df(df_small))
-            return Xs.shape[1]
-
-        df_small = df.head(min(200, len(df))).copy()
-        start_idx = 0
-        found = False
-        for name, tr in getattr(text_union, "transformer_list", []):
-            if name == "tfidf":
-                # TF-IDF mots directement dans l'union
-                found = True
-                break
-            elif name == "tfidf_word" and hasattr(tr, "transformer_list"):
-                # TF-IDF mots imbriqué dans un sous-FeatureUnion
-                inner_start = 0
-                for n2, tr2 in tr.transformer_list:
-                    if n2 == "tfidf":
-                        start_idx += inner_start
-                        found = True
-                        break
-                    inner_start += _ncols(tr2, df_small)
-                if found:
+        # --- Detect if the TEXT branch uses SVD (reduction -> components_)
+        # Locate the "text" branch inside the global FeatureUnion('features')
+        features_union = getattr(model.named_steps.get("features", None), "transformer_list", None)
+        text_branch = None
+        if features_union is not None:
+            for name, tr in features_union:
+                if name == "text":
+                    text_branch = tr
                     break
-            # autre branche au même niveau → on avance l'offset
-            start_idx += _ncols(tr, df_small)
 
-        if not found:
-            print("[WARN] Impossible de localiser la tranche TF-IDF → SHAP ignoré.")
-            return False
+        has_svd = bool(getattr(getattr(text_branch, "named_steps", {}), "get", lambda *_: None)("svd"))
 
-        end_idx = start_idx + n_tfidf
+        # Helper: count output dims of a fitted transformer without refitting
+        def _ncols_fitted(tr):
+            Xtmp = _ensure_input_df(df.head(min(5, len(df))))
+            Xt = tr.transform(Xtmp)
+            return int(Xt.shape[1])
 
-        # --- coef×mean(tfidf) sur la tranche TF-IDF mots uniquement ---
-        mu = np.asarray(X_tfidf.mean(axis=0)).ravel()          # (n_tfidf,)
-        C_text = C[:, start_idx:end_idx]                       # (n_classes, n_tfidf)
-        per_class = [np.abs(C_text[i, :]) * mu for i in range(C_text.shape[0])]
-        abs_mean = np.mean(np.vstack(per_class), axis=0)
+        if has_svd:
+            # ----- SVD CASE: slice classifier weights on TEXT block, then
+            # back-project and keep ONLY the TF-IDF word slice.
+            # 1) find global slice [a:b] for the TEXT block in the full FeatureUnion
+            a = 0
+            text_width = None
+            for name, tr in model.named_steps["features"].transformer_list:
+                # helper to get fitted output width without refit
+                Xtmp = _ensure_input_df(df.head(min(5, len(df))))
+                w = tr.transform(Xtmp).shape[1]
+                if name == "text":
+                    text_width = w
+                    break
+                a += w
+            if text_width is None:
+                print("[WARN] Impossible de localiser la tranche TEXT → SHAP ignoré.")
+                return False
+            b = a + text_width
+
+            # 2) weights on SVD components for TEXT
+            C_text_comp = np.asarray(C[:, a:b])    # (n_classes, k)
+
+            # 3) SVD components on the whole pre-SVD TEXT branch
+            svd = text_branch.named_steps["svd"]
+            Vk  = np.asarray(svd.components_)      # (k, d_text_pre)
+
+            # 4) find the TF-IDF word slice inside the pre-SVD TEXT branch
+            pre_union = text_branch.named_steps["text"]  # FeatureUnion before SVD
+            df_small  = df.head(min(200, len(df))).copy()
+            slices_pre = _block_slices_text(pre_union, df_small)
+            # look for the entry corresponding to TF-IDF words
+            a_w, b_w = None, None
+            for lbl, aa, bb in slices_pre:
+                if "tf-idf word" in lbl.lower() or "tfidf" == lbl.lower() or lbl.endswith("/tfidf"):
+                    a_w, b_w = aa, bb
+                    break
+            if a_w is None:
+                print("[WARN] Tranche TF-IDF introuvable dans la branche texte → SHAP ignoré.")
+                return False
+
+            # 5) mean TF-IDF on words (same dimension as b_w-a_w)
+            mu = np.asarray(X_tfidf.mean(axis=0)).ravel()   # (n_words,)
+
+            # 6) back-project per class, then slice to words only
+            per_class = []
+            for i in range(C_text_comp.shape[0]):
+                w_comp   = C_text_comp[i, :].ravel()       # (k,)
+                w_full   = Vk.T @ w_comp                   # (d_text_pre,)
+                w_words  = w_full[a_w:b_w]                 # (n_words,)
+                per_class.append(np.abs(w_words) * mu)     # (n_words,)
+
+            abs_mean = np.mean(np.vstack(per_class), axis=0)  # (n_words,)
 
     # === Sorties ===
     order = np.argsort(abs_mean)[::-1][:topk]
@@ -907,11 +1025,12 @@ def blocks_b2_per_class(
 
 def blocks_b4(model_path, data_csv, max_n=3000, normalize="abs"):
     model = joblib.load(model_path)
-    feat_union = model.named_steps.get("features")
-    clf = model.named_steps.get("clf")
+    feat_union, scaler, clf, names = _find_feat_scaler_clf(model)
     if feat_union is None or clf is None:
         print("[WARN] pipeline B4 inattendue -> ignoré.")
         return False
+    else:
+        print(f"[INFO] Étapes détectées → features='{names['features']}', scaler='{names['scaler']}', clf='{names['clf']}'")
 
     C = _coef_matrix(clf)
     if C is None:
@@ -922,8 +1041,8 @@ def blocks_b4(model_path, data_csv, max_n=3000, normalize="abs"):
     df = df.sample(n=min(len(df), max_n), random_state=0)
 
     X = feat_union.transform(_ensure_input_df(df))
-    if "scaler" in model.named_steps:
-        X = model.named_steps["scaler"].transform(X)
+    if scaler is not None:
+        X = scaler.transform(X)
 
     slices = _block_slices_b4(feat_union, df)
     df_imp = _block_importance_from_coef(C, X, slices, clf)
@@ -954,11 +1073,12 @@ def blocks_b4_per_class(
     topk_classes=30
 ):
     model = joblib.load(model_path)
-    feat_union = model.named_steps.get("features")
-    clf = model.named_steps.get("clf")
+    feat_union, scaler, clf, names = _find_feat_scaler_clf(model)
     if feat_union is None or clf is None:
         print("[WARN] pipeline B4 inattendue -> ignoré.")
         return False
+    else:
+        print(f"[INFO] Étapes détectées → features='{names['features']}', scaler='{names['scaler']}', clf='{names['clf']}'")
 
     C = _coef_matrix(clf)
     if C is None:
@@ -972,8 +1092,8 @@ def blocks_b4_per_class(
         df = df.sample(n=max_n, random_state=0)
 
     X = feat_union.transform(_ensure_input_df(df))
-    if "scaler" in model.named_steps:
-        X = model.named_steps["scaler"].transform(X)
+    if scaler is not None:
+        X = scaler.transform(X)
 
     slices = _block_slices_b4(feat_union, df)
     y = df[label_col].values
@@ -1026,13 +1146,12 @@ def blocks_b4_fine_global(
     from pathlib import Path
 
     model = joblib.load(model_path)
-    feat_union = model.named_steps.get("features")
-    clf = model.named_steps.get("clf")
-    scaler = model.named_steps.get("scaler")
-
+    feat_union, scaler, clf, names = _find_feat_scaler_clf(model)
     if feat_union is None or clf is None:
         print("[WARN] pipeline B4 inattendue -> ignoré.")
         return False
+    else:
+        print(f"[INFO] Étapes détectées → features='{names['features']}', scaler='{names['scaler']}', clf='{names['clf']}'")
 
     C = _coef_matrix(clf)
     if C is None:
@@ -1118,11 +1237,104 @@ def blocks_b2_per_class_signed(
     label_map_json=None,
     out_dir="results",
     topk_classes=30,
-    shared_scale=False
+    shared_scale=False,
 ):
+    """
+    B2 — Contributions SIGNÉES (+ à droite / − à gauche) par classe,
+    agrégées par sous-blocs texte (TF-IDF word, TF-IDF char, stats, …).
+    Génère :
+      - results/reports/block_importance_b2_per_class_pos.csv
+      - results/reports/block_importance_b2_per_class_neg.csv
+      - results/figures/block_importance_b2_per_class_signed.png
+    """
+    import json
+    from pathlib import Path
+
     model = joblib.load(model_path)
-    text_union = model.named_steps.get("text")
-    clf = model.named_steps.get("clf")
+    # B2 = Pipeline([("text", <FeatureUnion texte>), ("clf", ...)])
+    text_union = getattr(model, "named_steps", {}).get("text")
+    clf        = getattr(model, "named_steps", {}).get("clf")
+    if text_union is None or clf is None:
+        print("[WARN] pipeline B2 inattendue -> ignoré.")
+        return False
+
+    C = _coef_matrix(clf)
+    if C is None:
+        print("[WARN] Classifieur sans coef_ -> ignoré.")
+        return False
+
+    df = pd.read_csv(data_csv)
+    if label_col not in df.columns:
+        raise ValueError(f"Colonne label absente: {label_col}")
+    if len(df) > max_n:
+        df = df.sample(n=max_n, random_state=0)
+
+    # features texte + slices de blocs internes (tfidf_word, tfidf_char, …)
+    X = text_union.transform(_ensure_input_df(df))
+    slices = _block_slices_text(text_union, df)
+    y = df[label_col].values
+
+    # % de contribution + / − par classe et par bloc
+    df_pos = _block_contrib_per_class(C, X, y, slices, clf, normalize="pos")
+    df_neg = _block_contrib_per_class(C, X, y, slices, clf, normalize="neg")
+
+    # garder les classes les + fréquentes (comme B4)
+    counts = pd.Series(y).value_counts()
+    keep = counts.index[:min(topk_classes, len(counts))].tolist()
+    df_pos = df_pos.loc[[c for c in df_pos.index if c in keep]]
+    df_neg = df_neg.loc[df_pos.index]
+
+    # labels lisibles optionnels
+    label_map = None
+    if label_map_json and Path(label_map_json).exists():
+        try:
+            label_map = json.loads(Path(label_map_json).read_text(encoding="utf-8"))
+        except Exception:
+            label_map = None
+    if label_map:
+        new_index = [label_map.get(str(c), label_map.get(int(c), str(c))) for c in df_pos.index]
+        df_pos.index = new_index
+        df_neg.index = new_index
+
+    Path(out_dir, "reports").mkdir(parents=True, exist_ok=True)
+    Path(out_dir, "figures").mkdir(parents=True, exist_ok=True)
+    df_pos.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_pos.csv"))
+    df_neg.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_neg.csv"))
+
+    _plot_per_class_signed(
+        df_pos, df_neg,
+        "Importance par bloc — B2 (par classe, impact signé)",
+        str(Path(out_dir, "figures", "block_importance_b2_per_class_signed.png")),
+        shared_scale=shared_scale
+    )
+    return True
+
+
+def blocks_b2_per_class_signed_mag(
+    model_path,
+    data_csv,
+    label_col="prdtypecode",
+    max_n=3000,
+    label_map_json=None,
+    out_dir="results",
+    topk_classes=30,
+    shared_scale=True,
+    sort_by="none",
+):
+    """
+    B2 — Contributions signées en MAGNITUDE (pas en %) par classe,
+    agrégées par sous-blocs texte. Échelle linéaire du modèle (x·w).
+    Génère :
+      - results/reports/block_importance_b2_per_class_pos_mag.csv
+      - results/reports/block_importance_b2_per_class_neg_mag.csv
+      - results/figures/block_importance_b2_per_class_signed_mag.png
+    """
+    import json
+    from pathlib import Path
+
+    model = joblib.load(model_path)
+    text_union = getattr(model, "named_steps", {}).get("text")
+    clf        = getattr(model, "named_steps", {}).get("clf")
     if text_union is None or clf is None:
         print("[WARN] pipeline B2 inattendue -> ignoré.")
         return False
@@ -1142,41 +1354,71 @@ def blocks_b2_per_class_signed(
     slices = _block_slices_text(text_union, df)
     y = df[label_col].values
 
-    # % par bloc, séparés (+) et (−)
-    df_pos = _block_contrib_per_class(C, X, y, slices, clf, normalize="pos")
-    df_neg = _block_contrib_per_class(C, X, y, slices, clf, normalize="neg")
+    # magnitudes (pas de normalisation en %)
+    dfp, dfn = _block_contrib_per_class_magnitude(C, X, y, slices, clf)
 
-    # garder top classes
     counts = pd.Series(y).value_counts()
     keep = counts.index[:min(topk_classes, len(counts))].tolist()
-    df_pos = df_pos.loc[[c for c in df_pos.index if c in keep]]
-    df_neg = df_neg.loc[df_pos.index]  # même ordre
+    dfp = dfp.loc[[c for c in dfp.index if c in keep]]
+    dfn = dfn.loc[dfp.index]
 
-    # label mapping lisible
+    # tri optionnel (par pos, neg, net, total)
+    dfp, dfn = _sort_per_class_frames(dfp, dfn, sort_by=sort_by)
+
     label_map = None
     if label_map_json and Path(label_map_json).exists():
-        import json
         try:
             label_map = json.loads(Path(label_map_json).read_text(encoding="utf-8"))
         except Exception:
             label_map = None
-    if label_map:
-        new_index = [label_map.get(str(c), label_map.get(int(c), str(c))) for c in df_pos.index]
-        df_pos.index = new_index
-        df_neg.index = new_index
 
-    # CSVs et figure
     Path(out_dir, "reports").mkdir(parents=True, exist_ok=True)
     Path(out_dir, "figures").mkdir(parents=True, exist_ok=True)
-    df_pos.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_pos.csv"))
-    df_neg.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_neg.csv"))
-    _plot_per_class_signed(
-        df_pos, df_neg,
-        "Importance par bloc — B2 (par classe, impact signé)",
-        str(Path(out_dir, "figures", "block_importance_b2_per_class_signed.png")),
-        shared_scale=shared_scale
+    dfp.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_pos_mag.csv"))
+    dfn.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_neg_mag.csv"))
+
+    _plot_per_class_signed_magnitude(
+        dfp, dfn,
+        "Importance par bloc — B2 (par classe, impact signé, magnitude)",
+        str(Path(out_dir, "figures", "block_importance_b2_per_class_signed_mag.png")),
+        label_map=label_map, shared_scale=shared_scale
     )
     return True
+
+# --------------------------- B3 (image seule) global ---------------------------
+
+def blocks_b3(model_path, data_csv, out_csv="results/reports/blocks_b3.csv"):
+    """
+    Importance globale des blocs pour B3 (image seule) :
+    - 'img' (pixels ou CNN)
+    - + éventuellement 'image_stats_combined' si activé dans B3
+    """
+    import joblib, pandas as pd, numpy as np, os
+    model = joblib.load(model_path)
+    img_union = _get_img_union_from_model(model)
+    if img_union is None or not hasattr(img_union, "transformer_list"):
+        print("[WARN] Modèle B3 inattendu (pas de step 'img' FeatureUnion) — ignoré.")
+        return
+
+    df = _ensure_input_df(data_csv)
+    need_cols = ["productid", "imageid"]
+    X_img = img_union.transform(df[need_cols])
+
+    # Construire les slices bloc par bloc
+    slices = {}
+    start = 0
+    for name, tr in img_union.transformer_list:
+        Xi = tr.transform(df[need_cols])
+        n = Xi.shape[1]
+        slices[name] = slice(start, start + n)
+        start += n
+
+    C, _ = _coef_matrix(model)  # (n_classes, n_features_total)
+    imp = _block_importance_from_coef(C, slices)  # déjà dispo dans ton script
+
+    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
+    pd.Series(imp).sort_values(ascending=False).to_csv(out_csv, index_label="block", header=["importance"])
+    print(f"[OK] Blocks B3 → {out_csv}")
 
 # --------------------------- B4 (multimodal) par classe, signé (+ et − séparés) ---------------------------
 def blocks_b4_per_class_signed(
@@ -1190,11 +1432,12 @@ def blocks_b4_per_class_signed(
     shared_scale=False
 ):
     model = joblib.load(model_path)
-    feat_union = model.named_steps.get("features")
-    clf = model.named_steps.get("clf")
+    feat_union, scaler, clf, names = _find_feat_scaler_clf(model)
     if feat_union is None or clf is None:
         print("[WARN] pipeline B4 inattendue -> ignoré.")
         return False
+    else:
+        print(f"[INFO] Étapes détectées → features='{names['features']}', scaler='{names['scaler']}', clf='{names['clf']}'")
 
     C = _coef_matrix(clf)
     if C is None:
@@ -1208,8 +1451,8 @@ def blocks_b4_per_class_signed(
         df = df.sample(n=max_n, random_state=0)
 
     X = feat_union.transform(_ensure_input_df(df))
-    if "scaler" in model.named_steps:
-        X = model.named_steps["scaler"].transform(X)
+    if scaler is not None:
+        X = scaler.transform(X)
 
     slices = _block_slices_b4(feat_union, df)
     y = df[label_col].values
@@ -1412,70 +1655,7 @@ def _sort_per_class_frames(dfp, dfn, sort_by="none"):
     order = metric.sort_values(ascending=False).index
     return dfp.loc[order], dfn.loc[order]
 
-# --------------------------- B2 (texte) par classe, signé (magnitude) ---------------------------
-def blocks_b2_per_class_signed_magnitude(
-    model_path, data_csv, label_col="prdtypecode", max_n=3000,
-    label_map_json=None, out_dir="results", topk_classes=30,
-    shared_scale=True, sort_by="none"
-):
-    import pandas as pd, json
-    from pathlib import Path
-
-    model = joblib.load(model_path)
-    text_union = model.named_steps.get("text")
-    clf = model.named_steps.get("clf")
-    if text_union is None or clf is None:
-        print("[WARN] pipeline B2 inattendue -> ignoré.")
-        return False
-
-    C = _coef_matrix(clf)
-    if C is None:
-        print("[WARN] Classifieur sans coef_ -> ignoré.")
-        return False
-
-    df = pd.read_csv(data_csv)
-    if label_col not in df.columns:
-        raise ValueError(f"Colonne label absente: {label_col}")
-    if len(df) > max_n:
-        df = df.sample(n=max_n, random_state=0)
-
-    X = text_union.transform(_ensure_input_df(df))
-    slices = _block_slices_text(text_union, df)
-    y = df[label_col].values
-
-    # 1) contributions
-    dfp, dfn = _block_contrib_per_class_magnitude(C, X, y, slices, clf)
-
-    # 2) garder les top classes par effectif (puis aligner pos/neg)
-    counts = pd.Series(y).value_counts()
-    keep = counts.index[:min(topk_classes, len(counts))].tolist()
-    dfp = dfp.loc[[c for c in dfp.index if c in keep]]
-    dfn = dfn.loc[dfp.index]
-
-    # 3) trier selon l’option demandée
-    dfp, dfn = _sort_per_class_frames(dfp, dfn, sort_by=sort_by)
-
-    # (le reste inchangé : label_map, sauvegardes et plot)
-    label_map = None
-    if label_map_json and Path(label_map_json).exists():
-        try:
-            label_map = json.loads(Path(label_map_json).read_text(encoding="utf-8"))
-        except Exception:
-            label_map = None
-
-    Path(out_dir, "reports").mkdir(parents=True, exist_ok=True)
-    Path(out_dir, "figures").mkdir(parents=True, exist_ok=True)
-    dfp.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_pos_mag.csv"))
-    dfn.to_csv(Path(out_dir, "reports", "block_importance_b2_per_class_neg_mag.csv"))
-
-    _plot_per_class_signed_magnitude(
-        dfp, dfn,
-        "Importance par bloc — B2 (par classe, impact signé, magnitude)",
-        str(Path(out_dir, "figures", "block_importance_b2_per_class_signed_mag.png")),
-        label_map=label_map, shared_scale=shared_scale
-    )
-    return True
-
+# --------------------------- B4 (multimodal) par classe, signé (magnitude) ---------------------------
 def blocks_b4_per_class_signed_magnitude(
     model_path, data_csv, label_col="prdtypecode", max_n=3000,
     label_map_json=None, out_dir="results", topk_classes=30, shared_scale=True, sort_by="none"
@@ -1483,11 +1663,12 @@ def blocks_b4_per_class_signed_magnitude(
     import pandas as pd, json
     from pathlib import Path
     model = joblib.load(model_path)
-    feat_union = model.named_steps.get("features")
-    clf = model.named_steps.get("clf")
+    feat_union, scaler, clf, names = _find_feat_scaler_clf(model)
     if feat_union is None or clf is None:
         print("[WARN] pipeline B4 inattendue -> ignoré.")
         return False
+    else:
+        print(f"[INFO] Étapes détectées → features='{names['features']}', scaler='{names['scaler']}', clf='{names['clf']}'")
 
     C = _coef_matrix(clf)
     if C is None:
@@ -1501,8 +1682,8 @@ def blocks_b4_per_class_signed_magnitude(
         df = df.sample(n=max_n, random_state=0)
 
     X = feat_union.transform(_ensure_input_df(df))
-    if "scaler" in model.named_steps:
-        X = model.named_steps["scaler"].transform(X)
+    if scaler is not None:
+        X = scaler.transform(X)
 
     slices = _block_slices_b4_fine(feat_union, df)
     y = df[label_col].values
@@ -1554,6 +1735,7 @@ def main():
                         help="Taille d’échantillon max pour ACP/SHAP")
     parser.add_argument("--topk", type=int, default=20,
                         help="Nombre de confusions à reporter")
+    parser.add_argument("--blocks-b3", action="store_true", help="Importance des blocs pour B3 (image seule)")
 
     # Nouveaux switches d'importances
     parser.add_argument("--normalize", choices=["abs", "signed", "pos", "neg"],
@@ -1656,7 +1838,7 @@ def main():
     )
         
     if args.blocks_b2_per_class_signed_mag and args.model:
-        blocks_b2_per_class_signed_magnitude(
+        blocks_b2_per_class_signed_mag(
         args.model, args.data_csv,
         label_col=args.label_col,
         max_n=min(args.max_sample, 30000),
@@ -1681,6 +1863,9 @@ def main():
         label_col=args.label_col,
         max_n=args.max_sample
     )
+        
+    if args.kind == "b3" and args.blocks_b3:
+        blocks_b3(args.model, args.data_csv)
         
     if getattr(args, "blocks_b4_per_class_signed_mag_fine", False) and args.model:
         blocks_b4_per_class_signed_magnitude(

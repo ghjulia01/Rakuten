@@ -1,4 +1,7 @@
 # tools/rapport_complet.py
+# Génère un rapport complet (Markdown + HTML) à partir d'un CSV de prédictions
+# Usage:
+# python tools/rapport_complet.py --preds results/preds_b4.csv --labels features/labels_map.json --out-md reports/report_b4_full.md --out-html reports/report_b4_full.html
 import argparse, json
 from pathlib import Path
 import numpy as np, pandas as pd

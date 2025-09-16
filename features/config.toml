@@ -60,7 +60,7 @@ use_lemmatization = false
 # Active/désactive les features additionnelles
 use_text_stats = true
 use_text_stats_pro   = true    
-use_language_detection = true      #couteux en calcul
+use_language_detection = false      #couteux en calcul
 
 [text.lexicon]       # bloc chi2
 enabled = true
@@ -88,7 +88,7 @@ title_len  = 0.2
 text_stats = 0.25    # pris en compte si use_text_stats=true
 text_stats_pro=0.35  # pris en compte si use_text_stats_pro=true
 lexicon=0.4         # pris en compte si [text.lexicon] enabled=true
-#language   = 0.1         # pris en compte si use_language_detection=true SUPPRIMER / COMMENTER si la détection de langue est désactivée
+language   = 0         # pris en compte si use_language_detection=true SUPPRIMER / COMMENTER si la détection de langue est désactivée
 
 # [text.cleaner]
 # clean_special = true
@@ -101,7 +101,7 @@ handle_emojis = true
 
 [text.svd]
 enabled = true
-n_components = 600      # 400–600 : 600 si on a aussi la CNN ; 400 si RAM serrée
+n_components = 500      # 400–600 : 600 si on a aussi la CNN ; 400 si RAM serrée
 random_state = 42
 l2norm = true
 
@@ -112,7 +112,7 @@ train_dir = "data/images/images/image_train"
 # Dossier contenant les images associées à X_test
 test_dir  = "data/images/images/image_test"
 # Taille cible des images avant vectorisation (hauteur, largeur)
-size = [128, 128]  # Taille des images
+size = [224, 224]  # Taille des images
 batch_size = 32    # Réduire sipython -m main.train_model --compare-all OOM
 cache_enabled = true
 ext = ".jpg"
@@ -134,6 +134,7 @@ device = "auto"         # "auto" | "cpu" | "cuda"
 use_imagenet_norm = true
 fallback_zero = true
 dtype = "float32"
+num_workers = 4  
 
 [images.cnn.dim_reduction]
 enabled = true   
@@ -154,7 +155,10 @@ image_stats_combined = 0.35             # branche stats images
 # Activer les features de stats (5 colonnes)
 
 [images.stats_combined]
-enabled = true              # true = on ajoute la branche de features automatiques
+enabled = true
+fast = true                 # <— nouveau
+fast_size = 96 
+entropy_bins = 128              # true = on ajoute la branche de features automatiques
 white_threshold = 230       # pixels >= 230 -> fond (blanc)
 black_threshold = 25        # pixels <= 25  -> fond (noir)
 min_area = 16               # surface min pour éviter le bruit

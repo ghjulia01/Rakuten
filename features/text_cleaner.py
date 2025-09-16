@@ -29,6 +29,8 @@ from nltk.corpus import stopwords
 from nltk.stem.snowball import SnowballStemmer
 from typing import Dict, List, Optional, Set, Tuple
 
+from main.profiling_tools import profile_func, list_debug_add
+
 # === Configuration =======================================================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         handle_emojis: bool            convertir les emojis en :emoji:
         remove_numbers: bool           retirer les chiffres avant tokenisation
     """
+    @profile_func
     def __init__(
         self,
         combine_cols: Tuple[str, str] = ("designation", "description"),
@@ -118,6 +121,7 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         self._translate_map: Dict[str, str] = {}
 
     # ------------------------- Utils de nettoyage -------------------------
+    @profile_func
     def _clean_special_chars(self, text: str) -> str:
         if not isinstance(text, str):
             return ""
@@ -142,6 +146,7 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         return re.sub(r"\s+", " ", text).strip()
 
     # ------------------------------ API sklearn ---------------------------
+    @profile_func
     def fit(self, X, y=None):
         # (ré)initialiser le translate_map
         self._translate_map = {}
@@ -169,6 +174,7 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         )
         return self
 
+    @profile_func
     def clean_text(self, text: str) -> str:
         try:
             if pd.isnull(text):
@@ -199,6 +205,7 @@ class TextCleaner(BaseEstimator, TransformerMixin):
             logger.error("Erreur nettoyage texte: %s", e)
             return "__error__"
 
+    @profile_func
     def transform(self, X: pd.DataFrame) -> pd.Series:
         if not hasattr(self, "_translate_map"):
             # sécurité si fit non appelé
@@ -216,14 +223,17 @@ class TextCleaner(BaseEstimator, TransformerMixin):
 class HasDescriptionFlag(BaseEstimator, TransformerMixin):
     """Feature binaire indiquant la présence d'une description."""
     
+    @profile_func
     def __init__(self, col_name: str = "description", 
                  out_name: str = "has_description"):
         self.col_name = col_name
         self.out_name = out_name
 
+    @profile_func
     def fit(self, X, y=None):
         return self
 
+    @profile_func
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         if self.col_name not in X.columns:
             raise ValueError(f"Colonne '{self.col_name}' absente de X")
@@ -248,12 +258,15 @@ class DesignationLength(BaseEstimator, TransformerMixin):
 class LanguageFeaturizer(BaseEstimator, TransformerMixin):
     """Features one-hot de détection de langue."""
     
+    @profile_func
     def __init__(self, min_length: int = 5):
         self.min_length = min_length
         
+    @profile_func
     def fit(self, X, y=None):
         return self
         
+    @profile_func
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         try:
             languages = X.apply(

@@ -1,4 +1,7 @@
 # tools/train_b4_and_save.py
+# python tools/train_b4_and_save.py --config features/config.toml --out artifacts/b4.joblib 
+# Entraîne B4 (multimodal) et sauvegarde le pipeline en .joblib
+#
 import argparse
 from pathlib import Path
 import sys
@@ -25,7 +28,18 @@ def main():
     init_seeds(seed)
 
     X = pd.read_csv(cfg["paths"]["x_train_csv"])
-    y = pd.read_csv(cfg["paths"]["y_train_csv"]).squeeze()
+    y_df = pd.read_csv(cfg["paths"]["y_train_csv"])
+    for col in ["prdtypecode", "label", "y"]:
+        if col in y_df.columns:
+            y = y_df[col]
+            break
+    else:
+        y = y_df.squeeze()
+        if getattr(y, "ndim", 2) != 1:
+            raise ValueError(
+                "Le fichier y_train_csv contient plusieurs colonnes. "
+                "Spécifie la colonne label (ex: prdtypecode)."
+            )
 
     pipe, need_cols = build_baseline_pipeline("b4", cfg, seed, y_train=y)
     pipe.fit(X[need_cols], y)

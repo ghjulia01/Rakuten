@@ -23,6 +23,7 @@ from features.text_cleaner import TextCleaner, HasDescriptionFlag, DesignationLe
 from features.text_vectorizer import TextTfidfVectorizer
 from features.text_features import ( TextStatistics, TextStatisticsPro, LanguageDetector, Chi2LexiconFeatures
 )
+from main.profiling_tools import profile_func
 
 # Configuration du logging
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 # Utilitaires de configuration
 # -----------------------------------------------------------------------------
-
+@profile_func
 def _load_translate_map(path: Optional[str]) -> Dict[str, str]:
     """
     Charge le dictionnaire de traduction depuis un fichier JSON.
@@ -67,7 +68,7 @@ def _load_translate_map(path: Optional[str]) -> Dict[str, str]:
             except Exception as e:
                 logger.warning(f"Échec chargement translate_map depuis {p}: {e}")
     return {}
-
+@profile_func
 def _coerce_df_param(val: Any, *, is_max: bool = False) -> float | int:
     """
     Normalise les paramètres min_df/max_df pour sklearn.
@@ -94,7 +95,7 @@ def _coerce_df_param(val: Any, *, is_max: bool = False) -> float | int:
 # -----------------------------------------------------------------------------
 # Pipeline principal
 # -----------------------------------------------------------------------------
-
+@profile_func
 def create_text_pipeline(
     *,
     # 1) Cleaner
@@ -190,7 +191,7 @@ def create_text_pipeline(
         ))
 
     return FeatureUnion(transformers)
-
+@profile_func
 def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
     tmap_path = cfg_text.get("translate_map_path", None)
     n_map = len(_load_translate_map(tmap_path)) if tmap_path else 0
@@ -255,35 +256,29 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
         )
         transformers.append(("tfidf_char", char_pipeline))
 
-    # 3) Répartir les poids : top-level vs. internes à word_branch
-    raw_weights = cfg_text.get("weights", {}) or {}
+    # 3) Répartition et application des poids (robuste aux branches désactivées)
+    raw_weights = dict(cfg_text.get("weights", {}) or {})
     if raw_weights:
-        logger.info(f"Application des poids (config): {raw_weights}")
+        logger.info("Application des poids (config): %s", raw_weights)
 
-    # noms internes de la branche word_branch
-    inner_names = {"tfidf", "has_desc", "title_len", "text_stats", "text_stats_pro", "language", "lexicon"}
+    # Branches effectivement présentes
+    # - internes (dans la sous-union 'word_branch')
+    inner_present = {name for name, _ in word_branch.transformer_list}
+    # - top-level (dans la grande union texte)
+    top_present   = {name for name, _ in transformers}
 
-    top_weights   = {}
-    inner_weights = {}
+    # Filtrer les poids selon la présence réelle
+    inner_weights = {k: float(v) for k, v in raw_weights.items() if k in inner_present}
+    top_weights   = {k: float(v) for k, v in raw_weights.items() if k in top_present}
 
-    for k, v in raw_weights.items():
-        if k in ("tfidf_word", "tfidf_char"):
-            # ne garder tfidf_char que si la branche char est activée
-            if k == "tfidf_char" and not char_enabled:
-                continue
-            top_weights[k] = float(v)
-        elif k in inner_names:
-            inner_weights[k] = float(v)
-        else:
-            logger.warning(f"Ignorer poids '{k}': inconnu au top ou en interne.")
+    # Poids ignorés (ex. language si use_language_detection=false, tfidf_char si char désactivé, etc.)
+    dropped = sorted(set(raw_weights) - (set(inner_weights) | set(top_weights)))
+    if dropped:
+        logger.warning("Weights ignorés (pas présents à ce niveau): %s", dropped)
 
-    # Appliquer les poids internes à la branche word_branch (si présents)
+    # Appliquer les poids internes à la branche word
     if inner_weights:
-        # FeatureUnion accepte 'transformer_weights' en paramètre
         word_branch.set_params(transformer_weights=inner_weights)
 
-    # 4) Construire le FeatureUnion top-level avec les poids restants
-    if top_weights:
-        return FeatureUnion(transformers, transformer_weights=top_weights)
-    else:
-        return FeatureUnion(transformers)
+    # Construire le FeatureUnion top-level avec les poids filtrés
+    return FeatureUnion(transformers, transformer_weights=(top_weights or None))

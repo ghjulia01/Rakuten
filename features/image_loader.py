@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 from sklearn.base import BaseEstimator, TransformerMixin
 
+from main.profiling_tools import profile_func, list_debug_add
 
 class ImageLoader(BaseEstimator, TransformerMixin):
     """
@@ -20,6 +21,7 @@ class ImageLoader(BaseEstimator, TransformerMixin):
     - En cas d'erreur/fichier manquant, retourner un vecteur zéro (fallback).
     """
 
+    @profile_func
     def __init__(
         self,
         image_dir: str,
@@ -37,10 +39,12 @@ class ImageLoader(BaseEstimator, TransformerMixin):
 
     # --- API sklearn ------------------------------------------------------------
 
+    @profile_func
     def fit(self, X=None, y=None):
         # ne rien apprendre
         return self
 
+    @profile_func
     def _resolve_size(self) -> Tuple[int, int]:
         """
         Sécuriser/convertir la taille *au moment de l'usage* (pas dans __init__).
@@ -55,6 +59,7 @@ class ImageLoader(BaseEstimator, TransformerMixin):
             H, W = 128, 128
         return H, W
 
+    @profile_func
     def _build_path(self, imgid: Any, pid: Any) -> str:
         """Construire le chemin d'une image à partir des ids."""
         # convertir prudemment en int -> str
@@ -69,11 +74,13 @@ class ImageLoader(BaseEstimator, TransformerMixin):
         fname = f"image_{iid}_product_{pid_str}{self.ext}"
         return os.path.join(self.image_dir, fname)
 
+    @profile_func
     def transform(self, X):
         """
         X: DataFrame avec colonnes `imageid` et `productid`.
         Retour: np.ndarray (n, H, W, 3) float32 dans [0,1].
         """
+        list_debug_add("ImageLoader.transform : " + str(X.shape[0]))
         H, W = self._resolve_size()
 
         # extraire colonnes (laisser pandas gérer les types)

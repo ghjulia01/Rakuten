@@ -15,9 +15,12 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from main.profiling_tools import profile_func
+
 StopWords = Optional[Union[str, List[str]]]
 
 class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
+    @profile_func
     def __init__(
         self,
         max_features: int = 50_000,
@@ -49,6 +52,7 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
 
         self.vectorizer: Optional[TfidfVectorizer] = None
 
+    @profile_func
     def _make_vec(self) -> TfidfVectorizer:
         # Forcer float64 pour éviter le warning sklearn (float32→float64)
         dtype = np.float64 if str(self.dtype) not in ("float32", "np.float32") else np.float64
@@ -67,22 +71,26 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
             stop_words=self.stop_words,         
         )
 
+    @profile_func
     def fit(self, X, y=None):
         self.vectorizer = self._make_vec()
         self.vectorizer.fit(X)
         return self
 
+    @profile_func
     def transform(self, X):
         if self.vectorizer is None:
             raise RuntimeError("TextTfidfVectorizer non fitted : appeler fit() avant transform().")
         return self.vectorizer.transform(X)
 
+    @profile_func
     def get_feature_names_out(self):
         if self.vectorizer is None:
             raise RuntimeError("TextTfidfVectorizer non fitted.")
         return self.vectorizer.get_feature_names_out()
 
     # Laisser sklearn régler/inspecter les hyperparamètres
+    @profile_func
     def get_params(self, deep=True):
         return {
             "max_features": self.max_features,
@@ -99,6 +107,7 @@ class TextTfidfVectorizer(BaseEstimator, TransformerMixin):
             "analyzer": self.analyzer,
         }
 
+    @profile_func
     def set_params(self, **params):
         for k, v in params.items():
             setattr(self, k, v)

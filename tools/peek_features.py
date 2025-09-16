@@ -1,9 +1,9 @@
 # tools/peek_features.py
 # Inspecter la taille/nnz/mémoire des features par branche avant la fusion
-# Échantillon rapide (8k) pour ne pas exploser la RAM
-# le script à lancer: RAKUTEN_MAX_N=8000 python tools/peek_features.py
+# Échantillon rapide (3k) pour ne pas exploser la RAM
+# le script à lancer: RAKUTEN_MAX_N=83000 python tools/peek_features.py
 # Windows PowerShell
-# $env:RAKUTEN_MAX_N=8000; python tools/peek_features.py
+# $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py
 import os, sys, time
 from pathlib import Path
 
@@ -20,10 +20,18 @@ from scipy import sparse
 from main.train_model import load_config, init_seeds
 from models.text_pipeline import create_text_pipeline_from_cfg
 from models.image_pipeline import create_image_pipeline_from_cfg
-from models.cnn_features import create_cnn_branch_from_cfg
+try:
+    from models.cnn_features import create_cnn_branch_from_cfg
+except ImportError:
+    from main.train_model import create_cnn_branch_from_cfg
 from features.image_stats import ImageStatsCombinedFeaturizer
 
 # ---------- utilitaires ----------
+TIMES = {}  # collecte des durées par étape
+
+def remember(key, dt):
+    TIMES[key] = TIMES.get(key, 0.0) + dt
+
 def describe_sparse(name, X, float_bytes=8, index_bytes=4):
     """
     Estime la mémoire si CSR: data(float) + indices(int) + indptr(int).
@@ -57,6 +65,12 @@ def main():
     seed = int(cfg.get("random", {}).get("seed", 42))
     init_seeds(seed)
 
+    fusion_w = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
+    want_pixels = not (fusion_w.get("image_pixels", None) == 0)
+    want_cnn = not (fusion_w.get("image_cnn", None) == 0)
+    want_stats  = not (fusion_w.get("image_stats_combined", None) == 0)
+    print(f"Config: {CFG_PATH} | seed={seed} | max_n={MAX_N} | pixels={want_pixels} | cnn={want_cnn} | stats={want_stats}")
+    
     # Charger les données comme train_model
     x_path = cfg["paths"]["x_train_csv"]
     y_path = cfg["paths"]["y_train_csv"]
@@ -90,6 +104,7 @@ def main():
                 for in_name, in_trans in inner_list:
                     try:
                         X_in, dt = timer(in_trans.fit_transform, X[need_cols], y)
+                        remember(f"text/{in_name}", dt)
                         # devine un type raisonnable pour l'estimation mémoire :
                         if sparse.issparse(X_in):
                             # TF-IDF: souvent float64 -> 8 bytes; indices int32 -> 4 bytes (ajuste si besoin)
@@ -103,6 +118,7 @@ def main():
                 # Autres top-level: typiquement tfidf_char (Pipeline) si activée
                 try:
                     X_top, dt = timer(trans.fit_transform, X[need_cols], y)
+                    remember(f"text/{name}", dt)
                     if sparse.issparse(X_top):
                         describe_sparse(f"  [{name}]", X_top, float_bytes=8, index_bytes=4)
                     else:
@@ -113,57 +129,123 @@ def main():
 
     # Et calculer la **branche texte complète** telle qu'utilisée dans le training :
     X_text, dt = timer(text_union.fit_transform, X[need_cols], y)
+    remember("text/total", dt)
     # si le pipeline caste en float32 après TF-IDF, mets float_bytes=4 pour une meilleure estimation
     describe_sparse("text_branch (TOTAL)", X_text, float_bytes=8, index_bytes=4)
     print(f"   ↳ fit_transform texte (TOTAL): {dt/60:.2f} min")
 
+    svd_cfg = (cfg.get("text", {}).get("svd", {}) or {})
+    if bool(svd_cfg.get("enabled", False)):
+        from sklearn.decomposition import TruncatedSVD
+        from sklearn.preprocessing import Normalizer
+        n_comp = int(svd_cfg.get("n_components", 600))
+        rs = int(svd_cfg.get("random_state", 42))
+        l2 = bool(svd_cfg.get("l2norm", True))
+        print(f"\n=== TEXTE → SVD({n_comp}) {'+ L2' if l2 else ''} ===")
+        X_text = TruncatedSVD(n_components=n_comp, random_state=rs).fit_transform(X_text)
+        if l2:
+            X_text = Normalizer(copy=False).fit_transform(X_text)
+        # re-CSR pour l’estimation hstack
+        from scipy import sparse as sp
+        X_text = sp.csr_matrix(X_text)
+        describe_sparse("text_branch (POST-SVD)", X_text)
+
     # --------- BRANCHE PIXELS ----------
     print("\n=== PIXELS ===")
-    img_pipe = create_image_pipeline_from_cfg(cfg.get("images", {}), use_test_dir=False)
-    X_pix, dt = timer(img_pipe.fit_transform, X[need_cols], y)
-    if sparse.issparse(X_pix):
-        describe_sparse("pixels_branch", X_pix, float_bytes=8, index_bytes=4)
+    if want_pixels:
+        img_pipe = create_image_pipeline_from_cfg(cfg.get("images", {}), use_test_dir=False)
+        X_pix, dt = timer(img_pipe.fit_transform, X[need_cols], y)
+        remember("pixels", dt)
+        describe_sparse("pixels_branch", X_pix if sparse.issparse(X_pix) else X_pix)
+        print(f"   ↳ fit_transform pixels: {dt/60:.2f} min")
     else:
-        describe_sparse("pixels_branch", X_pix)
-    print(f"   ↳ fit_transform pixels: {dt/60:.2f} min")
+        X_pix = None
+        print("Pixels SKIPPED (poids=0 dans fusion.weights)")
 
     # --------- BRANCHE CNN (si activée) ----------
     X_cnn = None
     cnn_cfg = cfg.get("images", {}).get("cnn", {})
-    if bool(cnn_cfg.get("enabled", False)):
+    if want_cnn and bool(cnn_cfg.get("enabled", False)):
         print("\n=== CNN ===")
         try:
             cnn_pipe = create_cnn_branch_from_cfg(cfg.get("images", {}))
             X_cnn, dt = timer(cnn_pipe.fit_transform, X[need_cols], y)
-            if sparse.issparse(X_cnn):
-                describe_sparse("cnn_branch", X_cnn, float_bytes=8, index_bytes=4)
-            else:
-                describe_sparse("cnn_branch", X_cnn)
+            remember("cnn", dt)
+            describe_sparse("cnn_branch", X_cnn if sparse.issparse(X_cnn) else X_cnn)
             print(f"   ↳ fit_transform cnn: {dt/60:.2f} min")
+            try:
+                cstep = getattr(cnn_pipe, "named_steps", {}).get("cnn", None)
+                if cstep is not None and hasattr(cstep, "get_diagnostics"):
+                    diag = cstep.get_diagnostics()
+                    print(f"   ↳ CNN raw feat_dim: {diag.get('feat_dim')} | device: {diag.get('device')} "
+                        f"| batch_size: {diag.get('batch_size')} | imagenet_norm: {diag.get('use_imagenet_norm')}")
+            except Exception as e:
+                print(f"[WARN] Impossible de lire les diag CNN: {e}")
         except Exception as e:
             print(f"[WARN] CNN non disponible: {e}")
     else:
-        print("\n=== CNN désactivée dans la config ===")
+        print("\n=== CNN SKIPPED (poids=0 ou disabled) ===")
 
     # --------- BRANCHE STATS IMAGE (si activée) ----------
     X_stats = None
-    stats_c = cfg.get("images", {}).get("stats_combined", {})
-    if bool(stats_c.get("enabled", False)):
+    stats_cfg = cfg.get("images", {}).get("stats_combined", {})
+    if want_stats and bool(stats_cfg.get("enabled", False)):
         print("\n=== IMAGE STATS ===")
         stats = ImageStatsCombinedFeaturizer(
-            image_dir=cfg["images"]["train_dir"],
-            imgid_col="imageid", pid_col="productid",
-            white_threshold=int(stats_c.get("white_threshold", 230)),
-            black_threshold=int(stats_c.get("black_threshold", 25)),
-            min_area=int(stats_c.get("min_area", 16)),
-            prefix_basic=str(stats_c.get("prefix_basic", "img_")),
-            prefix_pro=str(stats_c.get("prefix_pro", "pro_")),
+            image_dir=cfg["images"]["train_dir"],   # ou test_dir selon le contexte
+        imgid_col="imageid", pid_col="productid",
+        white_threshold=stats_cfg.get("white_threshold", 230),
+        black_threshold=stats_cfg.get("black_threshold", 25),
+        min_area=stats_cfg.get("min_area", 16),
+        prefix_basic="img_", prefix_pro="pro_",
+        fast=bool(stats_cfg.get("fast", False)),
+        fast_size=int(stats_cfg.get("fast_size", 96)),
+        entropy_bins=int(stats_cfg.get("entropy_bins", 256)),
         )
         X_stats, dt = timer(stats.fit_transform, X[need_cols], y)
+        remember("image_stats", dt)
         describe_sparse("img_stats_branch", X_stats)
         print(f"   ↳ fit_transform stats: {dt/60:.2f} min")
     else:
-        print("\n=== IMAGE STATS désactivées dans la config ===")
+        print("\n=== IMAGE STATS SKIPPED (poids=0 ou disabled) ===")
+
+    print("\n=== RÉCAP (comme en training) ===")
+    present_branches = ["text"]
+    if X_pix is not None:
+        present_branches.append("image_pixels")
+    if X_cnn is not None:
+        present_branches.append("image_cnn")
+    if X_stats is not None:
+        present_branches.append("image_stats_combined")
+
+    # Poids effectifs = uniquement ceux des branches présentes
+    fusion_w = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
+    effective_weights = {k: v for k, v in fusion_w.items() if k in present_branches} or None
+
+    # Dimensions (après éventuelle réduction texte, etc.)
+    def ncols(arr):
+        return arr.shape[1] if arr is not None else 0
+
+    dim_text  = ncols(X_text)   # si tu as appliqué SVD texte, c'est déjà la taille réduite
+    dim_pix   = ncols(X_pix)
+    dim_cnn   = ncols(X_cnn)
+    dim_stats = ncols(X_stats)
+    dim_total = dim_text + dim_pix + dim_cnn + dim_stats
+
+    print(f"Branches fusionnées: {present_branches}")
+    print(f"Weights effectifs  : {effective_weights}")
+    print(f"Dimensions         : text={dim_text}, pixels={dim_pix}, cnn={dim_cnn}, stats={dim_stats}")
+    print(f"Dimension totale attendue ≈ {dim_total}")
+
+    print("\n=== RÉCAP TEMPS (fit_transform) ===")
+    if TIMES:
+        n = len(X)
+        total = sum(TIMES.values())
+        for k, v in sorted(TIMES.items(), key=lambda kv: kv[1], reverse=True):
+            print(f"{k:20s} : {v:6.1f}s  (~{v/60:.2f} min)  | {1000*v/n:5.1f} s / 1k échant.")
+        print(f"{'-'*20}\nTOTAL{' '*15}: {total:6.1f}s  (~{total/60:.2f} min)")
+    else:
+        print("Aucune durée collectée (TIMES est vide).")
 
     # --------- HSTACK MANUEL (estimation fusion) ----------
     print("\n=== FUSION (hstack) — estimation ===")
@@ -172,6 +254,6 @@ def main():
     X_all = sparse.hstack(blocks_csr).tocsr()
     describe_sparse("FUSION_total", X_all, float_bytes=8, index_bytes=4)
     print("OK.")
-
+    
 if __name__ == "__main__":
     main()

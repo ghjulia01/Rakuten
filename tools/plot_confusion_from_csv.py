@@ -9,11 +9,23 @@ Tracer une matrice de confusion à partir d’un CSV de prédictions (y_true, y_
   - mini-heatmap optionnelle focalisée sur les classes problématiques
   - [NOUVEAU] CSV consolidé des problèmes (avec colonne 'top_confusions')
   - [NOUVEAU] Mini-heatmap annotée avec support & F1 dans les labels
+  
+Le Scirpt est utilisable en ligne de commande.
+ python tools/plot_confusion_from_csv.py `
+  --csv results/preds_b4.csv `
+  --labels-map features/labels_map.json `
+  --normalize true `
+  --topN 30 `
+  --worst-by f1 --min-support 200 --worst-k 6 --top-mis 3 `
+  --heatmap-problemes results/figures/confusion_b4_problemes.png `
+  --mini-wrap 18 --mini-fontsize 8
+
 """
 
 import argparse
 import json
 from pathlib import Path
+from textwrap import fill
 
 import numpy as np
 import pandas as pd
@@ -116,6 +128,10 @@ def main():
                     help="Nombre de confusions principales à extraire par classe problématique")
     ap.add_argument("--heatmap-problemes", default="results/figures/confusion_problemes.png",
                     help="Mini-heatmap focalisée sur les classes problématiques (mettre '' pour désactiver)")
+    ap.add_argument("--mini-wrap", type=int, default=22,
+                    help="Largeur d'enrobage des étiquettes de la mini-heatmap")
+    ap.add_argument("--mini-fontsize", type=int, default=8,
+                    help="Taille de police des ticks de la mini-heatmap")
     args = ap.parse_args()
 
     out_png = args.output
@@ -245,21 +261,29 @@ def main():
     pd.DataFrame(recs).to_csv(conf_csv, index=False)
     print(f"[INFO] Confusions principales sauvegardées → {conf_csv}")
 
-    # ---- [NOUVEAU] CSV consolidé problèmes + résumé textuel des confusions
-    # On agrège recs par classe_vraie_id pour construire 'top_confusions'
+    # ---- CSV consolidé problèmes + résumé textuel des confusions
     if len(recs) > 0:
         df_recs = pd.DataFrame(recs)
-        grouped = (
-            df_recs.groupby(["classe_vraie_id", "classe_vraie_nom"], as_index=False)
-                   .apply(lambda g: _format_top_confusions(
-                       g[["classe_pred_nom", "taux", "comptes"]]
-                       .rename(columns={"classe_pred_nom":"classe_pred_nom",
-                                        "taux":"taux",
-                                        "comptes":"comptes"})
-                       .to_dict("records")
-                   ))
-                   .rename(columns={None: "top_confusions"})
-        )
+        gb = df_recs.groupby(["classe_vraie_id", "classe_vraie_nom"])
+        try:
+            # pandas ≥ 2.2 : on exclut explicitement les colonnes de groupage
+            grouped = gb.apply(
+                lambda g: pd.Series({
+                    "top_confusions": _format_top_confusions(
+                        g[["classe_pred_nom", "taux", "comptes"]].to_dict("records")
+                    )
+                }),
+                include_groups=False
+            ).reset_index()
+        except TypeError:
+            # pandas < 2.2 : pas de param include_groups
+            grouped = gb.apply(
+                lambda g: pd.Series({
+                    "top_confusions": _format_top_confusions(
+                        g[["classe_pred_nom", "taux", "comptes"]].to_dict("records")
+                    )
+                })
+            ).reset_index()
     else:
         grouped = pd.DataFrame(columns=["classe_vraie_id", "classe_vraie_nom", "top_confusions"])
 
@@ -277,7 +301,7 @@ def main():
         idx = [label_index[s] for s in sel if s in label_index]
         if idx:
             cm_sub = cm_true[np.ix_(idx, idx)]
-            # Construire labels enrichis: "Nom (n=SUPPORT, F1=xx)"
+            # Labels enrichis: "Nom (n=SUPPORT, F1=xx.xx)"
             meta = df_pb.set_index("classe_id")[["classe_nom", "support", "f1"]].to_dict(orient="index")
             lab_sub = []
             for lab in sel:
@@ -287,11 +311,21 @@ def main():
                 else:
                     lab_sub.append(mapping.get(lab, lab) if mapping else lab)
 
-            fig2, ax2 = plt.subplots(figsize=taille_fig_selon_nlabels(len(idx)))
-            disp2 = ConfusionMatrixDisplay(confusion_matrix=cm_sub, display_labels=lab_sub)
+            # NEW: wrap + taille dynamique + petite police
+            lab_sub_wrapped = [fill(s, width=args.mini_wrap) for s in lab_sub]
+            max_len = max(len(s) for s in lab_sub_wrapped)
+            h = max((5), 0.6 * len(idx))
+            w = max(8, 0.18 * max_len)
+
+            fig2, ax2 = plt.subplots(figsize=(w, h))
+            disp2 = ConfusionMatrixDisplay(confusion_matrix=cm_sub, display_labels=lab_sub_wrapped)
             disp2.plot(ax=ax2, cmap="Oranges", colorbar=True, values_format=".2f")
+            for t in ax2.get_xticklabels():
+                t.set_rotation(90)
+                t.set_fontsize(args.mini_fontsize)
+            for t in ax2.get_yticklabels():
+                t.set_fontsize(args.mini_fontsize)
             ax2.set_title(f"Matrice de confusion (normalisée par vrai) — pires classes ({col_metrique})")
-            plt.xticks(rotation=90)
             plt.tight_layout()
             Path(args.heatmap_problemes).parent.mkdir(parents=True, exist_ok=True)
             plt.savefig(args.heatmap_problemes, dpi=args.dpi, bbox_inches="tight")

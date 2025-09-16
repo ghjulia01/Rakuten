@@ -1,21 +1,28 @@
-# features/image_stats.py
 from math import hypot
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
+from main.profiling_tools import profile_func
 
 class ImageStatsCombinedFeaturizer(BaseEstimator, TransformerMixin):
     """
-    Combine les features BASIC (width,height,occupancy,white_ratio,black_ratio)
+    Combine BASIC (width,height,occupancy,white_ratio,black_ratio)
     et PRO (gray_mean/std, p10/p90, dyn_range, entropy, lap_var, edge_density,
     aspect_ratio, bbox_center_offset, sat_mean, colorfulness, border_white_ratio, file_bpp)
-    en une seule lecture par image.
+    en un seul passage par image.
+
+    Accélérateurs:
+      - fast: si True, calcule sur une version downscalée (fast_size) en préservant les ratios.
+      - fast_size: côté max pour la version downscalée.
+      - entropy_bins: nb de bins histogramme (plus petit = plus rapide).
     """
+    @profile_func
     def __init__(self, image_dir=None, imgid_col="imageid", pid_col="productid",
                  white_threshold=230, black_threshold=25, min_area=16,
-                 prefix_basic="img_", prefix_pro="pro_"):
+                 prefix_basic="img_", prefix_pro="pro_",
+                 fast=False, fast_size=96, entropy_bins=256):
         self.image_dir = image_dir
         self.imgid_col = imgid_col
         self.pid_col = pid_col
@@ -24,7 +31,11 @@ class ImageStatsCombinedFeaturizer(BaseEstimator, TransformerMixin):
         self.min_area = int(min_area)
         self.prefix_basic = str(prefix_basic)
         self.prefix_pro = str(prefix_pro)
+        self.fast = bool(fast)
+        self.fast_size = int(fast_size)
+        self.entropy_bins = int(entropy_bins)
 
+    @profile_func
     def fit(self, X, y=None):
         self.image_dir_ = Path(self.image_dir) if self.image_dir is not None else None
         self.basic_cols_ = [
@@ -44,141 +55,146 @@ class ImageStatsCombinedFeaturizer(BaseEstimator, TransformerMixin):
         ]
         self.columns_ = np.array(self.basic_cols_ + self.pro_cols_)
         return self
-    
+
+    @profile_func
     def set_image_dir(self, image_dir):
         self.image_dir = image_dir
         if hasattr(self, "image_dir_"):
             self.image_dir_ = Path(image_dir)
-    
+
+    # ---------- helpers rapides ----------
     @staticmethod
-    def _entropy(gray):
-        hist, _ = np.histogram(gray, bins=256, range=(0,255), density=True)
-        hist = hist[hist>0]
-        return float(-(hist * np.log2(hist)).sum())
+    def _entropy(gray, bins=256):
+        hist = np.bincount(gray.ravel(), minlength=256).astype(np.float64)
+        if bins != 256:
+            factor = 256 // bins
+            hist = hist.reshape(bins, factor).sum(axis=1)
+        p = hist / (hist.sum() + 1e-12)
+        p = p[p > 0]
+        return float(-(p * np.log2(p)).sum())
 
     @staticmethod
-    def _lap_var(gray):
-        k = np.array([[0,1,0],[1,-4,1],[0,1,0]], dtype=np.float32)
-        from scipy.signal import convolve2d
-        g = convolve2d(gray.astype(np.float32), k, mode="same", boundary="symm")
-        return float(g.var())
+    def _lap_var_fast(gray):
+        g = gray.astype(np.float32)
+        gx = np.gradient(g, axis=1)
+        gy = np.gradient(g, axis=0)
+        lap = np.gradient(gx, axis=1) + np.gradient(gy, axis=0)
+        return float(np.var(lap))
 
     @staticmethod
     def _edge_density(gray, thr=20.0):
-        gx = np.zeros_like(gray, dtype=np.float32)
-        gy = np.zeros_like(gray, dtype=np.float32)
-        gx[:,1:-1] = (gray[:,2:].astype(np.float32) - gray[:,:-2].astype(np.float32)) * 0.5
-        gy[1:-1,:] = (gray[2:,:].astype(np.float32) - gray[:-2,:].astype(np.float32)) * 0.5
+        g = gray.astype(np.float32)
+        gx = np.zeros_like(g, dtype=np.float32)
+        gy = np.zeros_like(g, dtype=np.float32)
+        gx[:, 1:-1] = (g[:, 2:] - g[:, :-2]) * 0.5
+        gy[1:-1, :] = (g[2:, :] - g[:-2, :]) * 0.5
         mag = np.hypot(gx, gy)
         return float((mag > thr).mean())
 
     @staticmethod
     def _colorfulness(rgb):
-        R,G,B = rgb[...,0].astype(np.float32), rgb[...,1].astype(np.float32), rgb[...,2].astype(np.float32)
-        rg, yb = np.abs(R-G), np.abs(0.5*(R+G)-B)
-        return float(np.sqrt(rg.var()+yb.var()) + 0.3*np.sqrt(rg.mean()**2 + yb.mean()**2))
+        r = rgb[..., 0].astype(np.float32)
+        g = rgb[..., 1].astype(np.float32)
+        b = rgb[..., 2].astype(np.float32)
+        rg = r - g
+        yb = 0.5 * (r + g) - b
+        std_rg, mean_rg = np.std(rg), np.mean(rg)
+        std_yb, mean_yb = np.std(yb), np.mean(yb)
+        return float(np.sqrt(std_rg**2 + std_yb**2) + 0.3 * np.sqrt(mean_rg**2 + mean_yb**2))
 
-    def transform(self, X: pd.DataFrame):
-        if self.imgid_col not in X.columns or self.pid_col not in X.columns:
-            raise ValueError(f"Colonnes requises absentes: '{self.imgid_col}', '{self.pid_col}'")
-        if not hasattr(self, "image_dir_") or self.image_dir_ is None:
-            raise RuntimeError("image_dir_ non défini : as-tu appelé fit() ?")
+    @staticmethod
+    def _sat_mean(rgb_pil):
+        hsv = rgb_pil.convert("HSV")
+        s = np.asarray(hsv)[..., 1].astype(np.float32)
+        return float(s.mean() / 255.0)
 
-        n = len(X)
-        out = np.zeros((n, len(self.columns_)), dtype=np.float32)
-        idxs = []
+    def _load_rgb(self, p: Path):
+        with Image.open(p) as im:
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            W, H = im.size
+            if self.fast:
+                max_side = max(W, H)
+                if max_side > self.fast_size:
+                    scale = self.fast_size / max_side
+                    new_size = (max(1, int(round(W * scale))), max(1, int(round(H * scale))))
+                    im = im.resize(new_size, Image.BILINEAR)
+            return im, (W, H)
 
-        for i, (idx, row) in enumerate(X[[self.imgid_col, self.pid_col]].iterrows()):
-            idxs.append(idx)
+    @profile_func
+    def transform(self, X):
+        if not hasattr(self, "columns_"):
+            self.fit(X)
+
+        paths = []
+        for imgid, pid in zip(X[self.imgid_col].values, X[self.pid_col].values):
+            if self.image_dir_ is None:
+                paths.append(None); continue
+            fname = f"image_{int(imgid)}_product_{int(pid)}.jpg"
+            p = self.image_dir_ / fname
+            paths.append(p if p.exists() else None)
+
+        out = np.zeros((len(paths), len(self.columns_)), dtype=np.float32)
+
+        for i, p in enumerate(paths):
+            if p is None:
+                continue
             try:
-                imgid = int(row[self.imgid_col]); pid = int(row[self.pid_col])
-                path = self.image_dir_ / f"image_{imgid}_product_{pid}.jpg"
+                img, (W0, H0) = self._load_rgb(p)
+                rgb = np.asarray(img)
+                H, W = rgb.shape[:2]
+                gray = np.asarray(img.convert("L"))
 
-                with Image.open(path) as im:
-                    im_rgb = im.convert("RGB")
-                    rgb = np.asarray(im_rgb)
-                    gray = np.asarray(im_rgb.convert("L"))
+                white_mask = gray >= self.white_threshold
+                black_mask = gray <= self.black_threshold
+                obj_mask = ~(white_mask | black_mask)
 
-                H, W = gray.shape
-                if H == 0 or W == 0:
-                    continue
-
-                # masques
-                white_mask = (gray >= self.white_threshold)
-                black_mask = (gray <= self.black_threshold)
-                mid = (~white_mask) & (~black_mask)
-
-                # BASIC
-                area = int(mid.sum())
+                occupancy = float(obj_mask.mean())
                 white_ratio = float(white_mask.mean())
                 black_ratio = float(black_mask.mean())
-                if area >= self.min_area:
-                    ys, xs = np.nonzero(mid)
-                    h = int(ys.max() - ys.min() + 1)
-                    w = int(xs.max() - xs.min() + 1)
-                    occ = float(area) / float(H * W)
+
+                if obj_mask.any():
+                    ys, xs = np.where(obj_mask)
+                    h_obj = ys.max() - ys.min() + 1
+                    w_obj = xs.max() - xs.min() + 1
+                    cy = ys.mean(); cx = xs.mean()
+                    offset = hypot(cx - (W - 1) / 2.0, cy - (H - 1) / 2.0) / hypot(W, H)
                 else:
-                    h = w = 0
-                    occ = 0.0
+                    h_obj = w_obj = 0.0
+                    offset = 0.0
 
-                # PRO
-                p10, p90 = np.percentile(gray, [10, 90])
-                gray_mean, gray_std = float(gray.mean()), float(gray.std())
-                dyn = float(p90 - p10)
-                ent = self._entropy(gray)
-                lapv = self._lap_var(gray)
-                edged = self._edge_density(gray)
+                gray_f = gray.astype(np.float32)
+                gmean = float(gray_f.mean())
+                gstd  = float(gray_f.std())
+                p10   = float(np.percentile(gray, 10))
+                p90   = float(np.percentile(gray, 90))
+                dyn   = float(p90 - p10)
+                ent   = self._entropy(gray, bins=(128 if self.fast else self.entropy_bins))
+                lapv  = self._lap_var_fast(gray)
+                edged = self._edge_density(gray, thr=20.0)
 
-                if area >= self.min_area and h > 0:
-                    aspect = (w / max(1, h))
-                    ys, xs = np.nonzero(mid)
-                    cy, cx = float(ys.mean()), float(xs.mean())
-                    off = hypot(cx - (W-1)/2.0, cy - (H-1)/2.0) / hypot(W/2.0, H/2.0)
-                else:
-                    aspect, off = 0.0, 1.0
+                bw = max(1, min(H, W) // 20)
+                border = np.zeros_like(gray, dtype=bool)
+                border[:bw, :] = True; border[-bw:, :] = True
+                border[:, :bw] = True; border[:, -bw:] = True
+                border_white_ratio = float((gray[border] >= self.white_threshold).mean())
 
-                # saturation moyenne (sous-échantillonnée si gros)
-                try:
-                    import colorsys
-                    flat = rgb.reshape(-1,3)/255.0
-                    step = max(1, flat.shape[0]//5000)
-                    s = 0.0
-                    for r,g,b in flat[::step]:
-                        s += colorsys.rgb_to_hsv(r,g,b)[1]
-                    sat_mean = float(s / (flat[::step].shape[0]))
-                except Exception:
-                    sat_mean = 0.0
-
-                cf = self._colorfulness(rgb)
-
-                # bordures blanches (5% de bande)
-                bw = int(max(1, 0.05*min(H,W)))
-                top = (gray[:bw,:] >= self.white_threshold).mean()
-                bottom = (gray[-bw:,:] >= self.white_threshold).mean()
-                left = (gray[:,:bw] >= self.white_threshold).mean()
-                right = (gray[:,-bw:] >= self.white_threshold).mean()
-                border_white = float(np.mean([top,bottom,left,right]))
+                sat_mean = self._sat_mean(img)
+                colorf   = self._colorfulness(rgb)
 
                 try:
-                    fsize = path.stat().st_size
-                    bpp = float(fsize) / float(max(1, H*W*3))
+                    fsz = p.stat().st_size
+                    bpp = float(fsz / (max(1, W0 * H0)))
                 except Exception:
                     bpp = 0.0
 
-                # write row
-                out[i, :len(self.basic_cols_)] = [w, h, occ, white_ratio, black_ratio]
-                out[i, len(self.basic_cols_):] = [
-                    gray_mean, gray_std, float(p10), float(p90), dyn,
-                    ent, lapv, edged,
-                    aspect, off,
-                    sat_mean, cf,
-                    border_white, bpp
+                vals = [
+                    float(W0), float(H0), occupancy, white_ratio, black_ratio,
+                    gmean, gstd, p10, p90, dyn, ent, lapv, edged,
+                    (float(W0) / max(1.0, H0)), offset, sat_mean, colorf, border_white_ratio, bpp
                 ]
+                out[i, :] = np.array(vals, dtype=np.float32)
             except Exception:
-                # ligne à zéro si problème d'I/O
-                pass
+                continue
 
-        return pd.DataFrame(out, index=idxs, columns=self.columns_)
-
-    def get_feature_names_out(self, input_features=None):
-        return self.columns_
+        df = pd.DataFrame(out, columns=list(self.columns_), index=X.index)
+        return df.values
