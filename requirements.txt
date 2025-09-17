@@ -21,3 +21,6 @@ torch==2.8.0
 torchvision==0.23.0
 tqdm==4.67.1
 wordcloud==1.9.4
+xgboost==1.7.6
+lightgbm==4.0.0
+transformers==4.19.1

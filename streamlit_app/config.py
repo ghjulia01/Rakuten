@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Streamlit – Rakuten Multimodal Dashboard (corrigé)
+Streamlit – Rakuten Multimodal Dashboard 
 - Supprime toute dépendance à un labels_map JSON (mapping en dur)
 - Force l'utilisation de streamlit_app/demo_images pour l'affichage des images
 - Corrige les erreurs de DuplicateElementId et remplace use_container_width par width
+- Ajoute des caches pour accélérer le rechargement
+- Ajoute un wordcloud optionnel (si le package est installé)
+- Corrige quelques bugs mineurs
 """
 
 from __future__ import annotations

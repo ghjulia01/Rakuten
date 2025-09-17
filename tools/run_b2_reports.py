@@ -1,6 +1,5 @@
 # tools/run_b2_reports.py
 # Rapports B2 (confusion + top problèmes + rapport complet)
-# python tools/run_b2_reports.py --csv results/preds_b2.csv --labels-map features/
 # python tools/run_b2_reports.py
 
 

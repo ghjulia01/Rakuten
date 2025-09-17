@@ -3,6 +3,45 @@
 Diagnostics ACP & SHAP pour baselines B2/B3/B4
 - ACP 2D: SVD preview si disponible, sinon PCA sur la matrice OOF
 - SHAP: LinearExplainer (LogReg) ou KernelExplainer (fallback, plus lent)
+python -m tools.diagnostics_acp_shap `
+  --kind b4 `
+  --model artifacts/b4.joblib `
+  --data-csv notebooks/df.csv `
+  --both-global `
+  --blocks-b4 `
+  --blocks-b4-per-class `
+  --blocks-b4-per-class-signed `
+  --signed-shared-scale `
+  --label-map features/labels_map.json
+
+
+python -m tools.diagnostics_acp_shap --kind b2 ^
+  --model artifacts/b2.joblib ^
+  --data-csv notebooks/df.csv ^
+  --blocks-b2-per-class --blocks-b2-per-class-signed --signed-shared-scale
+
+python -m tools.diagnostics_acp_shap --kind b3 ^
+  --model artifacts/b3.joblib ^
+  --data-csv notebooks/df.csv ^
+  --blocks-b3
+
+Global blocs:
+python -m tools.diagnostics_acp_shap --kind b2 --model artifacts/b2.joblib --data-csv notebooks/df.csv --blocks-b2
+
+Par classe signé (+/− en %) :
+python -m tools.diagnostics_acp_shap --kind b2 --model artifacts/b2.joblib --data-csv notebooks/df.csv --blocks-b2-per-class-signed --signed-shared-scale
+
+Par classe en magnitude (échelle linéaire, trié par total) :
+python -m tools.diagnostics_acp_shap --kind b2 --model artifacts/b2.joblib --data-csv notebooks/df.csv --blocks-b2-per-class-signed-mag --sort-by total
+
+Importance globale des sous-blocs texte
+python -m tools.diagnostics_acp_shap --kind b2 --model artifacts/b2.joblib --data-csv notebooks/df.csv --blocks-b2
+
+Top mots globaux (tente SHAP, sinon fallback coef×mean tf-idf)
+python -m tools.diagnostics_acp_shap --kind b2 --model artifacts/b2.joblib --data-csv notebooks/df.csv --blocks-b2 --both-global  
+
+python -m tools.diagnostics_acp_shap --kind b4 --model artifacts/b4.joblib --data-csv data/X_train_update.csv --shap-b4-blocks
+
 """
 
 import os
@@ -550,6 +589,12 @@ def do_shap(kind, model_path, data_csv=None, text_col="designation",
             abs_mean = np.mean(np.vstack(per_class), axis=0)  # (n_words,)
 
     # === Sorties ===
+    # Si aucun chemin n'a produit abs_mean/per_class, on sort proprement
+    if "abs_mean" not in locals():
+        print(f"[WARN] Impossible de calculer les importances (abs_mean) → SHAP ignoré pour {kind.upper()}.")
+        return False
+    if "per_class" not in locals():
+        per_class = []
     order = np.argsort(abs_mean)[::-1][:topk]
     top_df = pd.DataFrame({
         "feature": feat_names[order],
@@ -1716,7 +1761,104 @@ def blocks_b4_per_class_signed_magnitude(
         label_map=label_map, shared_scale=shared_scale
     )
     return True
+def _unwrap_classifier(clf):
+    # Dé-wrapper si LabelEncodingClassifier ou OvR
+    for attr in ("base_estimator", "estimator"):
+        if hasattr(clf, attr):
+            return getattr(clf, attr)
+    return clf
 
+def _is_tree_model(clf):
+    name = clf.__class__.__name__.lower()
+    return ("xgb" in name) or ("lgbm" in name) or ("randomforest" in name) or ("gb" in name)
+# --------------------------- SHAP pour B4 (multimodal) ---------------------------
+def _shap_on_fused(pipe, df, max_n=4000, bg_n=512, link="logit"):
+    """
+    Retourne (sv, classes, slices, feat_names) où:
+      - sv: list[np.ndarray] (multiclass) ou np.ndarray (binary) des valeurs SHAP
+      - classes: np.ndarray des ids de classes (si dispo)
+      - slices: découpe de blocs pour B4 (liste (label, a, b))
+      - feat_names: None (on travaille en blocs)
+    """
+    import shap
+    feat_union, scaler, clf, _ = _find_feat_scaler_clf(pipe)
+    base = _unwrap_classifier(clf)
+
+    # 1) X fusionné comme vu par le modèle
+    if len(df) > max_n:
+        df = df.sample(max_n, random_state=42)
+    X = feat_union.transform(_ensure_input_df(df))
+    if scaler is not None:
+        X = scaler.transform(X)
+
+    # 2) Explainer adapté
+    if _is_tree_model(base):
+        expl = shap.TreeExplainer(base)
+    elif hasattr(base, "coef_"):
+        expl = shap.LinearExplainer(base, X, feature_perturbation="interventional", link=link)
+    else:
+        # fallback universel (lent) sur un petit fond
+        f = (base.predict_proba if hasattr(base, "predict_proba") else base.decision_function)
+        bg = X if hasattr(X, "A") and X.shape[0] <= bg_n else (X[:bg_n] if hasattr(X, "__getitem__") else None)
+        expl = shap.KernelExplainer(lambda Z: f(Z), bg)
+
+    sv = expl.shap_values(X)   # list (multi) ou array (binaire)
+    classes = getattr(base, "classes_", None)
+    slices = _block_slices_b4(feat_union, df)  # (label, a, b)
+    return sv, classes, slices, None
+
+def _aggregate_blocks_from_shap(sv, slices, classes=None):
+    """
+    Agrège |SHAP| par bloc.
+    sv: list[np.nd] (multiclass) ou np.nd (binary). Retourne:
+      - global_df: DataFrame [block, importance]
+      - per_class: dict[class_idx -> Series(block -> importance)]
+    """
+    import numpy as np
+    import pandas as pd
+
+    def agg_one(S):
+        # S: (n_samples, n_features). Importance = mean(|sv|) par feature
+        mean_abs = np.mean(np.abs(S), axis=0)    # (d,)
+        rows = []
+        for (lbl, a, b) in slices:
+            rows.append((lbl, float(mean_abs[a:b].sum())))
+        df = pd.DataFrame(rows, columns=["block","importance"]).groupby("block", as_index=False)["importance"].sum()
+        df.sort_values("importance", ascending=False, inplace=True)
+        return df
+
+    if isinstance(sv, list):  # multiclass
+        global_df = sum((agg_one(S) for S in sv))  # somme sur classes
+        global_df = global_df.groupby("block", as_index=False)["importance"].sum().sort_values("importance", ascending=False)
+        per_class = {i: agg_one(S).set_index("block")["importance"] for i, S in enumerate(sv)}
+    else:                     # binaire
+        global_df = agg_one(sv)
+        per_class = {0: global_df.set_index("block")["importance"]}
+    return global_df, per_class
+def blocks_b4_shap(model_path, data_csv, max_n=3000, out_dir="results", label_map_json=None):
+    import pandas as pd
+    pipe = joblib.load(model_path)
+    df = pd.read_csv(data_csv)
+    sv, classes, slices, _ = _shap_on_fused(pipe, df, max_n=max_n)
+    global_df, per_class = _aggregate_blocks_from_shap(sv, slices, classes)
+
+    Path(out_dir, "reports").mkdir(parents=True, exist_ok=True)
+    Path(out_dir, "figures").mkdir(parents=True, exist_ok=True)
+
+    global_csv = Path(out_dir, "reports", "block_importance_b4_shap.csv")
+    global_df.to_csv(global_csv, index=False)
+    _save_barplot(global_df, "Importance par bloc — B4 (SHAP)", str(Path(out_dir, "figures", "block_importance_b4_shap.png")), value_col="importance")
+
+    # par classe (si classes dispo)
+    if classes is not None:
+        rows = []
+        for i, s in per_class.items():
+            for b, v in s.items():
+                rows.append((int(classes[i]), b, float(v)))
+        per_class_df = pd.DataFrame(rows, columns=["class_id","block","importance"])
+        per_class_df.to_csv(Path(out_dir, "reports", "block_importance_b4_shap_per_class.csv"), index=False)
+    print(f"[OK] SHAP blocs B4 → {global_csv}")
+    return True
 # --------------------------- CLI ---------------------------
 
 def main():
@@ -1736,6 +1878,7 @@ def main():
     parser.add_argument("--topk", type=int, default=20,
                         help="Nombre de confusions à reporter")
     parser.add_argument("--blocks-b3", action="store_true", help="Importance des blocs pour B3 (image seule)")
+    parser.add_argument("--shap-b4-blocks", action="store_true", help="Importance par bloc (B4) via SHAP pour tout modèle (LR/SVC/XGB/LGBM).")
 
     # Nouveaux switches d'importances
     parser.add_argument("--normalize", choices=["abs", "signed", "pos", "neg"],
@@ -1777,14 +1920,6 @@ def main():
     # ACP + confusions (toujours)
     do_acp(args.kind, max_n=args.max_sample)
     top_confusions(args.kind, topk=args.topk, labels_map=lblmap)
-
-    # SHAP si modèle fourni (texte global)
-    if args.model:
-        do_shap(args.kind, args.model, data_csv=args.data_csv,
-                text_col=args.text_col, label_col=args.label_col,
-                max_n=min(args.max_sample, 30000), topk=30)
-    else:
-        print("[INFO] --model non fourni -> skip SHAP.")
 
     # Importances par bloc (B2)
     if args.blocks_b2 and args.model:
@@ -1876,6 +2011,8 @@ def main():
         shared_scale=True,
         sort_by=args.sort_by
     )
+    if args.shap_b4_blocks and args.model:
+        blocks_b4_shap(args.model, args.data_csv, max_n=min(args.max_sample, 30000), label_map_json=args.label_map)
 
 
 if __name__ == "__main__":

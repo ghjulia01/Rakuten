@@ -423,6 +423,9 @@ python -m main.train_model --config features/config.toml
 
 ```bash
 python -m main.train_model --config features/config.toml --model svc   # ou lr
+python -m main.train_model --config features/config.toml --model xgb
+# ou
+python -m main.train_model --config features/config.toml --model lgbm
 ```
 **Comparer LogisticRegression vs LinearSVC (CV) :**
 
@@ -534,7 +537,10 @@ python -m tools.rapport_complet --preds results/preds_b4.csv \
 ```powershell
 Remove-Item -Recurse -Force "C:\Users\colle\Desktop\rakuten-logs\skcache"
  ```
-
+**Supprimer la commande d'ancier échantillons**
+```powershell
+ Remove-Item Env:RAKUTEN_MAX_N -ErrorAction SilentlyContinue
+```
 - ##### Fixer les seeds ([random].seed) et le parallélisme ([compute].n_jobs).
 - ##### Convergence LR : 
 augmenter max_iter (ex. 5000) ou relâcher tol.

@@ -31,6 +31,7 @@ ARCH_REGISTRY = {
     "resnet101": (resnet101, ResNet101_Weights.IMAGENET1K_V2, 2048),
 }
 
+
 class CNNFeaturizer(BaseEstimator, TransformerMixin):
     """
     Transformer sklearn qui :
@@ -48,7 +49,16 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         use_imagenet_norm: bool = True, # normaliser comme ImageNet
         fallback_zero: bool = True,     # image manquante → vecteur 0
         dtype: str = "float32",         # "float32" conseillé (mémoire)
-        num_workers: int = 0, 
+        num_workers: int = 0,
+        # --- nouveaux paramètres ---
+        trainable_last_n: int = 0,     # nb de paramètres finaux à défiger (0 = tout figé, features “classiques”)
+        finetune_epochs: int = 0,      # nb d’époques de fine-tuning (0 = pas de FT)
+        finetune_lr: float = 3e-4,
+        finetune_weight_decay: float = 0.01,
+        finetune_max_n: int = 8000,    # échantillon max utilisé pour FT (pour rester rapide)
+        hf_model_name: Optional[str] = None,  # ex: "google/vit-base-patch16-224"
+        hf_revision: Optional[str] = None,    # ex: "main"
+        hf_feature_dim: Optional[int] = None, # si tu connais le dim embeddings HF, sinon déduit 
     ):
         self.image_dir = image_dir
         self.arch = arch
@@ -71,6 +81,17 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         self.n_missing = 0
         self.n_failed = 0
 
+        # --- nouveaux paramètres (unfreeze / FT / HF) ---
+        self.trainable_last_n     = int(trainable_last_n)
+        self.finetune_epochs      = int(finetune_epochs)
+        self.finetune_lr          = float(finetune_lr)
+        self.finetune_weight_decay= float(finetune_weight_decay)
+        self.finetune_max_n       = int(finetune_max_n)
+
+        self.hf_model_name  = hf_model_name
+        self.hf_revision    = hf_revision
+        self.hf_feature_dim = int(hf_feature_dim) if hf_feature_dim is not None else None
+
     # -------- Utilitaires -------------------------------------------------------
     @profile_func
     def set_image_dir(self, new_dir: str):
@@ -92,24 +113,74 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
 
     @profile_func
     def _build_model(self):
+        # HF branch
+        if self.hf_model_name:
+            try:
+                from transformers import AutoImageProcessor, AutoModel
+            except Exception as e:
+                raise ImportError("transformers n'est pas installé. `pip install transformers`") from e
+
+            device = self._resolve_device()
+            processor = AutoImageProcessor.from_pretrained(self.hf_model_name, revision=self.hf_revision)
+            base = AutoModel.from_pretrained(self.hf_model_name, revision=self.hf_revision).to(device)
+            base.eval()
+
+            # Hook : récupérer un embedding image (pooler ou moyenne spatiale)
+            # On essaie plusieurs attributs selon les archs (ViT/ConvNeXT, etc.)
+            def _encode(batch_t):
+                # batch_t: tensor float [B,3,H,W] (0..1), on laisse le processor gérer la normalisation
+                with torch.no_grad():
+                    inputs = processor(images=[transforms.ToPILImage()(x.cpu()) for x in batch_t],
+                                   return_tensors="pt").to(device)
+                    out = base(**inputs)
+                    # ViT-like: last_hidden_state -> pooler ou moyenne
+                    if hasattr(out, "pooler_output") and out.pooler_output is not None:
+                        z = out.pooler_output
+                    elif hasattr(out, "last_hidden_state"):
+                        z = out.last_hidden_state[:, 0]  # [CLS]
+                    else:
+                        # fallback: si sortie tuple, prends le 1er et moyenne spatiale
+                        z0 = out[0] if isinstance(out, (tuple, list)) else out
+                        z = z0.mean(dim=1) if z0.ndim == 3 else z0
+                return z
+
+            self._feat_dim = int(self.hf_feature_dim or _encode(torch.zeros(1,3,224,224)).shape[-1])
+            # Préprocess minimal si on délègue au processor : resize+toTensor
+            preprocess = transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor()])
+            # On emballe pour garder la même API que torchvision
+            class _HFBackbone(torch.nn.Module):
+                def __init__(self, encode_fn): super().__init__(); self.encode_fn = encode_fn
+                def forward(self, x): return self.encode_fn(x)
+
+            model = _HFBackbone(_encode).to(device)
+            return model, preprocess
+
+        # Torchvision branch (la logique actuelle, résumée)
         arch_key = str(self.arch).lower()
         if arch_key not in ARCH_REGISTRY:
             raise ValueError(f"Architecture inconnue: {self.arch} (supportées: {list(ARCH_REGISTRY)})")
         ctor, weights_enum, feat_dim = ARCH_REGISTRY[arch_key]
         weights = weights_enum
         model = ctor(weights=weights)
-        # retirer la dernière couche de classification → embedding
         model.fc = nn.Identity()
         model.eval()
         model.to(self._resolve_device())
-
-        # preprocessing officiel des weights (Resize 224, CenterCrop, ToTensor, Norm)
         preprocess = weights.transforms() if self.use_imagenet_norm else transforms.Compose([
-            transforms.Resize(256), transforms.CenterCrop(224),
-            transforms.ToTensor()
+            transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor()
         ])
         self._feat_dim = feat_dim
         return model, preprocess
+
+    def _set_trainable_tail(self, n_params: int):
+        # Tout fige
+        for p in self._model.parameters():
+            p.requires_grad = False
+        # Défige les n derniers paramètres
+        if n_params > 0:
+            tail = list(self._model.parameters())[-n_params:]
+            for p in tail:
+                p.requires_grad = True
+            print(f"[INFO] Défige les {n_params} derniers paramètres du modèle CNN")
 
     @profile_func
     def _lazy_load(self):
@@ -125,9 +196,81 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
     # -------- API sklearn -------------------------------------------------------
     @profile_func
     def fit(self, X, y=None):
-        """Charger paresseusement le modèle ; réinitialiser les compteurs."""
         self._lazy_load()
         self.n_total = self.n_loaded = self.n_missing = self.n_failed = 0
+
+
+        # --- Fine-tuning optionnel (supervisé) ---
+        if self.finetune_epochs and y is not None and self.trainable_last_n > 0:
+            from sklearn.preprocessing import LabelEncoder
+            from torch.utils.data import TensorDataset, DataLoader
+            import math
+
+            # 1) Encode labels
+            le = LabelEncoder()
+            y_enc = le.fit_transform(np.asarray(y))
+
+            # 2) Sous-échantillon rapide
+            n = min(len(X), int(self.finetune_max_n))
+            idx = np.random.RandomState(42).permutation(len(X))[:n]
+            X_ft = X.iloc[idx].reset_index(drop=True)
+            y_ft = y_enc[idx]
+
+            # 3) Préparer training minimal
+            device = self._resolve_device()
+            self._set_trainable_tail(self.trainable_last_n)
+            self._model.train()
+
+            head = nn.Linear(self._feat_dim, int(len(le.classes_))).to(device)
+            opt = torch.optim.AdamW(
+                [{"params": [p for p in self._model.parameters() if p.requires_grad], "lr": self.finetune_lr},
+                {"params": head.parameters(), "lr": self.finetune_lr}],
+                weight_decay=self.finetune_weight_decay
+            )
+            criterion = nn.CrossEntropyLoss()
+
+            # petit loader CPU -> tensor
+            bs = int(self.batch_size)
+            steps_per_epoch = math.ceil(len(X_ft)/bs)
+
+            for epoch in range(int(self.finetune_epochs)):
+                i = 0
+                losses = []
+                while i < len(X_ft):
+                    j = min(i + bs, len(X_ft))
+                    paths_slice = [self._path_from_row(X_ft.iloc[k]) for k in range(i, j)]
+                    imgs = []
+                    ys = []
+                    for k, p in enumerate(paths_slice, start=i):
+                        if os.path.exists(p):
+                            try:
+                                img = Image.open(p).convert("RGB")
+                                imgs.append(self._preprocess(img))
+                                ys.append(y_ft[k])
+                            except Exception:
+                                pass
+                    if imgs:
+                        batch = torch.stack(imgs, dim=0).to(device)
+                        yb = torch.tensor(ys, dtype=torch.long, device=device)
+                        # forward
+                        feats = self._model(batch)      # [B, feat_dim]
+                        # (option) L2 normalisation pendant FT — à tester/couper si besoin
+                        norms = torch.norm(feats, dim=1, keepdim=True) + 1e-12
+                        feats = feats / norms
+                        logits = head(feats)
+                        loss = criterion(logits, yb)
+
+                        opt.zero_grad()
+                        loss.backward()
+                        opt.step()
+                        losses.append(loss.item())
+                    i = j
+                # (log rapide)
+                # print(f"[FT] epoch {epoch+1}/{self.finetune_epochs} loss={np.mean(losses):.4f}")
+
+            # remettre en eval, retirer la tête
+            self._model.eval()
+
         return self
 
     @profile_func
@@ -241,4 +384,7 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
             "loaded_ratio": float(self.n_loaded / max(1, self.n_total)),
             "num_workers" : int(self.num_workers),
             "input_size": int(input_size) if input_size else None,
+            "trainable_last_n": int(getattr(self, "trainable_last_n", 0)),
+            "finetune_epochs": int(getattr(self, "finetune_epochs", 0)),
+            "hf_model_name": getattr(self, "hf_model_name", None),
         }

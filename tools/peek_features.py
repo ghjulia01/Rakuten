@@ -4,8 +4,14 @@
 # le script à lancer: RAKUTEN_MAX_N=83000 python tools/peek_features.py
 # Windows PowerShell
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py
+# $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model xgb
+# $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model lgbm
+# $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model lr
+# $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model svc
+
 import os, sys, time
 from pathlib import Path
+import argparse
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
@@ -25,6 +31,13 @@ try:
 except ImportError:
     from main.train_model import create_cnn_branch_from_cfg
 from features.image_stats import ImageStatsCombinedFeaturizer
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
+    category=UserWarning
+)
 
 # ---------- utilitaires ----------
 TIMES = {}  # collecte des durées par étape
@@ -70,6 +83,10 @@ def main():
     want_cnn = not (fusion_w.get("image_cnn", None) == 0)
     want_stats  = not (fusion_w.get("image_stats_combined", None) == 0)
     print(f"Config: {CFG_PATH} | seed={seed} | max_n={MAX_N} | pixels={want_pixels} | cnn={want_cnn} | stats={want_stats}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--try-model", choices=["lr","svc","xgb","lgbm"], default=None,
+                        help="Optionnel: entraîne vite un modèle sur l'échantillon et affiche son nom/params")
+    args = parser.parse_args()
     
     # Charger les données comme train_model
     x_path = cfg["paths"]["x_train_csv"]
@@ -140,11 +157,13 @@ def main():
         from sklearn.preprocessing import Normalizer
         n_comp = int(svd_cfg.get("n_components", 600))
         rs = int(svd_cfg.get("random_state", 42))
-        l2 = bool(svd_cfg.get("l2norm", True))
-        print(f"\n=== TEXTE → SVD({n_comp}) {'+ L2' if l2 else ''} ===")
+        use_l2_cfg = bool(svd_cfg.get("l2norm", True))
+        use_l2 = use_l2_cfg and (args.try_model not in ("xgb", "lgbm"))
+        print(f"\n=== TEXTE → SVD({n_comp}){' + L2' if use_l2 else ''} ===")
         X_text = TruncatedSVD(n_components=n_comp, random_state=rs).fit_transform(X_text)
-        if l2:
-            X_text = Normalizer(copy=False).fit_transform(X_text)
+        if use_l2:
+            from sklearn.preprocessing import Normalizer
+        X_text = Normalizer(copy=False).fit_transform(X_text)
         # re-CSR pour l’estimation hstack
         from scipy import sparse as sp
         X_text = sp.csr_matrix(X_text)
@@ -253,6 +272,69 @@ def main():
     blocks_csr = [b.tocsr() if sparse.issparse(b) else sparse.csr_matrix(b) for b in blocks]
     X_all = sparse.hstack(blocks_csr).tocsr()
     describe_sparse("FUSION_total", X_all, float_bytes=8, index_bytes=4)
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import f1_score
+    from sklearn.preprocessing import LabelEncoder
+
+    # 1) Encoder les labels pour tous les modèles (sécurise XGB/LGBM)
+    le = LabelEncoder()
+    y_enc = le.fit_transform(y)
+
+    Xtr, Xva, ytr, yva = train_test_split(
+        X_all, y_enc, test_size=0.2, random_state=42, stratify=y_enc
+    )
+
+    # 2) Choisir le modèle
+    if args.try_model == "lr":
+        from sklearn.linear_model import LogisticRegression
+        model = LogisticRegression(max_iter=1000)  # multi_class="auto"
+    elif args.try_model == "svc":
+        from sklearn.svm import LinearSVC
+        from sklearn.multiclass import OneVsRestClassifier
+        model = OneVsRestClassifier(LinearSVC())
+    elif args.try_model == "xgb":
+        from xgboost import XGBClassifier
+        n_classes = len(le.classes_)
+        model = XGBClassifier(
+            n_estimators=300, learning_rate=0.2, max_depth=8,
+            subsample=0.9, colsample_bytree=0.8, tree_method="hist",
+            objective="multi:softprob", num_class=n_classes,
+            n_jobs=-1
+        )
+    else:  # lgbm
+        from lightgbm import LGBMClassifier
+    model = LGBMClassifier(
+        n_estimators=400,
+        learning_rate=0.2,
+        num_leaves=127,           # ↑ plus de liberté de split
+        min_child_samples=10,     # ↓ autorise des feuilles plus petites
+        feature_fraction=0.8,     # sous-échantillonnage de colonnes
+        bagging_fraction=0.9,     # sous-échantillonnage de lignes
+        bagging_freq=1,
+        colsample_bytree=0.8,     # redondant si feature_fraction, ok
+        objective="multiclass",
+        force_row_wise=True,      # mieux pour CSR
+        verbosity=-1              # coupe le spam de logs
+    )
+
+    # 3) Fit + score
+    model.fit(Xtr, ytr)
+    yhat = model.predict(Xva)
+    f1m = f1_score(yva, yhat, average="macro")
+
+    print("\n=== TRY-MODEL ===")
+    print(f"Model: {model.__class__.__name__} | f1_macro={f1m:.4f}")
+
+    # 4) Afficher quelques hyperparamètres clés
+    getp = getattr(model, "get_params", None)
+    if getp:
+        params = getp()
+        keys = ["n_estimators","learning_rate","max_depth","subsample","colsample_bytree",
+            "reg_alpha","reg_lambda","tree_method","C","loss","penalty","max_iter","tol",
+            "num_leaves","objective","num_class"]
+        short = {k: params[k] for k in keys if k in params}
+    print(f"Params: {short}")
+
     print("OK.")
     
 if __name__ == "__main__":

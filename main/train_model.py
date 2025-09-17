@@ -65,6 +65,7 @@ from tqdm.auto import tqdm
 from datetime import datetime
 
 
+
 import numpy as np
 import pandas as pd
 
@@ -76,6 +77,8 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_va
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.preprocessing import LabelEncoder
 
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler
@@ -92,6 +95,7 @@ from models.image_pipeline import diagnostic_reduction
 from models.cnn_features import CNNFeaturizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
+from sklearn.multiclass import OneVsRestClassifier
 from logging.handlers import RotatingFileHandler
 from main.profiling_tools import profile_func, print_function_stats, list_debug_add, print_list_debug, write_function_stats_to_file, write_list_debug_to_file 
 
@@ -293,7 +297,44 @@ class ToFloat32:
             return X.astype("float32") if sparse.issparse(X) else X.astype(np.float32)
         except Exception:
             return X  # garde-fou si un bloc ne supporte pas astype 
-          
+
+### Définir le classifieur avec encodage des labels ================================   
+class LabelEncodingClassifier(BaseEstimator, ClassifierMixin):
+    """Encode y en 0..K-1 pour fit/predict du classifieur sous-jacent, et redécode en sortie."""
+    def __init__(self, base_estimator=None):
+        self.base_estimator = base_estimator
+
+    def get_params(self, deep=True):
+        params = {"base_estimator": self.base_estimator}
+        if deep and hasattr(self.base_estimator, "get_params"):
+            for k, v in self.base_estimator.get_params(deep=True).items():
+                params[f"base_estimator__{k}"] = v
+        return params
+
+    def set_params(self, **params):
+        if "base_estimator" in params:
+            self.base_estimator = params.pop("base_estimator")
+        base_params = {k.split("__",1)[1]: v for k, v in params.items() if k.startswith("base_estimator__")}
+        if base_params and hasattr(self.base_estimator, "set_params"):
+            self.base_estimator.set_params(**base_params)
+        return self
+
+    def fit(self, X, y):
+        self.le_ = LabelEncoder()
+        y_enc = self.le_.fit_transform(y)
+        self.est_ = clone(self.base_estimator)
+        self.est_.fit(X, y_enc)
+        return self
+
+    def predict(self, X):
+        y_enc = self.est_.predict(X)
+        return self.le_.inverse_transform(np.asarray(y_enc))
+
+    def predict_proba(self, X):
+        if hasattr(self.est_, "predict_proba"):
+            return self.est_.predict_proba(X)
+        raise AttributeError("Le modèle sous-jacent ne supporte pas predict_proba.")
+    
 # === Fabriquer le classifieur à partir de la config =============================
 @profile_func
 def build_classifier(cfg: dict, seed: int):
@@ -318,86 +359,136 @@ def build_classifier(cfg: dict, seed: int):
       multi_class       = "auto" | "ovr" | "multinomial"  # si omis: on laisse sklearn décider
       ovr               = true/false   # envelopper en OneVsRestClassifier
     """
-    model = cfg.get("model", {}) or {}
-    name  = str(model.get("name", "lr")).lower()
+    model_cfg = cfg.get("model", {}) or {}
+    name = str(model_cfg.get("name", "lr")).lower()
+    sub = model_cfg.get(name, {}) if isinstance(model_cfg.get(name, {}), dict) else {}
 
-    # lire le nombre de jobs global
     n_jobs = int(cfg.get("compute", {}).get("n_jobs", -1))
 
-    # === LinearSVC (option texte) =============================================
+    if name in ("xgb", "xgboost"):
+        from xgboost import XGBClassifier
+        return XGBClassifier(
+            n_estimators=int(sub.get("n_estimators", model_cfg.get("n_estimators", 700))),
+            learning_rate=float(sub.get("learning_rate", model_cfg.get("learning_rate", 0.05))),
+            max_depth=int(sub.get("max_depth", model_cfg.get("max_depth", 8))),
+            subsample=float(sub.get("subsample", model_cfg.get("subsample", 0.8))),
+            colsample_bytree=float(sub.get("colsample_bytree", model_cfg.get("colsample_bytree", 0.8))),
+            reg_alpha=float(sub.get("reg_alpha", model_cfg.get("reg_alpha", 0.0))),
+            reg_lambda=float(sub.get("reg_lambda", model_cfg.get("reg_lambda", 1.0))),
+            tree_method=str(sub.get("tree_method", model_cfg.get("tree_method", "hist"))),
+            n_jobs=n_jobs,
+            random_state=seed,
+            objective="multi:softprob",
+            eval_metric="mlogloss",
+        )
+
+    if name in ("lgbm", "lightgbm"):
+        from lightgbm import LGBMClassifier
+        import warnings
+        warnings.filterwarnings(
+            "ignore",
+            message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
+            category=UserWarning
+        )
+        return LGBMClassifier(
+            n_estimators=int(sub.get("n_estimators", model_cfg.get("n_estimators", 1000))),
+            learning_rate=float(sub.get("learning_rate", model_cfg.get("learning_rate", 0.05))),
+            num_leaves=int(sub.get("num_leaves", model_cfg.get("num_leaves", 127))),  # ↑
+            max_depth=int(sub.get("max_depth", model_cfg.get("max_depth", -1))),
+            # échantillonnage
+            feature_fraction=float(sub.get("feature_fraction", model_cfg.get("feature_fraction", 0.8))),   # alias de colsample
+            bagging_fraction=float(sub.get("bagging_fraction", model_cfg.get("bagging_fraction", 0.9))),   # alias de subsample
+            bagging_freq=int(sub.get("bagging_freq", model_cfg.get("bagging_freq", 1))),
+            colsample_bytree=float(sub.get("colsample_bytree", model_cfg.get("colsample_bytree", 0.8))),   
+            subsample=float(sub.get("subsample", model_cfg.get("subsample", 0.9))),                        
+            # contraintes de split
+            min_child_samples=int(sub.get("min_child_samples", model_cfg.get("min_child_samples", 10))),   
+            min_split_gain=float(sub.get("min_split_gain", model_cfg.get("min_split_gain", 0.0))),
+            min_sum_hessian_in_leaf=float(sub.get("min_sum_hessian_in_leaf", model_cfg.get("min_sum_hessian_in_leaf", 1e-3))),
+            max_bin=int(sub.get("max_bin", model_cfg.get("max_bin", 511))),                                
+            # régularisation
+            reg_alpha=float(sub.get("reg_alpha", model_cfg.get("reg_alpha", 0.0))),
+            reg_lambda=float(sub.get("reg_lambda", model_cfg.get("reg_lambda", 0.0))),
+            # perf / logs / sparse
+            force_row_wise=bool(sub.get("force_row_wise", model_cfg.get("force_row_wise", True))),         # mieux pour CSR
+            verbosity=int(sub.get("verbosity", model_cfg.get("verbosity", -1))),                           # coupe le spam
+            n_jobs=n_jobs,
+            random_state=seed,
+            objective="multiclass",
+        )
+
     if name == "svc":
-        cw = "balanced" if model.get("use_class_weight", False) else None
-        loss = str(model.get("loss", "squared_hinge"))   # "hinge" ou "squared_hinge"
-        dual = bool(model.get("dual", True))             # voir note ci-dessous
-        penalty = str(model.get("penalty", "l2"))        # "l2" (par défaut) ou "l1" (avec dual=False)
+        cw = "balanced" if model_cfg.get("use_class_weight", False) else None
+        loss    = str(sub.get("loss",    model_cfg.get("loss", "squared_hinge")))
+        dual    = bool(sub.get("dual",    model_cfg.get("dual", True)))
+        penalty = str(sub.get("penalty", model_cfg.get("penalty", "l2")))
+        # Penalty autorisée
+        if penalty not in {"l2"}:
+            raise ValueError("LinearSVC ne supporte que penalty='l2'.")
+
+        # Perte/dual cohérents
+        if loss not in {"hinge", "squared_hinge"}:
+            raise ValueError("LinearSVC loss ∈ {'hinge','squared_hinge'}.")
+
+        # Règles scikit-learn :
+        # - loss='hinge' ⇒ dual doit être True
+        # - dual=False n’est permis qu’avec loss='squared_hinge'
+        if loss == "hinge" and dual is False:
+            raise ValueError("LinearSVC : loss='hinge' nécessite dual=True.")
+        if dual is False and loss != "squared_hinge":
+            raise ValueError("LinearSVC : dual=False uniquement avec loss='squared_hinge'.")
+        # multi_class cohérent si tu forces OvR
+        if model_cfg.get("ovr", False):
+            # Eviter multinomial quand on va wrapper en OvR (sinon redondant/confus)
+            if sub.get("multi_class", model_cfg.get("multi_class", "auto")) == "multinomial":
+                logger.warning("`ovr=true` mais multi_class='multinomial' pour LR → "
+                               "je passe implicitement en OvR.")
         return LinearSVC(
-            C=float(model.get("C", 1.0)),
-            tol=float(model.get("tol", 1e-3)),
-            max_iter=int(model.get("max_iter", 2000)),
+            C=float(sub.get("C", model_cfg.get("C", 1.0))),
+            tol=float(sub.get("tol", model_cfg.get("tol", 1e-3))),
+            max_iter=int(sub.get("max_iter", model_cfg.get("max_iter", 2000))),
             class_weight=cw,
             loss=loss,
             dual=dual,
             penalty=penalty,
-
         )
 
-    # === LogisticRegression ====================================================
-    use_cw = bool(model.get("use_class_weight", False))
+    # default: LR
+    use_cw = bool(model_cfg.get("use_class_weight", False))
     class_weight = "balanced" if use_cw else None
-
-    solver        = str(model.get("solver", "saga"))
-    penalty       = str(model.get("penalty", "l2"))
-    C             = float(model.get("C", 1.0))
-    max_iter      = int(model.get("max_iter", 3000))
-    tol           = float(model.get("tol", 1e-3))
-    verbose       = int(model.get("verbose", 0))
-    fit_intercept = bool(model.get("fit_intercept", True))
-
-    # multi_class : ne PAS forcer si absent (évite FutureWarning)
-    multi = model.get("multi_class", None)
-    if multi is not None:
-        multi = str(multi)
-
-    # l1_ratio : n’utiliser QUE si elasticnet (sinon éviter le warning)
-    l1_ratio = model.get("l1_ratio", None)
+    solver  = str(sub.get("solver",  model_cfg.get("solver", "saga")))
+    penalty = str(sub.get("penalty", model_cfg.get("penalty", "l2")))
+    C       = float(sub.get("C",      model_cfg.get("C", 1.0)))
+    max_it  = int(sub.get("max_iter", model_cfg.get("max_iter", 3000)))
+    tol     = float(sub.get("tol",    model_cfg.get("tol", 1e-3)))
+    verbose = int(sub.get("verbose",  model_cfg.get("verbose", 0)))
+    fit_intercept = bool(sub.get("fit_intercept", model_cfg.get("fit_intercept", True)))
+    multi = sub.get("multi_class", model_cfg.get("multi_class", None))
+    l1_ratio = sub.get("l1_ratio", model_cfg.get("l1_ratio", None))
     if penalty != "elasticnet":
         l1_ratio = None
-    else:
-        l1_ratio = 0.0 if l1_ratio is None else float(l1_ratio)
-
-    # gardes-fous solver/penalty
+    params = dict(
+        solver=solver, penalty=penalty, C=C, max_iter=max_it, tol=tol,
+        verbose=verbose, class_weight=class_weight, random_state=seed,
+        n_jobs=n_jobs, fit_intercept=fit_intercept,
+    )
+    if l1_ratio is not None: params["l1_ratio"] = float(l1_ratio)
+    if multi is not None and str(multi).lower() != "auto": params["multi_class"] = str(multi)
     if penalty == "l1" and solver not in {"liblinear", "saga"}:
         raise ValueError("penalty='l1' nécessite solver 'liblinear' ou 'saga'.")
+
     if penalty == "elasticnet" and solver != "saga":
         raise ValueError("penalty='elasticnet' nécessite solver 'saga'.")
 
-    # construire les paramètres sans passer les clés inutiles
-    params = dict(
-        solver=solver,
-        penalty=penalty,
-        C=C,
-        max_iter=max_iter,
-        tol=tol,
-        verbose=verbose,
-        class_weight=class_weight,
-        random_state=seed,
-        n_jobs=n_jobs,             # ignoré par certains solvers (OK)
-        fit_intercept=fit_intercept,
-    )
-    if l1_ratio is not None:
-        params["l1_ratio"] = l1_ratio
-    if multi is not None and multi.lower() != "auto":
-        params["multi_class"] = multi
+    # multi_class cohérent si tu forces OvR
+    if model_cfg.get("ovr", False):
+        # Eviter multinomial quand on va wrapper en OvR (sinon redondant/confus)
+        if sub.get("multi_class", model_cfg.get("multi_class", "auto")) == "multinomial":
+            logger.warning("`ovr=true` mais multi_class='multinomial' pour LR → "
+                       "je passe implicitement en OvR.")
+    return LogisticRegression(**params)
 
-    base_lr = LogisticRegression(**params)
-
-    # Option : envelopper en One-vs-Rest explicite
-    if bool(model.get("ovr", False)):
-        from sklearn.multiclass import OneVsRestClassifier
-        return OneVsRestClassifier(base_lr, n_jobs=n_jobs)
-
-    return base_lr
-
+    
 # === Construire les pipelines baselines sans rééchantillonnage ==================
 from typing import Optional
 from joblib import Memory
@@ -436,6 +527,9 @@ def build_baseline_pipeline(
     if kind == "b2":
         text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
         clf = build_classifier(cfg, seed)
+        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+        if model_name in ("xgb","xgboost","lgbm","lightgbm"):
+            clf = LabelEncodingClassifier(clf)
 
         cache = get_cache(cfg)
         if cache is not None and hasattr(cache, "location"):
@@ -450,8 +544,10 @@ def build_baseline_pipeline(
     if kind == "b3":
     # Si [images.cnn.enabled]=true → utiliser CNN, sinon pixels
         use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
+        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+        is_tree_model = model_name in ("xgb","xgboost","lgbm","lightgbm")
         if use_cnn:
-            img_branch = create_cnn_branch_from_cfg(cfg["images"])
+            img_branch = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model)
         else:
             img_branch = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
 
@@ -473,6 +569,9 @@ def build_baseline_pipeline(
             ))
 
         clf = build_classifier(cfg, seed)
+        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+        if is_tree_model:
+            clf = LabelEncodingClassifier(clf)
         cache = get_cache(cfg)
         pipe = SkPipeline([("img", img_union), ("clf", clf)], memory=cache)
         return pipe, ["productid", "imageid"]
@@ -514,6 +613,80 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
 
     pipe, need_cols = build_baseline_pipeline(kind, cfg, seed, y_train=y_train if kind=="b4" else None)
 
+    # --- run metadata pour le CSV ---
+    run_meta = {}
+
+    # CNN (depuis la cfg)
+    cnn_cfg = cfg.get("images", {}).get("cnn", {}) or {}
+    run_meta["cnn_enabled"] = bool(cnn_cfg.get("enabled", False))
+    run_meta["cnn_arch"]    = cnn_cfg.get("arch", None)
+    dr = cnn_cfg.get("dim_reduction", {}) or {}
+    run_meta["cnn_svd"]   = bool(dr.get("enabled", False))
+    run_meta["cnn_svd_n"] = int(dr.get("n_components", 0)) if run_meta["cnn_svd"] else 0
+
+    # branches de fusion et poids réellement utilisés
+    fusion_branches = []
+    fusion_weights  = {}
+
+    # selon la baseline, retrouver la FeatureUnion
+    features_step = pipe.named_steps.get("features")
+    if features_step is None:
+        # b2 : texte seul
+        features_step = pipe.named_steps.get("text")
+        # b3 : image seule
+        if features_step is None:
+            features_step = pipe.named_steps.get("img")
+
+    feat_union = features_step
+    if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
+        feat_union = features_step.named_steps["union"]
+
+    try:
+        fusion_branches = [name for name, _ in getattr(feat_union, "transformer_list", [])]
+        fusion_weights  = getattr(feat_union, "transformer_weights", {}) or {}
+    except Exception:
+        pass
+
+    run_meta["fusion_branches"] = fusion_branches
+    run_meta["fusion_weights"]  = fusion_weights
+
+    # détection de branche prunée (pixels absents)
+    pruned = []
+    if "image_pixels" not in fusion_branches:
+        pruned.append("image_pixels")
+    run_meta["pruned_branches"] = pruned
+
+    # weights texte appliqués / ignorés (si la branche texte est une union)
+    applied_text_weights = {}
+    ignored_text_weights = []
+    try:
+        text_trf = None
+        for name, sub in getattr(feat_union, "transformer_list", []):
+            if name == "text":
+                text_trf = sub
+                break
+        if text_trf is not None and hasattr(text_trf, "named_steps"):
+            inner = text_trf.named_steps.get("text")  # create_text_pipeline_from_cfg retourne souvent une union sous le nom "text"
+            if inner is not None and hasattr(inner, "transformer_list"):
+                present_text_keys = {n for n, _ in inner.transformer_list}
+                text_w_cfg = dict(cfg.get("text", {}).get("weights", {}))
+                applied_text_weights = {k: float(v) for k, v in text_w_cfg.items() if k in present_text_keys}
+                ignored_text_weights = sorted(set(text_w_cfg) - set(applied_text_weights))
+    except Exception:
+        pass
+
+    run_meta["text_weights"]    = applied_text_weights
+    run_meta["ignored_weights"] = ignored_text_weights
+
+    # modèle final (nom + params clés)
+    final_est = pipe.named_steps.get("model") or pipe.named_steps.get("clf")
+    mname, mparams = _short_estimator_name_and_params(final_est) if final_est else ("<unknown>", {})
+    run_meta["model_name"]   = mname
+    run_meta["model_params"] = mparams
+
+    # tailles des folds remplies dans la boucle
+    fold_sizes = []
+
     # Construire une CV stratifiée
     cv = StratifiedKFold(n_splits=splits, shuffle=shuffle, random_state=cv_seed)
 
@@ -543,6 +716,7 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
     t0_total = time.time()
     try:
         for fold_idx, (tr, va) in enumerate(splits_iter, 1):
+            fold_sizes.append({"train": int(len(tr)), "val": int(len(va))})
             logger.info(f"Fold {fold_idx}/{cv.get_n_splits()} | train={len(tr)} val={len(va)}")
             logger.info("Classes train: %s", pd.Series(y_train.iloc[tr]).value_counts().to_dict())
             logger.info("Classes val  : %s", pd.Series(y_train.iloc[va]).value_counts().to_dict())
@@ -558,6 +732,8 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
                 )
                 model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
                 y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
+                
+                run_meta["cv_fold_sizes"] = fold_sizes
 
             # ----- Export des features transformées du split de validation -----
             if export_features:
@@ -728,17 +904,33 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
         notes.append(f"cnn={'true' if use_cnn else 'false'}")
     notes_str = " | ".join(notes)
 
-    summary_csv = os.path.join(outdir, "baseline_results_summary.csv")
-    row = pd.DataFrame([{
+
+    summary_csv = Path(outdir) / "baseline_results_summary.csv"
+    summary_csv.parent.mkdir(parents=True, exist_ok=True)
+    row = {
         "baseline": kind.upper(),
         "cv_splits": splits,
         "f1_macro": f1_macro,
         "f1_weighted": f1_weighted,
         "train_infer_time_sec": round(dt, 3),
         "notes": notes_str,
-        "timestamp": datetime.now().isoformat(timespec="seconds")
-    }])
-    row.to_csv(summary_csv, index=False, mode="a", header=not os.path.exists(summary_csv))
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "fusion_branches": "|".join(run_meta.get("fusion_branches", [])),
+        "fusion_weights": json.dumps(run_meta.get("fusion_weights", {}), ensure_ascii=False),
+        "text_weights": json.dumps(run_meta.get("text_weights", {}), ensure_ascii=False),
+        "ignored_weights": ",".join(run_meta.get("ignored_weights", [])),
+        "pruned_branches": ",".join(run_meta.get("pruned_branches", [])),
+        "cnn_enabled": run_meta.get("cnn_enabled", False),
+        "cnn_arch": run_meta.get("cnn_arch", None),
+        "cnn_svd": run_meta.get("cnn_svd", False),
+        "cnn_svd_n": run_meta.get("cnn_svd_n", 0),
+        "cv_fold_sizes": "|".join(f"{d['train']}/{d['val']}" for d in run_meta.get("cv_fold_sizes", [])),
+        "model_name": run_meta.get("model_name", ""),
+        "model_params": json.dumps(run_meta.get("model_params", {}), ensure_ascii=False),
+        }
+    pd.DataFrame([row]).to_csv(
+    summary_csv, index=False,
+    mode="a", header=not summary_csv.exists())
 
 
     # Sauvegarder le rapport détaillé
@@ -908,10 +1100,10 @@ def diagnostic_baseline(
 # === Construire la branche CNN depuis la config =================================
 # (avec post-réduction optionnelle)    
 @profile_func
-def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
+def create_cnn_branch_from_cfg(images_cfg: dict, apply_l2: bool = True) -> SkPipeline:
     """
     Construire la branche CNN (embedding ResNet) depuis [images.cnn] du TOML.
-    Support : post-réduction optionnelle (TruncatedSVD) + normalisation L2.
+    Support : post-réduction optionnelle (TruncatedSVD) + normalisation L2 (conditionnelle).
     """
     cnn_cfg = images_cfg.get("cnn", {}) or {}
     if not bool(cnn_cfg.get("enabled", False)):
@@ -936,11 +1128,16 @@ def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
         n_comp = int(dr.get("n_components", 256))
         rs = int(dr.get("random_state", 42))
         steps += [
+            ("to32_pre", ToFloat32()),
             ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
-            ("l2norm", Normalizer(copy=False)),
         ]
+        if apply_l2:
+            steps.append(("l2norm", Normalizer(copy=False)))
+        steps.append(("to32_post", ToFloat32()))
     else:
-        steps += [("l2norm", Normalizer(copy=False))]
+        # Pas de SVD : on ne met L2 que si demandé
+        if apply_l2:
+            steps.append(("l2norm", Normalizer(copy=False)))
 
     return SkPipeline(steps)
 
@@ -950,19 +1147,32 @@ def create_cnn_branch_from_cfg(images_cfg: dict) -> SkPipeline:
 def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dict, seed: int):
     # --- Texte ---
     text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
-    # (SVD text optionnel conservé tel quel)
+
+    # Modèle cible (pour choisir d'appliquer L2 ou pas)
+    model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+    is_tree_model = model_name in ("xgb", "xgboost", "lgbm", "lightgbm")
+
+    # (SVD text optionnel conservé tel quel, avec L2 auto-off pour arbres)
     svd_cfg = (cfg.get("text", {}).get("svd", {}) or {})
     if bool(svd_cfg.get("enabled", True)):
         n_comp = int(svd_cfg.get("n_components", 600))
         rs     = int(svd_cfg.get("random_state", seed))
-        l2norm = bool(svd_cfg.get("l2norm", True))
+        l2_cfg = bool(svd_cfg.get("l2norm", True))
+        use_l2 = l2_cfg and not is_tree_model  # ← coupe L2 pour XGB/LGBM
+
         from sklearn.pipeline import Pipeline as _SkPipe
-        steps_txt = [("to32_pre", ToFloat32()),
-                     ("svd", TruncatedSVD(n_components=n_comp, random_state=rs))]
-        if l2norm:
+        # On normalise le flux en float32 autour du SVD
+        steps_txt = [
+            ("text", text_branch),
+            ("to32_pre", ToFloat32()),
+            ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
+        ]
+        if use_l2:
+            from sklearn.preprocessing import Normalizer
             steps_txt.append(("l2", Normalizer(copy=False)))
-        steps_txt.append(("to32_post", ToFloat32())) 
-        text_branch = _SkPipe([("text", text_branch), *steps_txt])
+        steps_txt.append(("to32_post", ToFloat32()))
+
+        text_branch = _SkPipe(steps_txt)
 
     # --- LIRE les poids de fusion en amont ---
     fusion_cfg = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
@@ -970,23 +1180,24 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
 
     transformers = [("text", text_branch)]
 
+# --- CNN (L2 auto OFF pour modèles arbres : xgb/lgbm) ---
+    try:
+        cnn_cfg = (cfg.get("images", {}) or {}).get("cnn", {}) or {}
+        if bool(cnn_cfg.get("enabled", False)):
+            image_cnn = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model)
+            arch = cnn_cfg.get("arch", "resnet50")
+            dr   = cnn_cfg.get("dim_reduction", {}) or {}
+            logger.info("CNN activée: arch=%s, svd=%s/%s", arch, bool(dr.get("enabled", False)), dr.get("n_components", None))
+            transformers.append(("image_cnn", image_cnn))
+    except Exception as e:
+        logger.warning("CNN désactivée (raison: %s)", e)
+
     # --- Pixels : NE PAS AJOUTER si poids=0 (pruning) ---
     if want_pixels:
         image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
         transformers.append(("image_pixels", image_pixels))
     else:
         logger.info("Branche 'image_pixels' PRUNÉE (poids=0) — non construite et non concaténée.")
-
-    # --- CNN (inchangé, + log ajouté plus haut) ---
-    try:
-        if bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False)):
-            image_cnn = create_cnn_branch_from_cfg(cfg["images"])
-            arch = cfg["images"]["cnn"].get("arch", "resnet50")
-            dr   = cfg["images"]["cnn"].get("dim_reduction", {}) or {}
-            logger.info("CNN activée: arch=%s, svd=%s/%s", arch, bool(dr.get("enabled", False)), dr.get("n_components", None))
-            transformers.append(("image_cnn", image_cnn))
-    except Exception as e:
-        logger.warning("CNN désactivée (raison: %s)", e)
 
     # --- Stats image (inchangé) ---
     stats_cfg = cfg.get("images", {}).get("stats_combined", {})
@@ -1015,17 +1226,39 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
         n_jobs=1
     )
     model = build_classifier(cfg, seed)
+    model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+    # Pour XGBoost/LightGBM, encoder les labels à l'intérieur du classifieur
+    if model_name in ("xgb", "xgboost", "lgbm", "lightgbm"):
+        model = LabelEncodingClassifier(model)
     cache = get_cache(cfg)
     if cache is not None and hasattr(cache, "location"):
         logger.info(f"Cache sklearn activé: {cache.location}")
 
-    pipe = ImbPipeline(steps=[
+    steps = [
         ("features", union),
         ("under", AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)),
         ("over", RandomOverSampler(sampling_strategy=over_strategy, random_state=seed)),
-        ("scaler", StandardScaler(with_mean=False)),
-        ("model", model),
-    ], memory=cache)
+    ]
+
+    model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+    if model_name not in ("xgb", "xgboost", "lgbm", "lightgbm"):
+        steps.append(("scaler", StandardScaler(with_mean=False)))  # utile pour LR/SVC
+    # Détecter class_weight sur les modèles qui l’acceptent
+    has_class_weight = False
+    if model_name in ("lr", "svc"):
+        try:
+            has_class_weight = (getattr(model, "class_weight", None) is not None)
+        except Exception:
+            pass
+
+    samplers_on = bool(under_strategy or over_strategy)  # si non vides
+    if has_class_weight and samplers_on:
+        logger.warning("Éviter de cumuler class_weight et under/over-sampling "
+                    "(double compensation). Je conseille de laisser class_weight=None.")
+
+    steps.append(("model", model))
+
+    pipe = ImbPipeline(steps=steps, memory=cache)
     return pipe
 
 
@@ -1136,7 +1369,7 @@ def compare_models_cv(X_train, y_train, cfg: dict):
 
     # Évaluer les deux modèles
     rows = []
-    for name in ["lr", "svc"]:
+    for name in ["lr", "svc", "xgb", "lgbm"]:
         cfg_local = {**cfg, "model": {**cfg.get("model", {}), "name": name}}
         pipe = create_combined_pipeline(cfg_local, under, over, seed)
         scores = cross_val_score(
@@ -1162,10 +1395,39 @@ def parse_args():
     p.add_argument("--config", default=str(DEFAULT_CFG), help="Chemin vers le TOML (défaut: features/config.toml)")
     p.add_argument("--compare", action="store_true", help="Comparer LR vs SVC via CV sur X_train (F1-macro)")
     p.add_argument("--baseline", choices=["b0", "b1", "b2", "b3", "b4"], help="Exécuter une baseline simple et sortir")
-    p.add_argument("--model", choices=["lr", "svc"], default=None, help="Forcer le modèle (écraser [model].name dans le TOML)")
     p.add_argument("--compare-all", action="store_true", 
                   help="Compare tous les modèles (B0-B4) et génère des graphiques")
+    p.add_argument("--model", choices=["lr", "svc", "xgb", "xgboost", "lgbm", "lightgbm"], default=None,
+                help="Forcer le modèle (écrase [model].name)")
     return p.parse_args()
+
+def _short_estimator_name_and_params(final_estimator) -> tuple[str, dict]:
+    """Return a readable model name and a minimal set of params for the summary CSV."""
+    try:
+        est = final_estimator
+        if hasattr(est, "base_estimator") and est.base_estimator is not None:
+            est = est.base_estimator
+        name = est.__class__.__name__
+        params = {}
+        getp = getattr(est, "get_params", None)
+
+        if "XGBClassifier" in name:
+            keys = ["n_estimators","learning_rate","max_depth","subsample","colsample_bytree","reg_alpha","reg_lambda","tree_method"]
+        elif "LGBMClassifier" in name:
+            keys = ["n_estimators","learning_rate","num_leaves","max_depth","subsample","colsample_bytree","reg_alpha","reg_lambda"]
+        elif "LinearSVC" in name:
+            keys = ["C","loss","dual","penalty","max_iter","tol"]
+        elif "LogisticRegression" in name:
+            keys = ["solver","penalty","C","max_iter","tol","fit_intercept","multi_class","l1_ratio","class_weight"]
+        else:
+            keys = []
+
+        if getp is not None:
+            full = est.get_params()
+            params = {k: full.get(k) for k in keys if k in full}
+        return name, params
+    except Exception:
+        return type(final_estimator).__name__, {}
 
 
 # === Fonction principale ========================================================
@@ -1184,6 +1446,7 @@ def main():
         return
     setup_logging(log_dir=cfg.get("outputs", {}).get("log_dir", "results/logs"))
     logger.info("Configuration chargée.")
+
     # Initialiser les graines pour la reproductibilité
     seed = int(cfg.get("random", {}).get("seed", 42))
     init_seeds(seed)

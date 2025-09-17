@@ -11,9 +11,7 @@ Sorties :
     barplot des 10 plus négatives / 10 plus positives (signed_mean)
 
 Usage:
-  python tools/stats_contribs_b4.py --model artifacts/b4.joblib \
-    --x data/X_train_update.csv --y data/Y_train_CVw08PX.csv \
-    --labels features/labels_map.json --top 10
+python tools/stats_contribs_b4.py --model artifacts/b4.joblib --x data/X_train_update.csv --y data/Y_train_CVw08PX.csv --labels features/labels_map.json --top 10
 """
 import argparse, json, os
 import numpy as np
@@ -67,49 +65,117 @@ def main():
     pipe = joblib.load(args.model)
 
     # 2) récupère la FeatureUnion et le scaler
-    #    (noms attendus d'après ton pipeline)
     fu = pipe.named_steps.get("features") or pipe.named_steps.get("union")
-    scaler = pipe.named_steps.get("scaler")
+    if fu is None:
+        raise RuntimeError("FeatureUnion 'features/union' introuvable dans le pipeline.")
 
-    # 3) slices par bloc + noms des colonnes du bloc stats
-    trans_dict = dict(fu.transformer_list)
-    if "image_stats_combined" not in trans_dict:
-        raise RuntimeError("Bloc 'image_stats_combined' introuvable dans la fusion.")
-    stats_tr = trans_dict["image_stats_combined"]
+    scaler = pipe.named_steps.get("scaler")  # peut être None (arbres)
 
-    # calcule les tailles de chaque bloc pour créer les slices
+    # 3) localiser le bloc 'stats' avec tolérance de nom
+    trans_list = list(fu.transformer_list)
+    trans_dict = dict(trans_list)
+    stats_name = None
+    preferred = ["image.stats_combined", "image_stats_combined", "image_stats", "img_stats", "stats_combined", "stats"]
+
+    for cand in preferred:
+        if cand in trans_dict:
+            stats_name = cand
+            break
+    if stats_name is None:
+        names = [n for n, _ in trans_list]
+        raise RuntimeError(
+            "Bloc stats images introuvable dans la fusion. Branches présentes: "
+            + ", ".join(names)
+            + ".\nAstuce: active [images.stats_combined] et mets un poids > 0 dans [fusion.weights]."
+        )
+    stats_tr = trans_dict[stats_name]
+
+    # calcule les tailles de chaque bloc (ATTENTION: transform potentiellement coûteux)
     offset = 0
     slices = {}
-    for name, tr in fu.transformer_list:
-        Xi = tr.transform(X)
+    for name, tr in trans_list:
+        Xi = tr.transform(X)          # ⚠ heavy si 'image_cnn'
         ncols = Xi.shape[1]
         slices[name] = slice(offset, offset + ncols)
         offset += ncols
 
-    sl_stats = slices["image_stats_combined"]
-    # noms de colonnes définis dans ton featurizer
+    sl_stats = slices[stats_name]
+
+    # noms de colonnes du bloc stats
     if hasattr(stats_tr, "columns_"):
         stat_names = list(stats_tr.columns_)
     else:
-        # re-fit pour avoir columns_ si nécessaire (léger)
         stats_tr.fit(X)
-        stat_names = list(stats_tr.columns_)
+        stat_names = list(getattr(stats_tr, "columns_", [f"{stats_name}_{i}" for i in range((sl_stats.stop-sl_stats.start))]))
 
     # 4) features après SCALER (comme vues par le modèle)
     X_fused = fu.transform(X)                # hstack
-    X_scaled = scaler.transform(X_fused)     # standardisation
+    X_scaled = scaler.transform(X_fused) if scaler else X_fused    # standardisation
     # isole le bloc stats (19 colonnes) et densifie
-    X_stats = _as_dense(X_scaled[:, sl_stats])
+    X_stats = _as_dense(X_scaled[:, sl_stats])  # (n_samples, 19)
 
-    # 5) récupère le classifieur et ses poids
-    clf = pipe.named_steps["model"]
-    W = clf.coef_                # (n_classes, n_features_totales)
-    W_stats = _as_dense(W[:, sl_stats])  # (n_classes, 19)
+    # 5) récupérer le classifieur réel (dé-wrapper si LabelEncodingClassifier)
+    clf = pipe.named_steps.get("model") or pipe.named_steps.get("clf")
+    base = getattr(clf, "base_estimator", clf)
 
-    classes = clf.classes_
-    # mapping éventuel id->nom lisible
-    labels = json.load(open(args.labels_map)) if args.labels_map else {}
-    id2name = {int(k): str(v) for k, v in (labels or {}).items()}
+    if hasattr(base, "coef_"):  # --- Modèles linéaires: contributions signées par classe ---
+        W = _as_dense(base.coef_)                         # (n_classes, n_features)
+        classes = base.classes_
+        W_stats = W[:, sl_stats]                          # (n_classes, n_stats)
+        labels = json.load(open(args.labels_map)) if args.labels_map else {}
+        id2name = {int(k): str(v) for k, v in (labels or {}).items()}
+
+        signed_sum = np.zeros(X_stats.shape[1], dtype=np.float64)
+        abs_sum    = np.zeros(X_stats.shape[1], dtype=np.float64)
+        rows = []
+        for k, cls in enumerate(classes):
+            mask = (y == cls)
+            if mask.sum() == 0:
+                continue
+            contrib = X_stats[mask, :] * W_stats[k, :][None, :]
+            signed_mean = contrib.mean(axis=0)
+            abs_mean = np.abs(contrib).mean(axis=0)
+
+            signed_sum += signed_mean * mask.sum()
+            abs_sum    += abs_mean * mask.sum()
+
+            for j, fname in enumerate(stat_names):
+                rows.append({
+                    "class_id": int(cls),
+                    "class_name": id2name.get(int(cls), str(cls)),
+                    "feature": fname,
+                    "signed_mean": float(signed_mean[j]),
+                    "abs_mean": float(abs_mean[j]),
+                })
+
+        per_class = pd.DataFrame(rows)
+        per_class.to_csv(out_reports / "b4_stats_contribs_per_class.csv", index=False, encoding="utf-8")
+
+        global_df = pd.DataFrame({
+            "feature": stat_names,
+            "signed_mean": (signed_sum / max(1, len(y))),
+            "abs_mean":    (abs_sum / max(1, len(y))),
+        }).sort_values("signed_mean")
+        global_df.to_csv(out_reports / "b4_stats_global_contribs.csv", index=False, encoding="utf-8")
+
+    else:  # --- Modèles arbres: pas de coef_ → importances globales ---
+        if hasattr(base, "feature_importances_"):
+            importances = np.asarray(base.feature_importances_)
+            imp_stats = importances[sl_stats]  # importance “globale” du bloc stats
+            global_df = pd.DataFrame({
+                "feature": stat_names,
+                "importance": imp_stats / (imp_stats.sum() + 1e-12)
+            }).sort_values("importance", ascending=False)
+            global_df.to_csv(out_reports / "b4_stats_global_contribs.csv", index=False, encoding="utf-8")
+
+            # On ne peut pas faire des “signed_mean par classe” sans SHAP.
+            # Écrivons un fichier vide explicite :
+            pd.DataFrame(columns=["class_id","class_name","feature","signed_mean","abs_mean"])\
+            .to_csv(out_reports / "b4_stats_contribs_per_class.csv", index=False, encoding="utf-8")
+
+            print("[NOTE] Modèle non linéaire (LGBM/XGB) : contributions par classe non disponibles sans SHAP.")
+        else:
+            raise RuntimeError("Classifieur non supporté pour ce script (ni coef_, ni feature_importances_).")
 
     # 6) contributions globales et par classe
     signed_sum = np.zeros(X_stats.shape[1], dtype=np.float64)
