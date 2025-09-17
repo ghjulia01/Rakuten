@@ -1100,14 +1100,14 @@ def diagnostic_baseline(
 # === Construire la branche CNN depuis la config =================================
 # (avec post-réduction optionnelle)    
 @profile_func
-def create_cnn_branch_from_cfg(images_cfg: dict, apply_l2: bool = True) -> SkPipeline:
+def create_cnn_branch_from_cfg(images_cfg: dict, apply_l2: bool = True, section: str = "cnn") -> SkPipeline:
     """
     Construire la branche CNN (embedding ResNet) depuis [images.cnn] du TOML.
     Support : post-réduction optionnelle (TruncatedSVD) + normalisation L2 (conditionnelle).
     """
-    cnn_cfg = images_cfg.get("cnn", {}) or {}
+    cnn_cfg = images_cfg.get(section, {}) or {}
     if not bool(cnn_cfg.get("enabled", False)):
-        raise ValueError("CNN demandée mais [images.cnn.enabled] est false dans le TOML.")
+        raise ValueError(f"CNN demandée mais [images.{section}.enabled] est false dans le TOML.")
 
     image_dir = images_cfg["train_dir"]
     featurizer = CNNFeaturizer(
@@ -1116,9 +1116,18 @@ def create_cnn_branch_from_cfg(images_cfg: dict, apply_l2: bool = True) -> SkPip
         batch_size=int(cnn_cfg.get("batch_size", 16)),
         device=str(cnn_cfg.get("device", "auto")),
         use_imagenet_norm=bool(cnn_cfg.get("use_imagenet_norm", True)),
+        trainable_last_layers=int(cnn_cfg.get("trainable_last_layers", 1)),
         fallback_zero=bool(cnn_cfg.get("fallback_zero", True)),
         dtype=str(cnn_cfg.get("dtype", "float32")),
         num_workers=int(cnn_cfg.get("num_workers", 0)),
+        finetune_epochs=int(cnn_cfg.get("finetune_epochs", 0)),
+        finetune_lr=float(cnn_cfg.get("finetune_lr", 3e-4)),
+        finetune_weight_decay=float(cnn_cfg.get("finetune_weight_decay", 0.01)),
+        finetune_max_n=int(cnn_cfg.get("finetune_max_n", 8000)),
+        # HF
+        hf_model_name=cnn_cfg.get("hf_model_name", None),
+        hf_revision=cnn_cfg.get("hf_revision", None),
+        hf_feature_dim=cnn_cfg.get("hf_feature_dim", None),
     )
 
     steps = [("cnn", featurizer)]
@@ -1182,7 +1191,8 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
 
 # --- CNN (L2 auto OFF pour modèles arbres : xgb/lgbm) ---
     try:
-        cnn_cfg = (cfg.get("images", {}) or {}).get("cnn", {}) or {}
+        images_cfg = (cfg.get("images", {}) or {})
+        cnn_cfg = (images_cfg.get("cnn", {}) or {})
         if bool(cnn_cfg.get("enabled", False)):
             image_cnn = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model)
             arch = cnn_cfg.get("arch", "resnet50")
@@ -1192,6 +1202,19 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
     except Exception as e:
         logger.warning("CNN désactivée (raison: %s)", e)
 
+    # --- CNN ViT (branch "cnn_vit") ---
+    try:
+        vit_cfg = (images_cfg.get("cnn_vit", {}) or {})
+        if bool(vit_cfg.get("enabled", False)):
+            image_cnn_vit = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model, section="cnn_vit")
+            arch = vit_cfg.get("hf_model_name", vit_cfg.get("arch", "vit"))
+            dr   = vit_cfg.get("dim_reduction", {}) or {}
+            logger.info("CNN ViT activée: model=%s, svd=%s/%s", arch, bool(dr.get("enabled", False)), dr.get("n_components", None))
+            transformers.append(("image_cnn_vit", image_cnn_vit))
+    except Exception as e:
+        logger.warning("CNN ViT désactivée (raison: %s)", e)
+
+        
     # --- Pixels : NE PAS AJOUTER si poids=0 (pruning) ---
     if want_pixels:
         image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)

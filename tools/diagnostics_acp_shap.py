@@ -660,6 +660,7 @@ def _winner_per_row(clf, X):
     return np.zeros(X.shape[0], dtype=int)
 
 def _block_slices_text(text_union, df_small):
+    text_union = _unwrap_features_union(text_union)
     """
     Retourne [(label, start, end)] pour la branche texte B2.
     Détaille les sous-éléments d'un éventuel sous-FeatureUnion 'tfidf_word'.
@@ -697,6 +698,19 @@ def _block_slices_text(text_union, df_small):
         start += n
 
     return slices
+
+def _unwrap_features_union(obj):
+    """Retourne la FeatureUnion interne si obj est un Pipeline/étage enveloppant."""
+    # Déjà une FeatureUnion ?
+    if hasattr(obj, "transformer_list"):
+        return obj
+    # Sinon, essayer les steps d'un Pipeline
+    if hasattr(obj, "named_steps"):
+        for key in ("text", "features", "union", "tfidf_word", "tfidf"):
+            step = obj.named_steps.get(key)
+            if step is not None:
+                return _unwrap_features_union(step)
+    return obj  # au pire, on renvoie tel quel
 
 def _block_slices_b4(features_union, df_small):
     """
@@ -781,7 +795,7 @@ def _block_slices_b4_fine(feat_union, df):
             continue
 
         # --- branche texte : on sous-découpe en reprenant la logique B2
-        if name.lower() in ("text", "txt", "text_features"):
+        if "text" in name.lower():
             sub = _block_slices_text(tr, df)  # [(subname, a, b) ...] relatifs à la branche texte
             # décaler chaque sous-bloc au bon offset global
             for (subname, a, b) in sub:
@@ -1772,7 +1786,7 @@ def _is_tree_model(clf):
     name = clf.__class__.__name__.lower()
     return ("xgb" in name) or ("lgbm" in name) or ("randomforest" in name) or ("gb" in name)
 # --------------------------- SHAP pour B4 (multimodal) ---------------------------
-def _shap_on_fused(pipe, df, max_n=4000, bg_n=512, link="logit"):
+def _shap_on_fused(pipe, df, max_n=4000, bg_n=512,):
     """
     Retourne (sv, classes, slices, feat_names) où:
       - sv: list[np.ndarray] (multiclass) ou np.ndarray (binary) des valeurs SHAP
@@ -1792,14 +1806,32 @@ def _shap_on_fused(pipe, df, max_n=4000, bg_n=512, link="logit"):
         X = scaler.transform(X)
 
     # 2) Explainer adapté
-    if _is_tree_model(base):
-        expl = shap.TreeExplainer(base)
-    elif hasattr(base, "coef_"):
-        expl = shap.LinearExplainer(base, X, feature_perturbation="interventional", link=link)
+    # --- Sélection de l'explainer SHAP ---
+    import shap
+    # Dé-wrapping de quelques wrappers (si présent)
+    base_est = getattr(clf, "base_estimator", clf)
+    base_est = getattr(base_est, "estimator", base_est)
+
+    def _is_tree_model(est):
+        n = est.__class__.__name__.lower()
+        return ("xgb" in n) or ("lgbm" in n) or ("randomforest" in n) or ("gradientboost" in n) or ("gb" in n)
+
+    if _is_tree_model(base_est):
+        expl = shap.TreeExplainer(base_est)
+    elif hasattr(base_est, "coef_"):
+        # Linéaire : lien logit si binaire, sinon identité
+        try:
+            from shap import links, maskers
+            n_classes = len(getattr(base_est, "classes_", [])) if hasattr(base_est, "classes_") else 2
+            link_obj = links.Logit() if n_classes == 2 else links.Identity()
+            expl = shap.LinearExplainer(base_est, masker=maskers.Independent(X), link=link_obj)
+        except Exception:
+            # Compat anciennes versions : retomber sans masker ni link objet
+            expl = shap.LinearExplainer(base_est, X)
     else:
-        # fallback universel (lent) sur un petit fond
-        f = (base.predict_proba if hasattr(base, "predict_proba") else base.decision_function)
-        bg = X if hasattr(X, "A") and X.shape[0] <= bg_n else (X[:bg_n] if hasattr(X, "__getitem__") else None)
+        # Fallback universel (lent) : KernelExplainer sur un fond réduit
+        f = (base_est.predict_proba if hasattr(base_est, "predict_proba") else base_est.decision_function)
+        bg = X[:bg_n] if hasattr(X, "__getitem__") else X
         expl = shap.KernelExplainer(lambda Z: f(Z), bg)
 
     sv = expl.shap_values(X)   # list (multi) ou array (binaire)

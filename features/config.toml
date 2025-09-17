@@ -129,25 +129,13 @@ random_state = 42
 [images.cnn]
 enabled = true
 arch = "resnet50"       # "resnet18" | "resnet50" | "resnet101"
-batch_size = 16
+batch_size = 12         # pour Resnet 16 , je teste avec12 pour Vit
 device = "auto"         # "auto" | "cpu" | "cuda"
 use_imagenet_norm = true
 fallback_zero = true
 dtype = "float32"
 num_workers = 4
-
-
-# Unfreeze + FT
-trainable_last_n = 5000    # nb de paramètres à "défiger" (ex: 5000 à 20000)
-finetune_epochs   = 1      # commencer par 1 (rapide), puis 2-3 si utile
-finetune_lr       = 0.0003
-finetune_weight_decay = 0.01
-finetune_max_n = 6000      # limite l'échantillon pour rester rapide
-
-# HuggingFace (optionnel, alternative à arch=...)
-# hf_model_name = "google/vit-base-patch16-224"
-# hf_revision   = "main"
-# hf_feature_dim = 768       # utile si le modèle n’expose pas facilement la dim
+trainable_last_n = 1         # si tu veux FT layer4 propre, mets 1 (voir patch)
 
 [images.cnn.dim_reduction]
 enabled = true   
@@ -155,11 +143,34 @@ method = "truncated_svd"
 n_components = 256
 random_state = 42
 
+
+# --- Branche 2 : ViT-B/16 (HF) avec par exemple FT 2 epochs, dernier bloc défigé ---
+[images.cnn_vit]
+enabled = true
+# HuggingFace (optionnel, alternative à arch=...)
+hf_model_name = "google/vit-base-patch16-224"
+hf_feature_dim = 768
+hf_revision   = "main"
+batch_size = 12
+device = "auto"
+finetune_epochs = 1              # commencer par 1 (rapide), puis 2-3 si utile
+trainable_last_n = 1          # interrupteur FT nb de paramètres à "défiger" (ex: 5000 à 20000) # ignoré par la branche HF du patch ci-dessus
+trainable_last_layers = 2     # ← nb de blocs Transformer à unfreeze (peut tester 2)
+finetune_lr = 0.0003
+finetune_weight_decay = 0.01
+finetune_max_n = 6000           # limite l'échantillon pour rester rapide
+
+[images.cnn_vit.dim_reduction]
+enabled = true
+n_components = 256
+
+
 # Peser la contribution texte vs image(s) sans toucher au code
 [fusion.weights]
 text  = 1.2
 image_pixels = 0                        # mettre 0 si image_cnn
 image_cnn = 1
+image_cnn_vit = 1           # ViT
 image_stats_combined = 0             # branche stats images
 
 # --- Statistiques des images ---

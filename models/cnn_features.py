@@ -56,9 +56,10 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         finetune_lr: float = 3e-4,
         finetune_weight_decay: float = 0.01,
         finetune_max_n: int = 8000,    # échantillon max utilisé pour FT (pour rester rapide)
+        trainable_last_layers: int = 1, # nb de couches (transformer blocks) à défiger si HF
         hf_model_name: Optional[str] = None,  # ex: "google/vit-base-patch16-224"
         hf_revision: Optional[str] = None,    # ex: "main"
-        hf_feature_dim: Optional[int] = None, # si tu connais le dim embeddings HF, sinon déduit 
+        hf_feature_dim: Optional[int] = None, # si les dim embeddings HF sont connus, sinon déduit 
     ):
         self.image_dir = image_dir
         self.arch = arch
@@ -87,6 +88,7 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         self.finetune_lr          = float(finetune_lr)
         self.finetune_weight_decay= float(finetune_weight_decay)
         self.finetune_max_n       = int(finetune_max_n)
+        self.trainable_last_layers = int(trainable_last_layers)
 
         self.hf_model_name  = hf_model_name
         self.hf_revision    = hf_revision
@@ -113,46 +115,38 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
 
     @profile_func
     def _build_model(self):
-        # HF branch
+        # HF branch (ViT & co)
         if self.hf_model_name:
-            try:
-                from transformers import AutoImageProcessor, AutoModel
-            except Exception as e:
-                raise ImportError("transformers n'est pas installé. `pip install transformers`") from e
-
+            from transformers import AutoImageProcessor, AutoModel
             device = self._resolve_device()
             processor = AutoImageProcessor.from_pretrained(self.hf_model_name, revision=self.hf_revision)
             base = AutoModel.from_pretrained(self.hf_model_name, revision=self.hf_revision).to(device)
             base.eval()
 
-            # Hook : récupérer un embedding image (pooler ou moyenne spatiale)
-            # On essaie plusieurs attributs selon les archs (ViT/ConvNeXT, etc.)
-            def _encode(batch_t):
-                # batch_t: tensor float [B,3,H,W] (0..1), on laisse le processor gérer la normalisation
-                with torch.no_grad():
-                    inputs = processor(images=[transforms.ToPILImage()(x.cpu()) for x in batch_t],
-                                   return_tensors="pt").to(device)
-                    out = base(**inputs)
-                    # ViT-like: last_hidden_state -> pooler ou moyenne
+            class HFBackbone(torch.nn.Module):
+                def __init__(self, base, processor, device):
+                    super().__init__()
+                    self.base = base
+                    self.processor = processor
+                    self.device = device
+                def forward(self, x):   # x: (B,3,H,W) in [0,1]
+                    imgs = [transforms.ToPILImage()(xi.cpu()) for xi in x]
+                    inputs = self.processor(images=imgs, return_tensors="pt").to(self.device)
+                    out = self.base(**inputs)
                     if hasattr(out, "pooler_output") and out.pooler_output is not None:
                         z = out.pooler_output
                     elif hasattr(out, "last_hidden_state"):
-                        z = out.last_hidden_state[:, 0]  # [CLS]
+                        z = out.last_hidden_state[:, 0]   # [CLS]
                     else:
-                        # fallback: si sortie tuple, prends le 1er et moyenne spatiale
                         z0 = out[0] if isinstance(out, (tuple, list)) else out
                         z = z0.mean(dim=1) if z0.ndim == 3 else z0
-                return z
+                    return z
 
-            self._feat_dim = int(self.hf_feature_dim or _encode(torch.zeros(1,3,224,224)).shape[-1])
-            # Préprocess minimal si on délègue au processor : resize+toTensor
+            model = HFBackbone(base, processor, device).to(device)
+            self._feat_dim = int(self.hf_feature_dim or 768)  # ViT-base = 768
+            # Préprocess standard (le processor fait le reste)
             preprocess = transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor()])
             # On emballe pour garder la même API que torchvision
-            class _HFBackbone(torch.nn.Module):
-                def __init__(self, encode_fn): super().__init__(); self.encode_fn = encode_fn
-                def forward(self, x): return self.encode_fn(x)
-
-            model = _HFBackbone(_encode).to(device)
             return model, preprocess
 
         # Torchvision branch (la logique actuelle, résumée)
@@ -172,15 +166,39 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         return model, preprocess
 
     def _set_trainable_tail(self, n_params: int):
-        # Tout fige
+        """Défige la queue du backbone :
+           - HF/ViT : N derniers blocs Transformer (trainable_last_layers)
+           - ResNet : layer4 complet
+           - Fallback : derniers `n_params` paramètres
+        """
+        # Cas HF (ViT) : dernier(s) bloc(s) du Transformer
+        if hasattr(self._model, "base") and hasattr(self._model.base, "encoder") and hasattr(self._model.base.encoder, "layer"):
+            for p in self._model.base.parameters():
+                p.requires_grad = False
+            n_layers = max(1, int(getattr(self, "trainable_last_layers", 1)))
+            for blk in list(self._model.base.encoder.layer)[-n_layers:]:
+                for p in blk.parameters():
+                    p.requires_grad = True
+            print(f"[INFO] HF unfreeze: last {n_layers} transformer block(s).")
+            return
+
+        # Cas ResNet (torchvision) : défige layer4
+        if hasattr(self._model, "layer4"):
+            for p in self._model.parameters():
+                p.requires_grad = False
+            for p in self._model.layer4.parameters():
+                p.requires_grad = True
+            print("[INFO] ResNet unfreeze: layer4")
+            return
+
+        # Fallback générique : défige les n derniers paramètres
         for p in self._model.parameters():
             p.requires_grad = False
-        # Défige les n derniers paramètres
         if n_params > 0:
             tail = list(self._model.parameters())[-n_params:]
             for p in tail:
                 p.requires_grad = True
-            print(f"[INFO] Défige les {n_params} derniers paramètres du modèle CNN")
+            print(f"[INFO] Unfreeze last {n_params} parameters (generic)")
 
     @profile_func
     def _lazy_load(self):
@@ -201,7 +219,7 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
 
 
         # --- Fine-tuning optionnel (supervisé) ---
-        if self.finetune_epochs and y is not None and self.trainable_last_n > 0:
+        if self.finetune_epochs and y is not None and (self.trainable_last_n > 0 or getattr(self, "trainable_last_layers", 0) > 0):
             from sklearn.preprocessing import LabelEncoder
             from torch.utils.data import TensorDataset, DataLoader
             import math
