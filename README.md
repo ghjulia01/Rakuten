@@ -180,10 +180,10 @@ end
   %% ================
   %% EXPLICABILITÉ
   %% ================
-  subgraph X[Analyses & Explicabilité]
-    X1[Analyse: Poids et impact des features (B2/B4)]
+    subgraph X[Analyses & Explicabilité]
+    X1[Analyse des poids et impact]
     X2[ACP 2D & Top confusions]
-    X3[Grad-CAM ResNet<br/>layer4 + head_ft.pt]
+    X3[Grad-CAM ResNet]
   end
 
   %% FLOWS
@@ -201,12 +201,12 @@ end
   CLF --> OUT[Scores CV & prédictions]
 
   %% ANALYSES HOOKS
-  FUSION -.-> X3
   FUSION -.-> X1
   FUSION -.-> X2
+  FUSION -.-> X3
   CLF -.-> X1
   CLF -.-> X2
-  CLF -.-> X3
+  R50 -.-> X3
 
   %% STYLES
   classDef phase fill:#e1f5fe,stroke:#0277bd
@@ -220,7 +220,7 @@ end
   class A1,A1a,A1b,A1c phase
   class FUSION fusion
   class CLF model
-  class X1,X2,X3,X4,X5,X6,X7,X8 xp
+  class X1,X2,X3 xp
   class US,OS sam
   class C src
   class OUT out
