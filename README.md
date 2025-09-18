@@ -23,6 +23,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 ### A) Constats clés :
 
 - **27 classes fortement déséquilibrées** → métriques macro + **sampling CV-safe** indispensables.
+- **100 000** produits au total entre train et test
 - ~**35 %** de `description` manquante, données **multilingues** → **`has_description`** aide ; **char** compense titres courts.
 - images **500×500** nommées `image_{imageid}_product_{productid}.jpg`. 
 
