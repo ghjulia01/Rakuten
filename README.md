@@ -252,7 +252,7 @@ Le résultat est une **matrice creuse (sparse)**, normalisée, prête à être f
 
 ---
 
-#### B — Traitement des images – Pipeline Rakuten (MÀJ : ResNet &/ou ViT + fine-tuning optionnel)
+#### B — Traitement des images – Pipeline Rakuten : ResNet &/ou ViT + fine-tuning optionnel)
 
 Les images complètent le texte et offrent des indices visuels.  
 Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embeddings**, **Statistiques**) puis **fusionnées** (pondérations configurables).
