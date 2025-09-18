@@ -93,7 +93,7 @@ class TextStatistics(BaseEstimator, TransformerMixin):
     
     @profile_func
     def get_feature_names_out(self, input_features=None):
-        return np.array(["n_words","avg_word_len","lex_div","caps_ratio"], dtype=object)
+        return np.array(["n_words", "n_chars","avg_word_len","lex_div","caps_ratio"], dtype=object)
 
 class LanguageDetector(BaseEstimator, TransformerMixin):
     """Détecter la langue et renvoyer un one-hot (fr, en, de par défaut).
