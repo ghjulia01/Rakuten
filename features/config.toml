@@ -167,7 +167,7 @@ n_components = 256
 
 # Peser la contribution texte vs image(s) sans toucher au code
 [fusion.weights]
-text  = 1.2
+text  = 2.2
 image_pixels = 0                        # mettre 0 si image_cnn
 image_cnn = 1
 image_cnn_vit = 1           # ViT

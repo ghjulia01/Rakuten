@@ -60,6 +60,8 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         hf_model_name: Optional[str] = None,  # ex: "google/vit-base-patch16-224"
         hf_revision: Optional[str] = None,    # ex: "main"
         hf_feature_dim: Optional[int] = None, # si les dim embeddings HF sont connus, sinon déduit 
+        save_head_path: Optional[str] = None,  # si renseigné, sauvegarde la tête FT + classes
+        save_head_normalize: bool = True,      # normalise l'embedding avant la tête (comme en FT)
     ):
         self.image_dir = image_dir
         self.arch = arch
@@ -93,6 +95,10 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         self.hf_model_name  = hf_model_name
         self.hf_revision    = hf_revision
         self.hf_feature_dim = int(hf_feature_dim) if hf_feature_dim is not None else None
+        self.save_head_path = save_head_path
+        self.save_head_normalize = bool(save_head_normalize)
+        self._trained_head: Optional[nn.Module] = None
+        self.label_classes_: Optional[np.ndarray] = None
 
     # -------- Utilitaires -------------------------------------------------------
     @profile_func
@@ -288,6 +294,19 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
 
             # remettre en eval, retirer la tête
             self._model.eval()
+            # Conserver la tête entraînée et les classes
+            self._trained_head = head.to(device).eval()
+            self.label_classes_ = le.classes_
+
+            # Sauvegarde optionnelle
+            if self.save_head_path:
+                to_save = {
+                    "state_dict": self._trained_head.state_dict(),
+                    "feat_dim": int(self._feat_dim),
+                    "classes": self.label_classes_.tolist(),
+                    "normalize_feat": bool(self.save_head_normalize),
+                }
+                torch.save(to_save, self.save_head_path)
 
         return self
 
@@ -301,7 +320,117 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
             return self._preprocess(img)
         except Exception:
             return None
-        
+
+    @profile_func
+    def attach_head(self, head: nn.Module, classes: List[str] | np.ndarray, normalize_feat: Optional[bool] = None):
+        """Attache une tête Linear entraînée + liste de classes."""
+        self._lazy_load()
+        self._trained_head = head.to(self._resolve_device()).eval()
+        self.label_classes_ = np.asarray(classes)
+        if normalize_feat is not None:
+            self.save_head_normalize = bool(normalize_feat)
+
+    @profile_func
+    def load_head(self, path: str):
+        """Charge une tête Linear + classes depuis torch.save(...)"""
+        self._lazy_load()
+        chk = torch.load(path, map_location=self._resolve_device())
+        feat_dim = int(chk.get("feat_dim", int(self._feat_dim or 0)))
+        classes = chk["classes"]
+        head = nn.Linear(feat_dim, len(classes))
+        head.load_state_dict(chk["state_dict"])
+        self._trained_head = head.to(self._resolve_device()).eval()
+        self.label_classes_ = np.asarray(classes)
+        self.save_head_normalize = bool(chk.get("normalize_feat", True))
+
+    @torch.no_grad()
+    def _embed_batch(self, batch: torch.Tensor, normalize: bool = True) -> torch.Tensor:
+        """Embeddings [B, feat_dim] avec option de L2-normalisation (comme en FT)."""
+        self._lazy_load()
+        feats = self._model(batch)  # [B, feat_dim]
+        if normalize:
+            feats = feats / (feats.norm(dim=1, keepdim=True) + 1e-12)
+        return feats
+
+    @torch.no_grad()
+    def predict_logits_from_paths(self, paths: List[str]) -> np.ndarray:
+        """
+        Calcule les logits par classe pour une liste de chemins d'images.
+        Requiert self._trained_head et self.label_classes_.
+        """
+        assert self._trained_head is not None, "Aucune tête entraînée attachée/chargée. Utilise attach_head(...) ou load_head(...)."
+        device = self._resolve_device()
+        bs = int(self.batch_size)
+        logits_all = []
+
+        i = 0
+        while i < len(paths):
+            j = min(i + bs, len(paths))
+            imgs = []
+            for p in paths[i:j]:
+                if os.path.exists(p):
+                    try:
+                        img = Image.open(p).convert("RGB")
+                        imgs.append(self._preprocess(img))
+                    except Exception:
+                        imgs.append(None)
+                else:
+                    imgs.append(None)
+
+            if any(t is not None for t in imgs):
+                batch = torch.stack([t for t in imgs if t is not None], dim=0).to(device)
+                feats = self._embed_batch(batch, normalize=self.save_head_normalize)
+                logits = self._trained_head(feats).detach().cpu().numpy()
+                # Remettre dans l'ordre avec des lignes vides pour les manquantes
+                it = iter(logits)
+                for t in imgs:
+                    if t is None:
+                        logits_all.append(np.full((1, len(self.label_classes_)), np.nan))
+                    else:
+                        logits_all.append(next(it)[None, :])
+            else:
+                # tout manquant dans ce batch
+                logits_all.extend([np.full((1, len(self.label_classes_)), np.nan) for _ in imgs])
+
+            i = j
+
+        return np.vstack(logits_all)
+
+    def idx_to_label(self, class_idx: int) -> str:
+        """Map index de classe -> libellé d'origine (si disponible)."""
+        if self.label_classes_ is None:
+            return str(class_idx)
+        return str(self.label_classes_[class_idx])
+    
+    @torch.no_grad()
+    def predict_proba_from_paths(self, paths: List[str]) -> np.ndarray:
+        """Probabilités softmax (même gabarit que predict_logits_from_paths)."""
+        logits = self.predict_logits_from_paths(paths)
+        # Gestion NaN: on laisse NaN si ligne entière NaN
+        mask = ~np.isnan(logits).any(axis=1)
+        proba = np.full_like(logits, np.nan, dtype=np.float64)
+        if mask.any():
+            e = np.exp(logits[mask] - np.max(logits[mask], axis=1, keepdims=True))
+            proba[mask] = e / (e.sum(axis=1, keepdims=True) + 1e-12)
+        return proba
+    
+    @torch.no_grad()
+    def topk_from_paths(self, paths: List[str], k: int = 5):
+        """Retourne pour chaque image: [(idx,label,logit,proba), ...] triés par logit desc."""
+        logits = self.predict_logits_from_paths(paths)
+        proba  = self.predict_proba_from_paths(paths)
+        out = []
+        for i in range(logits.shape[0]):
+            if np.isnan(logits[i]).all():
+                out.append([])
+                continue
+            idxs = np.argsort(-logits[i])[:k]
+            items = []
+            for j in idxs:
+                items.append((int(j), self.idx_to_label(int(j)), float(logits[i, j]), float(proba[i, j])))
+            out.append(items)
+        return out
+    
     @profile_func
     def transform(self, X):
         """
