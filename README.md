@@ -65,7 +65,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 - Solide sur TF-IDF haute dimension, rapide et **robuste au bruit**.
 
 **XGBoost**
-- Bon sur représentations compactes (ex. TF-IDF tronquée, SVD). Paramétrage **lisible depuis TOML**.
+- Adéquat sur représentations compactes (ex. TF-IDF tronquée, SVD). Paramétrage **lisible depuis TOML**.
 
 **LightGBM**
 - Alternative **feature-wise** : gère bien les sparsités TF-IDF.
@@ -86,6 +86,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 - **Global (macro)** : on agrège les **|coefficients|** par groupes (n-grammes mots / caractères) → vue des signaux les plus discriminants.
 - **Par classe (OvR)** : pour chaque classe, on **rank** les features par poids (positif = indicateur de la classe, négatif = anti-signal).
 - **Image → texte** : le **poids de branche** (`fusion.weights`) indique la **contribution relative**. En cas de classes visuellement distinctes (ex. “consoles/chaussures”), la branche image gagne du poids ; sur des classes proches sémantiquement, le texte domine.
+- **Matrices de confusions**
 
 **Vision**
 - **Grad-CAM** (ResNet `layer4`) : cartes de chaleur sur les zones discriminantes ; utile pour **contrôler** que le modèle regarde l’objet et pas l’arrière-plan.
@@ -95,27 +96,25 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 **Modèles linéaires (Linear SVC / LR OvR)**
 
 **But.** Comprendre *quoi* portent les modèles (texte, image CNN/ViT, pixels, stats d’image) et *comment* ces blocs contribuent **globalement** et **par classe**.  
-Les sorties (CSV + PNG) sont générées par `tools/diagnostics_acp_shap.py`. :contentReference[oaicite:1]{index=1}
+Les sorties (CSV + PNG) sont générées par `tools/diagnostics_acp_shap.py`.
 
 - **Global (macro)** : on agrège les **|coefficients|** par groupes (n-grammes mots / caractères) → vue des signaux les plus discriminants.
 - **Par classe (OvR)** : pour chaque classe, on **rank** les features par poids (positif = indicateur de la classe, négatif = anti-signal).
 - **Image → texte** : le **poids de branche** (`fusion.weights`) indique la **contribution relative**. En cas de classes visuellement distinctes (ex. “consoles/chaussures”), la branche image gagne du poids ; sur des classes proches sémantiquement, le texte domine.
 
 **Notions clés.**
-- **imp_abs** : importance moyenne \|x·w\| (contribution absolue) — pour classer les blocs. :contentReference[oaicite:2]{index=2}  
-- **imp_pos / imp_neg** : parts moyennes **positives**/**négatives** au score OvR. :contentReference[oaicite:3]{index=3}  
-- **imp_signed** : impact net moyen (positifs − négatifs). :contentReference[oaicite:4]{index=4}  
+- **imp_abs** : importance moyenne \|x·w\| (contribution absolue) — pour classer les blocs. 
+- **imp_pos / imp_neg** : parts moyennes **positives**/**négatives** au score OvR.  
+- **imp_signed** : impact net moyen (positifs − négatifs). 
 - **Par classe (signé, magnitude)** : barres divergentes “+ / −” montrant, pour chaque classe, les blocs qui **aident** ou **desservent** la décision (échelle linéaire). :contentReference[oaicite:5]{index=5}
 
 **Dossiers de sortie.**
 - Figures : `results/figures/*.png`  
 - Tableurs : `results/reports/*.csv`  
-*(créés automatiquement si absents)*. :contentReference[oaicite:6]{index=6}
 
 ---
 
-
----
+### Diagramme
 
 ```mermaid
 flowchart TB
@@ -221,140 +220,7 @@ end
   class C src
   class OUT out
 ```
-### Diagramme
 
-```mermaid
-flowchart TB
-%% Styles
-classDef phase fill:#f2f6ff,stroke:#5271ff,stroke-width:1px,color:#1f2a44;
-classDef step  fill:#ffffff,stroke:#999999,stroke-width:1px,color:#111111;
-classDef io    fill:#fffbe6,stroke:#c9a227,color:#4d3d00;
-classDef tool  fill:#eefaf3,stroke:#2ca46c,color:#083b2c;
-
-%% -------------------------------------------------------
-%% 0) Installation & config
-%% -------------------------------------------------------
-subgraph P0["0) Installation et configuration"]
-  P0a["Créer .venv311 et installer requirements"]:::step
-  P0b["Configurer features/config.toml<br/>(paths, outputs, random/compute/cv,<br/>text(+char+stats+lexicon), images(pixels+cnn+stats), sampling, model)"]:::step
-end
-class P0,P0a,P0b phase;
-
-%% -------------------------------------------------------
-%% 1) Données
-%% -------------------------------------------------------
-subgraph P1["1) Préparation des données"]
-  P1a["CSV : X_train.csv, Y_train.csv, X_test.csv<br/>(designation, description, productid, imageid)"]:::io
-  P1b["Dossiers images : image_train/, image_test/<br/>(noms: image_{imageid}_product_{productid}.jpg)"]:::io
-  P1c["Option : translate_map (JSON)"]:::tool
-end
-class P1,P1a,P1b,P1c phase;
-
-%% -------------------------------------------------------
-%% 2) Baselines
-%% -------------------------------------------------------
-subgraph P2["2) Baselines (références)"]
-  B0["B0 Dummy — most_frequent"]:::step
-  B1["B1 Dummy — stratified"]:::step
-  B2["B2 Texte : TextCleaner → TF-IDF(word) → LR(saga)"]:::step
-  B3["B3 Image (pixels) : ImageLoader → Resize → Flatten → PCA → LR(saga)"]:::step
-  B4["B4 Multimodale : Texte + Image (pixels|CNN) + Stats"]:::step
-end
-class P2,B0,B1,B2,B3,B4 phase;
-
-%% -------------------------------------------------------
-%% 3) Pipeline multimodale (B4)
-%% -------------------------------------------------------
-subgraph P3["3) Pipeline multimodale (B4) — entraînement"]
-
-  %% Texte
-  T0a["TextCleaner<br/>(normaliser, traduire, stopwords, stemmer)"]:::tool
-  T0b["Pré-traitement<br/>(normaliser)"]:::tool
-  T1["TF-IDF (word)"]:::tool
-  T1b["TF-IDF (char/char_wb) <i>option</i>"]:::tool
-  T2["HasDescription / TitleLength"]:::tool
-  T3["TextStatisticsPro"]:::tool
-  T4["LanguageDetector / LexiconFeatures"]:::tool
-  T5["SVD global (optionnel)<br/>réduction dim. + L2 norm"]:::tool
-
-  %% Images (pixels)
-  I1["ImageLoader (RGB, resize)"]:::tool
-  I2["Flatten"]:::tool
-  I3["Réduction dim. (PCA/SVD) <i>option</i>"]:::tool
-
-  %% Images (CNN)
-  C1["Embeddings CNN (ResNet18/50/101)"]:::tool
-  C2["SVD post-CNN (optionnel)"]:::tool
-
-  %% Images (stats)
-  S1["ImageStatsCombinedFeaturizer<br/>(width,height,entropy,lap_var,colorfulness,...)"]:::tool
-
-  %% Fusion
-  FU["FeatureUnion<br/>Texte[word+char+features] + Pixels + CNN + Stats"]:::step
-
-  %% Sampling + Scaler + Modèle
-  SAMP["Rééquilibrage (CV-safe)<br/>Under=AdaptiveUnderSampler<br/>Over=RandomOverSampler"]:::step
-  SCAL["StandardScaler(with_mean=false)"]:::step
-  CLF["Classifier : LogisticRegression(saga)<br/>ou LinearSVC"]:::step
-end
-class P3,T0a,T0b,T1,T1b,T2,T3,T4,T5,I1,I2,I3,C1,C2,S1,FU,SAMP,SCAL,CLF phase;
-
-%% Branching & fusion (texte)
-T0a --> T1
-T0a --> T1b
-T0b --> T2
-T0b --> T3
-T0b --> T4
-T1 --> FU
-T1b --> FU
-T2 --> FU
-T3 --> FU
-T4 --> FU
-FU --> T5 --> SAMP
-
-%% Images
-I1 --> I2 --> I3 --> FU
-C1 --> C2 --> FU
-S1 --> FU
-
-%% Suite pipeline
-SAMP --> SCAL --> CLF
-
-%% -------------------------------------------------------
-%% 4) Entraîner & prédire
-%% -------------------------------------------------------
-subgraph P4["4) Entraîner et prédire"]
-  F1["Fit pipeline sur X_train, y_train (CV stratifiée)"]:::step
-  F2["Re-pointer images vers test_dir"]:::step
-  F3["Predict sur X_test → CSV"]:::step
-end
-class P4,F1,F2,F3 phase;
-
-%% -------------------------------------------------------
-%% 5) Évaluation
-%% -------------------------------------------------------
-subgraph P5["5) Évaluation et reporting"]
-  R1["Scores CV : F1-macro / F1-pondéré"]:::step
-  R2["Rapports : results/report_b*_cv.txt"]:::io
-  V1["Visualisations (matrices confusion, barres, etc.)"]:::tool
-end
-class P5,R1,R2,V1 phase;
-
-%% -------------------------------------------------------
-%% 6) Sorties
-%% -------------------------------------------------------
-subgraph P6["6) Sorties et livraison"]
-  O1["Modèle : artifacts/b4.joblib"]:::io
-  O2["Prédictions test : results/preds_b4.csv"]:::io
-  O3["OOF + compare CV"]:::io
-  G1["README + diagrammes Mermaid"]:::step
-end
-class P6,O1,O2,O3,G1 phase;
-
-%% Flux global
-P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
-
-```
 
 ### Feature Engineering
 
@@ -386,33 +252,47 @@ Le résultat est une **matrice creuse (sparse)**, normalisée, prête à être f
 
 ---
 
-#### B — Traitement des images – Pipeline Rakuten
+#### B — Traitement des images – Pipeline Rakuten (MÀJ : ResNet &/ou ViT + fine-tuning optionnel)
 
 Les images complètent le texte et offrent des indices visuels.  
-Elles sont traitées via deux pipelines alternatifs (pixels ou CNN) **+ une branche statistiques**.
+Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embeddings**, **Statistiques**) puis **fusionnées** (pondérations configurables).
 
-##### 1) Objectif
-- **Pixels** : capturer les formes et couleurs brutes après redimensionnement.  
-- **CNN** : utiliser des représentations pré-apprises (ResNet) pour extraire des vecteurs riches.  
-- **Stats d’images** : résumer la structure globale (taille, contraste, couleur, occupation).  
+---
 
-##### 2) Pipelines parallèles
-- **Branche Pixels** (`ImageLoader`)  
-  - Charger et redimensionner chaque image (ex. 64×64).  
-  - Transformer en vecteur de pixels aplatis.  
-  - *(Optionnel)* réduire la dimension via PCA.  
+### 1) Objectifs par branche
+- **Pixels** : capturer formes/couleurs brutes après redimensionnement.
+- **CNN embeddings** : exploiter des représentations pré-apprises :
+  - **ResNet** (torchvision, `feat=2048`) — *option* : **défiger `layer4`** pour un **fine-tuning léger**.
+  - **ViT** (HuggingFace, `feat≈768`) — *option* : **défiger les derniers blocs du Transformer** pour **ViT-seul** ou en **complément de ResNet**.
+- **Statistiques d’images** : résumer la structure globale (occupation, contraste, entropie, netteté, centrage, colorfulness…).
 
-- **Branche CNN** (`ResNet18/50/101`)  
-  - Extraire un embedding dense (512–2048 dimensions).  
-  - Normaliser (L2).  
-  - *(Optionnel)* réduire la dimension via SVD.  
+---
 
-- **Branche Statistiques** (`ImageStatsCombinedFeaturizer`)  
-  - Caractéristiques basiques : largeur, hauteur, ratio d’occupation, proportion de blanc/noir.  
-  - Caractéristiques avancées : entropie, densité de contours, aspect ratio, couleur, saturation, contraste.  
+### 2) Pipelines parallèles
+**Branche Pixels**  
+- Chargement/redimensionnement (ex. 64×64) → **flatten**.  
+- *(Optionnel)* **PCA/SVD** pour réduire la dimension.
 
-##### 3) Gestion des absences
-Si une image est manquante ou corrompue, on génère automatiquement un vecteur nul pour ne pas casser la pipeline.
+**Branche CNN embeddings**  
+- **ResNet18/50/101** *ou* **ViT base** → vecteur dense (**L2**).  
+- *(Optionnel)* **SVD** par branche **ou** **SVD commun** après union ResNet+ViT (configurable).  
+- **Fine-tuning (optionnel)** :
+  - **ResNet** : défige `layer4` + petite tête `Linear(feat_dim → n_classes)`.  
+  - **ViT** : défige `last N` blocs (`trainable_last_layers`) + tête identique.  
+  - La tête entraînée est **sauvegardée** (`artifacts/head_ft.pt`) pour l’**explicabilité** (logits par classe).
+
+**Branche Statistiques**  
+- **Basiques** : largeur/hauteur (si conservés), **ratio d’occupation**, **white/black ratio**.  
+- **Avancées** : **entropie**, **variance du Laplacien** (netteté), **densité d’arêtes**, **aspect ratio**, **offset du centre**, **saturation**, **colorfulness**, etc.
+
+### 3) Fine-tuning : modes supportés
+- **ViT seul** : activer la branche ViT, *désactiver ResNet si souhaité*, défiger `last N` blocs, `finetune_epochs ≥ 1`.  
+- **ResNet + ViT (hybride)** : activer les deux ; possible de **fine-tuner uniquement ViT**, **uniquement ResNet**, ou **les deux** (léger, quelques époques) ; la **CV** décidera si le gain de la combinaison est significatif.  
+- La tête (linear) est **réutilisée** pour la **Grad-CAM ResNet** (logits) et pour les diagnostics.
+
+### 4) Gestion des absences / robustesse
+- **Images manquantes/corrompues** → vecteur **zéro** (config `fallback_zero=true`) pour préserver le flux.  
+- Chargement **batché**, sélection **CPU/GPU auto**, **L2** systématique des embeddings.
 
 ---
 
@@ -436,14 +316,14 @@ L’étape clé est la **fusion multimodale** : toutes les sources sont combiné
 
 ##### 2) Étapes du pipeline global
 1. **Texte** : TF-IDF (word + char) + features textuelles.  
-2. **Image** : Pixels *ou* CNN (avec réduction PCA/SVD).  
+2. **Image** : Pixels *ou* CNN (Resnet et/ou Vit) avec réduction PCA/SVD selon si branche Pixels ou CNN.  
 3. **Stats images** : caractéristiques globales.  
 4. **Fusion** : combiner toutes les branches en un vecteur unique.  
 5. **Sampling** :  
    - Sous-échantillonnage adaptatif (`AdaptiveUnderSampler`).  
    - Sur-échantillonnage des petites classes (`RandomOverSampler`).  
 6. **Standardisation** : `StandardScaler(with_mean=False)`.  
-7. **Modèle** : LogisticRegression (saga) ou LinearSVC (avec option OneVsRest parallélisée).
+7. **Modèle** : LogisticRegression (saga), LinearSVC (avec option OneVsRest parallélisée), XG Boost ou LGBM
 
 ---
 #### E — Architecture du projet
@@ -459,6 +339,8 @@ Architecture du projet
 - ├── data/images/images/
 - │ ├── image_train/ # images d'entraînement
 - │ └── image_test/ # images de test
+- ├── artifacts/
+- │ ├── joblibs
 - │
 - ├── features/
 - │ ├── config.toml # configuration centrale (texte, images, sampling, model, cv…)
@@ -515,9 +397,9 @@ Elles servent de **points de comparaison** pour mesurer l’apport du texte, des
 |------|---------------------|-----------------|
 | **B0** | Naïf (majoritaire) | Toujours prédire la classe la plus fréquente. |
 | **B1** | Naïf (stratifié)   | Tirer au hasard, mais en respectant la distribution des classes. |
-| **B2** | Texte seul         | Nettoyage texte → TF-IDF (mots et éventuellement caractères) → Logistic Regression ou Linear SVC. |
-| **B3** | Image seule        | Pixels (flatten + PCA) ou CNN → Logistic Regression ou Linear SVC. |
-| **B4** | Multimodal         | Texte + Image (pixels **ou** CNN) + Statistiques d’images → Logistic Regression ou Linear SVC. |
+| **B2** | Texte seul         | Nettoyage texte → TF-IDF (mots et éventuellement caractères)  |
+| **B3** | Image seule        | Pixels (flatten + PCA) ou CNN (Resnet avec/ou Vit)|
+| **B4** | Multimodal         | Texte + Image (pixels **ou** CNN) + Statistiques d’images → Logistic Regression, Linear SVC XGBoost ou LGBM. |
 
 **Pourquoi ces baselines ?**  
 - B0/B1 montrent ce qu’on obtient **sans modèle intelligent**.  
