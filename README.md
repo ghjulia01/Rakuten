@@ -200,9 +200,6 @@ end
   CLF --> OUT[Scores CV & prédictions]
 
   %% ANALYSES HOOKS
-  FUSION -.-> X1
-  FUSION -.-> X2
-  FUSION -.-> X3
   CLF -.-> X1
   CLF -.-> X2
   R50 -.-> X3
