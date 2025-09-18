@@ -123,24 +123,23 @@ flowchart TB
   %% SOURCES
   %% ================
 subgraph A1["1) Préparation des données"]
-  A1a["CSV : X_train.csv, Y_train.csv, X_test.csv<br/>(designation, description, productid, imageid)"]:::io
-  A1b["Dossiers images : image_train/, image_test/<br/>(noms: image_{imageid}_product_{productid}.jpg)"]:::io
-  A1c["Option : translate_map (JSON)"]:::tool
+  A1a["CSV : X_train.csv, Y_train.csv, X_test.csv<br/>(designation, description, productid, imageid)"]
+  A1b["Dossiers images : image_train/, image_test/<br/>(noms: image_{imageid}_product_{productid}.jpg)"]
+  A1c["Option : dictionnaire multilingue"]
 end
-class A1,A1a,A1b,A1c phase;c
 
   %% ================
   %% TEXTE
   %% ================
   subgraph T[Texte]
-    T1[TextCleaner(stem, emojis, translate_map)] --> T2[TF-IDF word]
-    T3[[TF-IDF char (opt)]] --> T8
-    T4[[TextStatistics / Pro (opt)]] --> T8
-    T5[[HasDescription / TitleLength]] --> T8
-    T6[[LanguageDetector (opt)]] --> T8
-    T7[[Lexicon χ² (opt)]] --> T8
-    T2 --> T8(FeatureUnion Texte\n+ pondérations [text.weights])
-    T8 -->|[text.svd.enabled=true]| T9[TruncatedSVD (n_comp)\n+ L2 (option)]
+    T1[TextCleaner stem, emojis, translate_map] --> T2[TF-IDF word]
+    T3[TF-IDF char opt] --> T8
+    T4[TextStatistics / Pro opt] --> T8
+    T5[HasDescription / TitleLength] --> T8
+    T6[LanguageDetector opt] --> T8
+    T7[Lexicon χ² opt] --> T8
+    T2 --> T8[FeatureUnion Texte<br/>+ pondérations text.weights]
+    T8 --> T9[TruncatedSVD n_comp<br/>+ L2 option]
   end
 
   %% ================
@@ -150,48 +149,51 @@ class A1,A1a,A1b,A1c phase;c
     direction TB
     subgraph I_CNN[CNN embeddings]
       direction TB
-      R50[ResNet (torchvision)\nfeat=2048, L2] --> R50S[[SVD (opt) + L2]]
-      VIT[ViT (HF)\nfeat=768, L2] --> VITS[[SVD (opt) + L2]]
+      R50[ResNet torchvision<br/>feat=2048, L2] --> R50S[SVD opt + L2]
+      VIT[ViT HF<br/>feat=768, L2] --> VITS[SVD opt + L2]
     end
-    ISTATS[ImageStatsCombined\n(occupancy, entropy, edges,\ncenter offset, colorfulness…)]:::stat
-    PIX[[Pixels → Flatten → PCA/SVD (opt)]]:::opt
+    ISTATS[ImageStatsCombined<br/>occupancy, entropy, edges,<br/>center offset, colorfulness…]
+    PIX[Pixels → Flatten → PCA/SVD opt]
   end
 
   %% ================
   %% FUSION
   %% ================
-  FUSION[FeatureUnion multimodale\n+ [fusion.weights]\n(text, image_cnn, image_cnn_vit, pixels, stats)]:::fusion
+  FUSION[FeatureUnion multimodale<br/>+ fusion.weights<br/>text, image_cnn, image_cnn_vit, pixels, stats]
 
   %% ================
   %% SAMPLING + MODEL
   %% ================
-  US[Under-sampling adaptatif (par fold)]:::sam
-  OS[Over-sampling tail]:::sam
-  CLF[Classifier\n• LogisticRegression\n• LinearSVC\n• XGBoost / LightGBM]:::model
+  US[Under-sampling adaptatif par fold]
+  OS[Over-sampling tail]
+  CLF[Classifier<br/>• LogisticRegression<br/>• LinearSVC<br/>• XGBoost / LightGBM]
 
   %% ================
   %% EXPLICABILITÉ
   %% ================
     subgraph X[Analyses & Explicabilité]
-    X1[B2 — Global<br/>Importance par bloc]:::xp
-    X2[B2 — Par classe<br/>signé, magnitude]:::xp
-    X3[B4 — Global (coarse)<br/>Texte/CNN/Pixels/Stats]:::xp
-    X4[B4 — Global (fin)<br/>sous-blocs texte & stats]:::xp
-    X5[B4 — Par classe<br/>signé (parts %)]:::xp
-    X6[B4 — Par classe<br/>fidèle (texte rétro-projeté)]:::xp
-    X7[ACP 2D & Top confusions]:::xp
-    X8[Grad-CAM ResNet<br/>(layer4 + head_ft.pt)]:::xp
+    X1[B2 — Global<br/>Importance par bloc]
+    X2[B2 — Par classe<br/>signé, magnitude]
+    X3[B4 — Global coarse<br/>Texte/CNN/Pixels/Stats]
+    X4[B4 — Global fin<br/>sous-blocs texte & stats]
+    X5[B4 — Par classe<br/>signé parts %]
+    X6[B4 — Par classe<br/>fidèle texte rétro-projeté]
+    X7[ACP 2D & Top confusions]
+    X8[Grad-CAM ResNet<br/>layer4 + head_ft.pt]
   end
 
   %% FLOWS
-  A --> T1
-  A --> I
+  A1 --> T1
+  A1 --> I
   T9 --> FUSION
   T8 --> FUSION
   R50S --> FUSION
   VITS --> FUSION
   ISTATS --> FUSION
-  FUSION --> CLF
+  PIX --> FUSION
+  FUSION --> US
+  US --> OS
+  OS --> CLF
 
   %% ANALYSES HOOKS
   T8 -.-> X1
@@ -202,19 +204,27 @@ class A1,A1a,A1b,A1c phase;c
   FUSION -.-> X6
   FUSION -.-> X7
   R50 -.-> X8
-  CLF -.scores/coefs.-> X1
-  CLF -.scores/coefs.-> X2
-  CLF -.scores/coefs.-> X3
-  CLF -.scores/coefs.-> X4
-  CLF -.scores/coefs.-> X5
-  CLF -.scores/coefs.-> X6
+  CLF -.-> X1
+  CLF -.-> X2
+  CLF -.-> X3
+  CLF -.-> X4
+  CLF -.-> X5
+  CLF -.-> X6
 
-  classDef src fill:#eef,stroke:#556;
-  classDef fusion fill:#ffd,stroke:#aa5;
-  classDef model fill:#fef,stroke:#a5a;
-  classDef xp fill:#ffe6e6,stroke:#b55;
+  %% STYLES
+  classDef phase fill:#e1f5fe,stroke:#0277bd
+  classDef fusion fill:#fff3e0,stroke:#ef6c00
+  classDef model fill:#fce4ec,stroke:#c2185b
+  classDef xp fill:#ffebee,stroke:#d32f2f
+  classDef sam fill:#f3e5f5,stroke:#7b1fa2
+  
+  class A1,A1a,A1b,A1c phase
+  class FUSION fusion
+  class CLF model
+  class X1,X2,X3,X4,X5,X6,X7,X8 xp
+  class US,OS sam
+  
 ```
-
 ### Diagramme
 
 ```mermaid
