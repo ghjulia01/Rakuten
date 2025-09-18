@@ -20,13 +20,13 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ## Méthodologie
 
-### Constats clés :
+### A) Constats clés :
 
 - **27 classes fortement déséquilibrées** → métriques macro + **sampling CV-safe** indispensables.
 - ~**35 %** de `description` manquante, données **multilingues** → **`has_description`** aide ; **char** compense titres courts.
 - images **500×500** nommées `image_{imageid}_product_{productid}.jpg`. 
 
-### Objectifs du projet
+### B) Objectifs du projet
 
 - Construire un pipeline **Texte + Image** robuste sur un jeu **très déséquilibré**, multilingue, avec **~35 % de descriptions manquantes**.
 - Optimiser la performance sous **F1-macro** (priorité) avec une **validation CV-safe** (stratifiée, sans fuite) et des garde-fous sur le sampling.
@@ -41,7 +41,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ---
 
-### Architecture construite pour être lisible, robuste et portable
+### C) Architecture construite pour être lisible, robuste et portable
 
 - **Qualité logicielle & robustesse**
   - **Pytest** (tests unitaires & smoke tests), détections proactives dans `tools/` (cohérence des chemins, fichiers manquants, tailles, NaN).
@@ -68,7 +68,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ---
 
-### Pipeline (vue d’ensemble)
+### D) Pipeline (vue d’ensemble)
 
 **Texte**
 - Nettoyage (map de traduction), **TF-IDF word + char** (union).
@@ -85,7 +85,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ---
 
-### Validation & métriques
+### E) Validation & métriques
 
 - **CV stratifiée** (k-fold)
 - **Métriques** : **F1-macro** (prioritaire), F1-pondéré en second.
@@ -93,7 +93,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ---
 
-### Modèles & recherche d’hyperparamètres
+### F) Modèles & recherche d’hyperparamètres
 
 **Linear SVC (One-Vs-Rest) — GridSearchCV**
 - Solide sur TF-IDF haute dimension, rapide et **robuste au bruit**.
@@ -114,7 +114,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ---
 
-### Impact des features (global & par classe)
+### G) Impact des features (global & par classe)
 
 **Modèles linéaires (Linear SVC / LR OvR)**
 - **Global (macro)** : on agrège les **|coefficients|** par groupes (n-grammes mots / caractères) → vue des signaux les plus discriminants.
@@ -125,7 +125,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 **Vision**
 - **Grad-CAM** (ResNet `layer4`) : cartes de chaleur sur les zones discriminantes ; utile pour **contrôler** que le modèle regarde l’objet et pas l’arrière-plan.
 
-### Analyses — Poids & impact des features (B2/B4)
+### H) Analyses — Poids & impact des features (B2/B4)
 
 **Modèles linéaires (Linear SVC / LR OvR)**
 
