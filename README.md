@@ -91,7 +91,7 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 **Vision**
 - **Grad-CAM** (ResNet `layer4`) : cartes de chaleur sur les zones discriminantes ; utile pour **contrôler** que le modèle regarde l’objet et pas l’arrière-plan.
 
-### 🔍 Analyses — Poids & impact des features (B2/B4)
+### Analyses — Poids & impact des features (B2/B4)
 
 **Modèles linéaires (Linear SVC / LR OvR)**
 
