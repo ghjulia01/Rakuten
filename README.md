@@ -292,7 +292,6 @@ Le résultat est une **matrice creuse (sparse)**, normalisée, prête à être f
 Les images complètent le texte et offrent des indices visuels.  
 Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embeddings**, **Statistiques**) puis **fusionnées** (pondérations configurables).
 
----
 
 ##### 1) Objectifs par branche
 - **Pixels** : capturer formes/couleurs brutes après redimensionnement.
@@ -300,8 +299,6 @@ Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embedding
   - **ResNet** (torchvision, `feat=2048`) — *option* : **défiger `layer4`** pour un **fine-tuning léger**.
   - **ViT** (HuggingFace, `feat≈768`) — *option* : **défiger les derniers blocs du Transformer** pour **ViT-seul** ou en **complément de ResNet**.
 - **Statistiques d’images** : résumer la structure globale (occupation, contraste, entropie, netteté, centrage, colorfulness…).
-
----
 
 ##### 2) Pipelines parallèles
 **Branche Pixels**  
@@ -376,6 +373,7 @@ Architecture du projet
 - │ └── image_test/ # images de test
 - ├── artifacts/
 - │ ├── joblibs
+- │ └── head_ft.pt  # pour gradcam
 - │
 - ├── features/
 - │ ├── config.toml # configuration centrale (texte, images, sampling, model, cv…)
