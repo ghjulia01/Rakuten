@@ -133,7 +133,7 @@ end
   %% ================
 subgraph T[Texte]
   direction TB
-  C[Combine<br/>(designation + description)]:::src
+  C[Combine(designation + description)]:::src
   %% Branche WORD
   C --> TWC[TextCleaner] --> TWW[TF-IDF word]
   %% Branche CHAR
