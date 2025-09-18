@@ -192,17 +192,16 @@ end
   end
 
   %% FLOWS
-  A1 --> T1
-  A1 --> I
-  T9 --> FUSION
-  T8 --> FUSION
+  A --> T
+  A --> I
+  TSV --> FUSION
+  TU  --> FUSION
   R50S --> FUSION
   VITS --> FUSION
   ISTATS --> FUSION
-  PIX --> FUSION
-  FUSION --> US
-  US --> OS
-  OS --> CLF
+  FUSION --> CLF
+  R50 -. hooks .-> GC
+  CLF --> OUT[Scores CV & prédictions]:::out
 
   %% ANALYSES HOOKS
   T8 -.-> X1
