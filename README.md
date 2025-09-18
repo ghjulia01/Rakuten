@@ -122,7 +122,7 @@ flowchart TB
   %% ================
   %% SOURCES
   %% ================
-  A[Inputs CSV\n designation\n description\n imageid, productid]:::src
+  A[Inputs CSV<br/>- designation<br/>- description<br/>- imageid, productid]:::src
 
   %% ================
   %% TEXTE
