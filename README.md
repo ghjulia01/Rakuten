@@ -131,16 +131,25 @@ end
   %% ================
   %% TEXTE
   %% ================
-  subgraph T[Texte]
-    T1[TextCleaner stem, emojis, translate_map] --> T2[TF-IDF word]
-    T3[TF-IDF char opt] --> T8
-    T4[TextStatistics / Pro opt] --> T8
-    T5[HasDescription / TitleLength] --> T8
-    T6[LanguageDetector opt] --> T8
-    T7[Lexicon χ² opt] --> T8
-    T2 --> T8[FeatureUnion Texte<br/>+ pondérations text.weights]
-    T8 --> T9[TruncatedSVD n_comp<br/>+ L2 option]
-  end
+subgraph T[Texte]
+  direction TB
+  C[Combine<br/>(designation + description)]:::src
+  %% Branche WORD
+  C --> TWC[TextCleaner] --> TWW[TF-IDF word]
+  %% Branche CHAR
+  C --> TCC[TextCleaner (no stem)] --> TCW[TF-IDF char/char_wb]
+  %% Branches "features" sur texte brut combiné
+  C --> TS[TextStatistics / Pro]
+  C --> TL[LanguageDetector]
+  C --> TX[Lexicon χ²]
+  %% Union texte
+  TWW --> TU[Union texte]
+  TCW --> TU
+  TS  --> TU
+  TL  --> TU
+  TX  --> TU
+  TU -->|text.svd.enabled| TSV[TruncatedSVD (n_comp)]
+end
 
   %% ================
   %% IMAGES
@@ -223,7 +232,7 @@ end
   class CLF model
   class X1,X2,X3,X4,X5,X6,X7,X8 xp
   class US,OS sam
-  
+
 ```
 ### Diagramme
 
