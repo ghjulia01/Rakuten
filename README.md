@@ -20,17 +20,51 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 ## Méthodologie
 
-- **Constats clés** :
+### Constats clés :
 
 - **27 classes fortement déséquilibrées** → métriques macro + **sampling CV-safe** indispensables.
 - ~**35 %** de `description` manquante, données **multilingues** → **`has_description`** aide ; **char** compense titres courts.
 - images **500×500** nommées `image_{imageid}_product_{productid}.jpg`. 
 
-**Objectif**
+### Objectifs du projet
 
-- Construire un pipeline **Texte + Image** robuste sur un jeu **très déséquilibré**, multilingue, avec **35% de descriptions manquantes**
-- Priorités : **F1-macro**, validation **CV-safe**, explicabilité (poids features et impact pour chacune des classes/ cartes Grad-CAM).
-- ** Enrichir la représentation **multimodale** avec des **signaux simples, interprétables et rapides** à calculer, utiles pour la robustesse (manques de description, bruit visuel, classes proches).
+- Construire un pipeline **Texte + Image** robuste sur un jeu **très déséquilibré**, multilingue, avec **~35 % de descriptions manquantes**.
+- Optimiser la performance sous **F1-macro** (priorité) avec une **validation CV-safe** (stratifiée, sans fuite) et des garde-fous sur le sampling.
+- Assurer l’**explicabilité** : poids globaux/par classe (linéaires), **diagnostics par blocs** (texte, CNN, stats), **Grad-CAM ResNet**.
+- Intégrer une vision **moderne et complémentaire** :
+  - **ResNet (torchvision)** et/ou **ViT (HuggingFace)**, **fine-tuning optionnel** (ResNet: `layer4`; ViT: derniers blocs).
+  - **Sauvegarde de la tête** (logits + classes) pour l’explicabilité et le debug.
+- **Réduction de dimension** pilotée par config :
+  - **Texte** : **TruncatedSVD après l’Union** (TF-IDF word/char + stats + langue + lexiques).
+  - **Images** : **SVD par branche** (ResNet/ViT) **ou SVD commun** après union (option).
+- **Enrichir la représentation multimodale** avec des **signaux simples, interprétables et rapides** (stats d’image : occupancy, entropie, edges, centrage, colorfulness ; stats texte : ratios, patterns, lexiques χ²).
+
+---
+
+### Architecture construite pour être lisible, robuste et portable
+
+- **Qualité logicielle & robustesse**
+  - **Pytest** (tests unitaires & smoke tests), détections proactives dans `tools/` (cohérence des chemins, fichiers manquants, tailles, NaN).
+  - **Fail-soft** par design : `fallback_zero` pour images manquantes, gestion **NaN-aware** côté logits/probas, lecture résiliente.
+  - **Code portable & explicité** : chemins **dynamiques** (cross-platform), **docstrings** et **typing** pour lisibilité/maintenance.
+
+- **Architecture modulaire pilotée par configuration**
+  - Pipelines scikit-learn composées (**FeatureUnion**, **Pipeline**), **TOML** central pour activer/désactiver branches (texte, ResNet, ViT, pixels, stats), **poids de fusion** et grilles d’hyperparamètres.
+  - **Séparation des préoccupations** : nettoyage/featurisation/vision/fusion/modèles/explicabilité logés dans modules dédiés.
+
+- **Performance & ingénierie**
+  - Chargement **batché**, **num_workers** configurables, **auto GPU/CPU** ; embeddings **L2-norm** systématiques.
+  - **SVD/PCA** au bon endroit (après unions) pour **contrôle mémoire** et vitesse de fit.
+  - **GridSearchCV** sur **LinearSVC** + options **XGBoost/LightGBM** paramétrables depuis le TOML.
+
+- **Reproductibilité & traçabilité**
+  - **Artifacts** versionnés (`*.joblib`, `head_ft.pt`, figures/CSV diagnostics), **random_state** maîtrisé, **logs** des runs (poids de fusion, branches actives, tailles train/val, meilleurs modèles).
+  - **Diagrammes Mermaid** dans le README pour la compréhension et l’onboarding rapide.
+
+- **Explicabilité opérationnelle**
+  - Analyses **globales** et **par classe** (signé/magnitude, parts %) sur texte/images.
+  - **Grad-CAM ResNet** (hook `layer4` + tête sauvegardée) ; ViT prêt pour **attention rollout / Grad-CAM-ViT**.
+  - Livrables clairs : **figures** (`results/figures/*.png`) & **tableurs** (`results/reports/*.csv`).
 
 ---
 
