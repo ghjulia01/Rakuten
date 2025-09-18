@@ -122,7 +122,12 @@ flowchart TB
   %% ================
   %% SOURCES
   %% ================
-  A[Inputs CSV<br/>- designation<br/>- description<br/>- imageid, productid]:::src
+subgraph A1["1) Préparation des données"]
+  A1a["CSV : X_train.csv, Y_train.csv, X_test.csv<br/>(designation, description, productid, imageid)"]:::io
+  A1b["Dossiers images : image_train/, image_test/<br/>(noms: image_{imageid}_product_{productid}.jpg)"]:::io
+  A1c["Option : translate_map (JSON)"]:::tool
+end
+class A1,A1a,A1b,A1c phase;c
 
   %% ================
   %% TEXTE
