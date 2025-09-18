@@ -180,8 +180,8 @@ end
   %% ================
   %% EXPLICABILITÉ
   %% ================
-    subgraph X[Analyses & Explicabilité]
-    X1[Analyse<br/>Poids & impact des features (B2/B4)]
+  subgraph X[Analyses & Explicabilité]
+    X1[Analyse<br/>Poids et impact des features (B2/B4)]
     X2[ACP 2D & Top confusions]
     X3[Grad-CAM ResNet<br/>layer4 + head_ft.pt]
   end
