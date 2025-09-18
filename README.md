@@ -103,7 +103,7 @@ flowchart TB
   %% TEXTE
   %% ================
   subgraph T[Texte]
-    T1[TextCleaner\n(stem, emojis, translate_map)] --> T2[TF-IDF word]
+    T1[TextCleaner<br/>(stem, emojis, translate_map)] --> T2[TF-IDF word]
     T3[[TF-IDF char (opt)]] --> T8
     T4[[TextStatistics / Pro (opt)]] --> T8
     T5[[HasDescription / TitleLength]] --> T8

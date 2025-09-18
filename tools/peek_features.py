@@ -1,13 +1,15 @@
 # tools/peek_features.py
 # Inspecter la taille/nnz/mémoire des features par branche avant la fusion
 # Échantillon rapide (3k) pour ne pas exploser la RAM
-# le script à lancer: RAKUTEN_MAX_N=83000 python tools/peek_features.py
+# le script à lancer: RAKUTEN_MAX_N=3000 python tools/peek_features.py
+# (ou 3000 pour un test très rapide)
 # Windows PowerShell
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model xgb
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model lgbm
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model lr
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model svc
+
 
 import os, sys, time
 from pathlib import Path
