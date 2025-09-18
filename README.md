@@ -294,7 +294,7 @@ Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embedding
 
 ---
 
-### 1) Objectifs par branche
+##### 1) Objectifs par branche
 - **Pixels** : capturer formes/couleurs brutes après redimensionnement.
 - **CNN embeddings** : exploiter des représentations pré-apprises :
   - **ResNet** (torchvision, `feat=2048`) — *option* : **défiger `layer4`** pour un **fine-tuning léger**.
@@ -303,7 +303,7 @@ Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embedding
 
 ---
 
-### 2) Pipelines parallèles
+##### 2) Pipelines parallèles
 **Branche Pixels**  
 - Chargement/redimensionnement (ex. 64×64) → **flatten**.  
 - *(Optionnel)* **PCA/SVD** pour réduire la dimension.
@@ -320,12 +320,12 @@ Elles sont traitées via **trois branches** parallèles (Pixels, **CNN embedding
 - **Basiques** : largeur/hauteur (si conservés), **ratio d’occupation**, **white/black ratio**.  
 - **Avancées** : **entropie**, **variance du Laplacien** (netteté), **densité d’arêtes**, **aspect ratio**, **offset du centre**, **saturation**, **colorfulness**, etc.
 
-### 3) Fine-tuning : modes supportés
+##### 3) Fine-tuning : modes supportés
 - **ViT seul** : activer la branche ViT, *désactiver ResNet si souhaité*, défiger `last N` blocs, `finetune_epochs ≥ 1`.  
 - **ResNet + ViT (hybride)** : activer les deux ; possible de **fine-tuner uniquement ViT**, **uniquement ResNet**, ou **les deux** (léger, quelques époques) ; la **CV** décidera si le gain de la combinaison est significatif.  
 - La tête (linear) est **réutilisée** pour la **Grad-CAM ResNet** (logits) et pour les diagnostics.
 
-### 4) Gestion des absences / robustesse
+##### 4) Gestion des absences / robustesse
 - **Images manquantes/corrompues** → vecteur **zéro** (config `fallback_zero=true`) pour préserver le flux.  
 - Chargement **batché**, sélection **CPU/GPU auto**, **L2** systématique des embeddings.
 
