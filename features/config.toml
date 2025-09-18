@@ -135,7 +135,11 @@ use_imagenet_norm = true
 fallback_zero = true
 dtype = "float32"
 num_workers = 4
-trainable_last_n = 1         # si tu veux FT layer4 propre, mets 1 (voir patch)
+# Ajouts pour la tête et la Grad-CAM Mais attention il faut désactiver images.cnn_vit et enlever son poid
+finetune_epochs = 2          # ≥1 pour apprendre/enregistrer la tête
+trainable_last_n = 1         # déclenche l’unfreeze; pour ResNet on unfreeze layer4
+save_head_path = "artifacts/head_ft.pt"
+save_head_normalize = true
 
 [images.cnn.dim_reduction]
 enabled = true   

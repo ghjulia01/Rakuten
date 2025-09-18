@@ -4,6 +4,30 @@ import torch.nn.functional as F
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
+import json, argparse
+
+
+# Génère un fichier JSON index_to_label à partir d'une tête entraînée
+# python gradcam_resnet_head.py --head artifacts/head_ft.pt --out features/labels_map.json
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--head", required=True, help="artifacts/head_ft.pt")
+    ap.add_argument("--out", required=True, help="features/labels_map.json")
+    args = ap.parse_args()
+
+    chk = torch.load(args.head, map_location="cpu")
+    classes = chk.get("classes")
+    if classes is None:
+        raise SystemExit("Pas de 'classes' dans le head — est-ce que l'entrainement a bien fonctionné /enregistré la tête ?")
+
+    payload = {
+        "classes": classes,                                   # liste ordonnée
+        "index_to_label": {str(i): lbl for i, lbl in enumerate(classes)}
+    }
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"OK → {args.out} ({len(classes)} classes)")
+
 
 class ResNetGradCAMWithHead:
     def __init__(self, featurizer):

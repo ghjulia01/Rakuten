@@ -32,7 +32,7 @@ def main():
     )
     print(f"Classe prédite : {label} (idx: {idx})")
     # Option: sauvegarder la heatmap/overlay
-    # heatmap.save("artifacts/gradcam_heatmap.png"); overlay.save("artifacts/gradcam_overlay.png")
+    heatmap.save("artifacts/gradcam_heatmap.png"); overlay.save("artifacts/gradcam_overlay.png")
 
 if __name__ == "__main__":
     main()

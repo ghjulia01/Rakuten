@@ -3,6 +3,8 @@ import sys
 import argparse
 from models.cnn_features import CNNFeaturizer
 # python tools/smoke_head_topk.py --images_dir data/images/images --head_path models/head_ft.pth --rows 3 --csv notebooks/df.csv
+# Test rapide de la tête FT + top-k
+# Nécessite d'avoir entraîné une tête et sauvegardé le modèle dans 'models/head_ft.pth'
 
 def main():
     ap = argparse.ArgumentParser()
