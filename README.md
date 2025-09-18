@@ -133,12 +133,12 @@ end
   %% ================
 subgraph T[Texte]
   direction TB
-  C[Combine(designation + description)]:::src
+  C[Combine designation + description]
   %% Branche WORD
   C --> TWC[TextCleaner] --> TWW[TF-IDF word]
   %% Branche CHAR
-  C --> TCC[TextCleaner (no stem)] --> TCW[TF-IDF char/char_wb]
-  %% Branches "features" sur texte brut combiné
+  C --> TCC[TextCleaner no stem] --> TCW[TF-IDF char/char_wb]
+  %% Branches features sur texte brut combiné
   C --> TS[TextStatistics / Pro]
   C --> TL[LanguageDetector]
   C --> TX[Lexicon χ²]
@@ -148,7 +148,7 @@ subgraph T[Texte]
   TS  --> TU
   TL  --> TU
   TX  --> TU
-  TU -->|text.svd.enabled| TSV[TruncatedSVD (n_comp)]
+  TU --> TSV[TruncatedSVD n_comp]
 end
 
   %% ================
@@ -192,20 +192,22 @@ end
   end
 
   %% FLOWS
-  A --> T
-  A --> I
+  A1 --> C
+  A1 --> I
   TSV --> FUSION
   TU  --> FUSION
   R50S --> FUSION
   VITS --> FUSION
   ISTATS --> FUSION
-  FUSION --> CLF
-  R50 -. hooks .-> GC
-  CLF --> OUT[Scores CV & prédictions]:::out
+  PIX --> FUSION
+  FUSION --> US
+  US --> OS
+  OS --> CLF
+  CLF --> OUT[Scores CV & prédictions]
 
   %% ANALYSES HOOKS
-  T8 -.-> X1
-  T8 -.-> X2
+  TU -.-> X1
+  TU -.-> X2
   FUSION -.-> X3
   FUSION -.-> X4
   FUSION -.-> X5
@@ -225,13 +227,16 @@ end
   classDef model fill:#fce4ec,stroke:#c2185b
   classDef xp fill:#ffebee,stroke:#d32f2f
   classDef sam fill:#f3e5f5,stroke:#7b1fa2
+  classDef src fill:#e8f5e8,stroke:#2e7d32
+  classDef out fill:#fff8e1,stroke:#f57f17
   
   class A1,A1a,A1b,A1c phase
   class FUSION fusion
   class CLF model
   class X1,X2,X3,X4,X5,X6,X7,X8 xp
   class US,OS sam
-
+  class C src
+  class OUT out
 ```
 ### Diagramme
 
