@@ -18,72 +18,155 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 
 -L’approche est multimodale : une branche texte (nettoyage + TF-IDF) et une branche image (chargement, normalisation, PCA ou  CNN), fusionnées puis apprises par un classifieur linéaire, avec rééquilibrage des classes (undersampling/oversampling).
 
-## Méthodologie — Planning Modélisation & Livrables (MÀJ)
+## Méthodologie
 
-Contexte Rendu 1 (EDA) acquis : 
-**27 classes fortement déséquilibrées**, ~**35 %** de `description` manquante, données **multilingues**, images **500×500** nommées `image_{imageid}_product_{productid}.jpg`. 
-
-Priorités : pipeline **multimodale** (Texte+Image), **sampling CV-safe**, métriques **F1 macro / pondéré**.
-
-- **Tableaux / Figures** :
-- Histogramme des **fréquences par classe** (trié).
-- Boxplots des **longueurs** `designation_len` / `description_len`.  
-- **Top n-grammes** avant/après nettoyage (word & char).  
-- Histos `occupancy`, `white_ratio`, `black_ratio` (train global + par classe *si lisible*).
 - **Constats clés** :
-- Fort **déséquilibre** → métriques macro + **sampling CV-safe** indispensables.
-- **35%** de descriptions manquantes → **`has_description`** aide ; **char** compense titres courts.
-- **Images** : stats simples + **CNN** améliorent la robustesse vs pixels seuls.
----
 
-### Modélisation  
+- **27 classes fortement déséquilibrées** → métriques macro + **sampling CV-safe** indispensables.
+- ~**35 %** de `description` manquante, données **multilingues** → **`has_description`** aide ; **char** compense titres courts.
+- images **500×500** nommées `image_{imageid}_product_{productid}.jpg`. 
 
-#### Étape 1 — Baselines & premier cadrage 
-- Lancer **B0–B3** puis un premier **B4** minimal (Texte=TF-IDF(word), Image=pixels+PCA, **sans** char/CNN).
-- Générer : `results/baseline_results_summary.csv`, `reports/report_b*_cv.txt`.
-- Analyser la pertinence : déséquilibre vs F1-macro, classes confondues (matrices de confusion top-K).
+**Objectif**
 
-#### Étape 2 — Mesures & optimisation 
-- **Mesures** : F1-macro & F1-pondéré + confusion (B2 & B4).
-- **Optimisations rapides** :
-  - Texte : activer **TF-IDF(char/char_wb)**, ajuster `max_features`, `min_df/max_df`, pondérations `FeatureUnion`.
-  - Image (pixels) : ajuster `size` (32/64) & **PCA** (`n_components` 80–120).
-  - **Sampling CV-safe** : `AdaptiveUnderSampler` (cap p85–p90) → `RandomOverSampler` (tail_min 1 000–1 500).
-  - **Comparaison modèle** : `--compare` (**LR(saga)** vs **LinearSVC**), tuning `C`.
-  - **CNN (option)** : embeddings **ResNet18/50** + **SVD 128–256**.
-- Livrables : `results/compare_cv_results.csv`, figures barres & confusion mises à jour, notes d’ablation.
-
-#### Étape 3 — Modélisation avancée & interprétabilité 
-- **Bagging/Boosting** *(si temps/ressources)* : LightGBM/HistGBDT sur **text SVD** (+ image SVD) en One-Vs-Rest.
-- **Deep Learning** *(option GPU)* : baseline **CNN embeddings** renforcée (pooling/MLP), ou petit **ViT/EfficientNet** gelé + head linéaire.
-- **Interprétabilité** :
-  - Texte : coefficients LR/SVC par classe, **permutation importance**, **LIME/SHAP** sur classes clés.
-  - Image : inspection d’**erreurs typiques** (collages d’images + confusion).
-- **Conclusions métiers** : synthèse succès/limites, recommandations (qualité de saisie, regroupements de classes).
-- Livrable : **Rendu 2 — rapport de modélisation** (résultats, ablations, interprétations, recommandations).
+- Construire un pipeline **Texte + Image** robuste sur un jeu **très déséquilibré**, multilingue, avec **35% de descriptions manquantes**
+- Priorités : **F1-macro**, validation **CV-safe**, explicabilité (poids features et impact pour chacune des classes/ cartes Grad-CAM).
+- ** Enrichir la représentation **multimodale** avec des **signaux simples, interprétables et rapides** à calculer, utiles pour la robustesse (manques de description, bruit visuel, classes proches).
 
 ---
 
-#### Étape 4 — Rapport final + codes GitHub  
-- Fusionner **Rendu 1 + Rendu 2** → rapport final avec **conclusion & ouverture**.
-- Code **propre & commenté** : README (pipelines, toggles TOML, diagrammes Mermaid), dossiers `results/` & `reports/` structurés.
+### Pipeline (vue d’ensemble)
+
+**Texte**
+- Nettoyage (map de traduction), **TF-IDF word + char** (union).
+- Gestion des champs manquants via `has_description`, pondération char pour les titres courts.
+
+**Image**
+- **CNN ResNet** (torchvision) → **embedding 2048-d** (L2-norm) ; option **ViT** (HF) → **768-d**.
+- **Fine-tuning léger** (défige `layer4` pour ResNet / derniers blocs pour ViT).
+- **Sauvegarde de la tête de classification** (logits) pour l’explicabilité : `artifacts/head_ft.pt`.
+
+**Fusion**
+- Somme pondérée des branches (`text`, `image_cnn`, `image_cnn_vit`…), **weights** calibrables (grid simple).
+- Réduction de dimension optionnelle (SVD) côté image.
 
 ---
 
-#### Étape 5 — Streamlit + Soutenances  
-- App **esthétique** (plusieurs onglets) : *Aperçu données*, *Training & scores*, *Démo prédiction*.
-- **Pas de ré-entraînement** côté app ; charger `models/text_image_classifier.joblib`.
-- **Soutenance** : 20 min présentation + 10 min Q/R ; au choix **Slides + Démo** ou **App seule**.
-- Checklist : stabilité (pas de bugs), temps d’inférence ok, dépendances légères.
+### Validation & métriques
+
+- **CV stratifiée** (k-fold)
+- **Métriques** : **F1-macro** (prioritaire), F1-pondéré en second.
+- **Export** des diagnostics de run : **branches fusionnées**, **poids appliqués**, **CNN activée** (arch/SVD), **n train/val**, **top modèles** retenus, etc.
 
 ---
 
-### Checkpoints & To-Do rapides
-- Finaliser Step 1 (B0–B4 minimal) & publier `baseline_results_summary.csv`.
-- Activer char, sampling CV-safe & `--compare` (Step 2) ; produire `compare_cv_results.csv`.
-- Lancer CNN+SVD (option) et ablations clés (char on/off, stats image on/off, pixels vs CNN).
-- Rédiger **Rendu 2** (graphes, confusions, interprétations) → avant **26/09**.
-- Finaliser rapport & repo GitHub **avant 03/10** ; préparer **Streamlit** & pitch.
+### Modèles & recherche d’hyperparamètres
+
+**Linear SVC (One-Vs-Rest) — GridSearchCV**
+- Solide sur TF-IDF haute dimension, rapide et **robuste au bruit**.
+
+**XGBoost**
+- Bon sur représentations compactes (ex. TF-IDF tronquée, SVD). Paramétrage **lisible depuis TOML**.
+
+**LightGBM**
+- Alternative **feature-wise** : gère bien les sparsités TF-IDF.
+
+**Option Vision avancée — ResNet + ViT (complémentarité)**
+- **ResNet** capte la **texture / bords / motifs locaux** ; **ViT** capte des **relations globales** via attention.
+- Nous **activons les deux** extracteurs d’images, fusionnons leurs embeddings avec le texte, et laissons la **CV** choisir :
+  - soit **Texte + ResNet**, 
+  - soit **Texte + ViT**, 
+  - soit **Texte + ResNet + ViT** (si le gain est significatif).
+- **Fine-tuning ciblé** (quelques époques, queue du backbone) pour **aligner** l’espace visuel sur nos classes sans surcoût majeur.
+
+---
+
+### Impact des features (global & par classe)
+
+**Modèles linéaires (Linear SVC / LR OvR)**
+- **Global (macro)** : on agrège les **|coefficients|** par groupes (n-grammes mots / caractères) → vue des signaux les plus discriminants.
+- **Par classe (OvR)** : pour chaque classe, on **rank** les features par poids (positif = indicateur de la classe, négatif = anti-signal).
+- **Image → texte** : le **poids de branche** (`fusion.weights`) indique la **contribution relative**. En cas de classes visuellement distinctes (ex. “consoles/chaussures”), la branche image gagne du poids ; sur des classes proches sémantiquement, le texte domine.
+
+**Vision**
+- **Grad-CAM** (ResNet `layer4`) : cartes de chaleur sur les zones discriminantes ; utile pour **contrôler** que le modèle regarde l’objet et pas l’arrière-plan.
+
+---
+
+```mermaid
+flowchart TB
+  %% ================
+  %% SOURCES
+  %% ================
+  A[Inputs CSV\n• designation\n• description\n• imageid, productid]:::src
+
+  %% ================
+  %% TEXTE
+  %% ================
+  subgraph T[Texte]
+    T1[TextCleaner\n(stem, emojis, translate_map)] --> T2[TF-IDF word]
+    T3[[TF-IDF char (opt)]] --> T8
+    T4[[TextStatistics / Pro (opt)]] --> T8
+    T5[[HasDescription / TitleLength]] --> T8
+    T6[[LanguageDetector (opt)]] --> T8
+    T7[[Lexicon χ² (opt)]] --> T8
+    T2 --> T8(FeatureUnion Texte\n+ pondérations [text.weights])
+    T8 -->|[text.svd.enabled=true]| T9[TruncatedSVD (n_comp)\n+ L2 (option)]
+  end
+
+  %% ================
+  %% IMAGES
+  %% ================
+  subgraph I[Images]
+    direction TB
+    subgraph I_CNN[CNN embeddings]
+      direction TB
+      R50[ResNet (torchvision)\nfeat=2048, L2] --> R50S[[SVD (opt) + L2]]
+      VIT[ViT (HF)\nfeat=768, L2] --> VITS[[SVD (opt) + L2]]
+    end
+    ISTATS[ImageStatsCombined\n(occupancy, entropy, edges,\ncenter offset, colorfulness…)]:::stat
+    PIX[[Pixels → Flatten → PCA/SVD (opt)]]:::opt
+  end
+
+  %% ================
+  %% FUSION
+  %% ================
+  FUSION[FeatureUnion multimodale\n+ [fusion.weights]\n(text, image_cnn, image_cnn_vit, pixels, stats)]:::fusion
+
+  %% ================
+  %% SAMPLING + MODEL
+  %% ================
+  US[Under-sampling adaptatif (par fold)]:::sam
+  OS[Over-sampling tail]:::sam
+  CLF[Classifier\n• LogisticRegression\n• LinearSVC\n• XGBoost / LightGBM]:::model
+
+  %% ================
+  %% EXPLICABILITÉ
+  %% ================
+  GC[[Grad-CAM (ResNet layer4)\n+ head_ft.pt (logits + classes)]]:::xp
+
+  %% FLOWS
+  A --> T1
+  A --> I
+  T9 --> FUSION
+  T8 --> FUSION
+  R50S --> FUSION
+  VITS --> FUSION
+  ISTATS --> FUSION
+  PIX --> FUSION
+  FUSION --> US --> OS --> CLF
+  R50 -.utilisé par .-> GC
+  GC -.visuels .-> OUT
+  CLF --> OUT[Prédictions, rapports CV,\nexport features SVD OOF]:::out
+
+  classDef src fill:#eef,stroke:#556;
+  classDef stat fill:#efe,stroke:#393;
+  classDef fusion fill:#ffd,stroke:#aa5;
+  classDef model fill:#fef,stroke:#a5a;
+  classDef sam fill:#eef9ff,stroke:#359;
+  classDef xp fill:#ffe6e6,stroke:#b55;
+  classDef opt fill:#fafafa,stroke:#bbb,stroke-dasharray: 4 3;
+  classDef out fill:#eee,stroke:#666;
+```
 
 ### Diagramme
 
