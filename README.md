@@ -181,7 +181,7 @@ end
   %% EXPLICABILITÉ
   %% ================
     subgraph X[Analyses & Explicabilité]
-    X1[Analyse des poids et impact]
+    X1[Analyse des poids et impact, matrices de confusions, score, diagnostics]
     X2[ACP 2D & Top confusions]
     X3[Grad-CAM ResNet]
   end
@@ -197,7 +197,7 @@ end
   FUSION --> US
   US --> OS
   OS --> CLF
-  CLF --> OUT[Scores CV & prédictions]
+  CLF --> OUT[Scores CV, joblib, OOF, & prédictions]
 
   %% ANALYSES HOOKS
   CLF -.-> X1
