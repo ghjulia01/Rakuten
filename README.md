@@ -90,6 +90,31 @@ Pipeline multimodale texte + image, **configuration centralisée via TOML**, ré
 **Vision**
 - **Grad-CAM** (ResNet `layer4`) : cartes de chaleur sur les zones discriminantes ; utile pour **contrôler** que le modèle regarde l’objet et pas l’arrière-plan.
 
+### 🔍 Analyses — Poids & impact des features (B2/B4)
+
+**Modèles linéaires (Linear SVC / LR OvR)**
+
+**But.** Comprendre *quoi* portent les modèles (texte, image CNN/ViT, pixels, stats d’image) et *comment* ces blocs contribuent **globalement** et **par classe**.  
+Les sorties (CSV + PNG) sont générées par `tools/diagnostics_acp_shap.py`. :contentReference[oaicite:1]{index=1}
+
+- **Global (macro)** : on agrège les **|coefficients|** par groupes (n-grammes mots / caractères) → vue des signaux les plus discriminants.
+- **Par classe (OvR)** : pour chaque classe, on **rank** les features par poids (positif = indicateur de la classe, négatif = anti-signal).
+- **Image → texte** : le **poids de branche** (`fusion.weights`) indique la **contribution relative**. En cas de classes visuellement distinctes (ex. “consoles/chaussures”), la branche image gagne du poids ; sur des classes proches sémantiquement, le texte domine.
+
+**Notions clés.**
+- **imp_abs** : importance moyenne \|x·w\| (contribution absolue) — pour classer les blocs. :contentReference[oaicite:2]{index=2}  
+- **imp_pos / imp_neg** : parts moyennes **positives**/**négatives** au score OvR. :contentReference[oaicite:3]{index=3}  
+- **imp_signed** : impact net moyen (positifs − négatifs). :contentReference[oaicite:4]{index=4}  
+- **Par classe (signé, magnitude)** : barres divergentes “+ / −” montrant, pour chaque classe, les blocs qui **aident** ou **desservent** la décision (échelle linéaire). :contentReference[oaicite:5]{index=5}
+
+**Dossiers de sortie.**
+- Figures : `results/figures/*.png`  
+- Tableurs : `results/reports/*.csv`  
+*(créés automatiquement si absents)*. :contentReference[oaicite:6]{index=6}
+
+---
+
+
 ---
 
 ```mermaid
@@ -103,7 +128,7 @@ flowchart TB
   %% TEXTE
   %% ================
   subgraph T[Texte]
-    T1[TextCleaner<br/>(stem, emojis, translate_map)] --> T2[TF-IDF word]
+    T1[TextCleaner(stem, emojis, translate_map)] --> T2[TF-IDF word]
     T3[[TF-IDF char (opt)]] --> T8
     T4[[TextStatistics / Pro (opt)]] --> T8
     T5[[HasDescription / TitleLength]] --> T8
@@ -142,7 +167,16 @@ flowchart TB
   %% ================
   %% EXPLICABILITÉ
   %% ================
-  GC[[Grad-CAM (ResNet layer4)\n+ head_ft.pt (logits + classes)]]:::xp
+    subgraph X[Analyses & Explicabilité]
+    X1[B2 — Global<br/>Importance par bloc]:::xp
+    X2[B2 — Par classe<br/>signé, magnitude]:::xp
+    X3[B4 — Global (coarse)<br/>Texte/CNN/Pixels/Stats]:::xp
+    X4[B4 — Global (fin)<br/>sous-blocs texte & stats]:::xp
+    X5[B4 — Par classe<br/>signé (parts %)]:::xp
+    X6[B4 — Par classe<br/>fidèle (texte rétro-projeté)]:::xp
+    X7[ACP 2D & Top confusions]:::xp
+    X8[Grad-CAM ResNet<br/>(layer4 + head_ft.pt)]:::xp
+  end
 
   %% FLOWS
   A --> T1
@@ -152,20 +186,28 @@ flowchart TB
   R50S --> FUSION
   VITS --> FUSION
   ISTATS --> FUSION
-  PIX --> FUSION
-  FUSION --> US --> OS --> CLF
-  R50 -.utilisé par .-> GC
-  GC -.visuels .-> OUT
-  CLF --> OUT[Prédictions, rapports CV,\nexport features SVD OOF]:::out
+  FUSION --> CLF
+
+  %% ANALYSES HOOKS
+  T8 -.-> X1
+  T8 -.-> X2
+  FUSION -.-> X3
+  FUSION -.-> X4
+  FUSION -.-> X5
+  FUSION -.-> X6
+  FUSION -.-> X7
+  R50 -.-> X8
+  CLF -.scores/coefs.-> X1
+  CLF -.scores/coefs.-> X2
+  CLF -.scores/coefs.-> X3
+  CLF -.scores/coefs.-> X4
+  CLF -.scores/coefs.-> X5
+  CLF -.scores/coefs.-> X6
 
   classDef src fill:#eef,stroke:#556;
-  classDef stat fill:#efe,stroke:#393;
   classDef fusion fill:#ffd,stroke:#aa5;
   classDef model fill:#fef,stroke:#a5a;
-  classDef sam fill:#eef9ff,stroke:#359;
   classDef xp fill:#ffe6e6,stroke:#b55;
-  classDef opt fill:#fafafa,stroke:#bbb,stroke-dasharray: 4 3;
-  classDef out fill:#eee,stroke:#666;
 ```
 
 ### Diagramme
