@@ -181,14 +181,9 @@ end
   %% EXPLICABILITÉ
   %% ================
     subgraph X[Analyses & Explicabilité]
-    X1[B2 — Global<br/>Importance par bloc]
-    X2[B2 — Par classe<br/>signé, magnitude]
-    X3[B4 — Global coarse<br/>Texte/CNN/Pixels/Stats]
-    X4[B4 — Global fin<br/>sous-blocs texte & stats]
-    X5[B4 — Par classe<br/>signé parts %]
-    X6[B4 — Par classe<br/>fidèle texte rétro-projeté]
-    X7[ACP 2D & Top confusions]
-    X8[Grad-CAM ResNet<br/>layer4 + head_ft.pt]
+    X1[Analyse<br/>Poids & impact des features (B2/B4)]
+    X2[ACP 2D & Top confusions]
+    X3[Grad-CAM ResNet<br/>layer4 + head_ft.pt]
   end
 
   %% FLOWS
@@ -206,20 +201,12 @@ end
   CLF --> OUT[Scores CV & prédictions]
 
   %% ANALYSES HOOKS
-  TU -.-> X1
-  TU -.-> X2
   FUSION -.-> X3
-  FUSION -.-> X4
-  FUSION -.-> X5
-  FUSION -.-> X6
-  FUSION -.-> X7
-  R50 -.-> X8
+  FUSION -.-> X1
+  FUSION -.-> X2
   CLF -.-> X1
   CLF -.-> X2
   CLF -.-> X3
-  CLF -.-> X4
-  CLF -.-> X5
-  CLF -.-> X6
 
   %% STYLES
   classDef phase fill:#e1f5fe,stroke:#0277bd
