@@ -3,12 +3,16 @@
 # Échantillon rapide (3k) pour ne pas exploser la RAM
 # le script à lancer: RAKUTEN_MAX_N=3000 python tools/peek_features.py
 # (ou 3000 pour un test très rapide)
+# Si nécéssaire, supprimer le cache sklearn:
+# Remove-Item -Recurse -Force "C:\Users\colle\Desktop\rakuten-logs\skcache"
+# Remove-Item Env:RAKUTEN_MAX_N -ErrorAction SilentlyContinue
 # Windows PowerShell
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model xgb
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model lgbm
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model lr
 # $env:RAKUTEN_MAX_N=3000; python tools/peek_features.py --try-model svc
+
 
 
 import os, sys, time
@@ -40,6 +44,10 @@ warnings.filterwarnings(
     message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
     category=UserWarning
 )
+import logging
+# Configurer les logs pour capturer les messages des pipelines (sklearn, PIL, torch ...)
+from main.train_model import setup_logging
+setup_logging(log_dir="C:/Users/colle/Desktop/rakuten-logs", level=logging.DEBUG)
 
 # ---------- utilitaires ----------
 TIMES = {}  # collecte des durées par étape
@@ -100,7 +108,7 @@ def main():
         rng = np.random.RandomState(0)
         idx = rng.choice(len(X), size=MAX_N, replace=False)
         X = X.iloc[idx].reset_index(drop=True)
-        y = y.iloc[idx]
+        y = y.iloc[idx].reset_index(drop=True)  
 
     need_cols = ["designation", "description", "productid", "imageid"]
     for c in need_cols:
@@ -164,8 +172,7 @@ def main():
         print(f"\n=== TEXTE → SVD({n_comp}){' + L2' if use_l2 else ''} ===")
         X_text = TruncatedSVD(n_components=n_comp, random_state=rs).fit_transform(X_text)
         if use_l2:
-            from sklearn.preprocessing import Normalizer
-        X_text = Normalizer(copy=False).fit_transform(X_text)
+            X_text = Normalizer(copy=False).fit_transform(X_text)
         # re-CSR pour l’estimation hstack
         from scipy import sparse as sp
         X_text = sp.csr_matrix(X_text)
@@ -287,9 +294,19 @@ def main():
     )
 
     # 2) Choisir le modèle
+
+    # d'abord décider du modèle (CLI > TOML > défaut)
+    if not args.try_model:
+        try:
+            name = cfg["model"]["name"].strip().lower()
+            args.try_model = name if name in {"lr","svc","xgb","lgbm"} else "svc"
+        except Exception:
+            args.try_model = "svc"
+
+    # puis instancier en fonction du choix
     if args.try_model == "lr":
         from sklearn.linear_model import LogisticRegression
-        model = LogisticRegression(max_iter=1000)  # multi_class="auto"
+        model = LogisticRegression(max_iter=1000)
     elif args.try_model == "svc":
         from sklearn.svm import LinearSVC
         from sklearn.multiclass import OneVsRestClassifier
@@ -305,20 +322,13 @@ def main():
         )
     else:  # lgbm
         from lightgbm import LGBMClassifier
-    model = LGBMClassifier(
-        n_estimators=400,
-        learning_rate=0.2,
-        num_leaves=127,           # ↑ plus de liberté de split
-        min_child_samples=10,     # ↓ autorise des feuilles plus petites
-        feature_fraction=0.8,     # sous-échantillonnage de colonnes
-        bagging_fraction=0.9,     # sous-échantillonnage de lignes
-        bagging_freq=1,
-        colsample_bytree=0.8,     # redondant si feature_fraction, ok
-        objective="multiclass",
-        force_row_wise=True,      # mieux pour CSR
-        verbosity=-1              # coupe le spam de logs
-    )
-
+        model = LGBMClassifier(
+            n_estimators=400, learning_rate=0.2, num_leaves=127,
+            min_child_samples=10, feature_fraction=0.8, bagging_fraction=0.9,
+            bagging_freq=1, colsample_bytree=0.8, objective="multiclass",
+            force_row_wise=True, verbosity=-1
+        )
+    print(f"Modèle choisi: {model.__class__.__name__}")
     # 3) Fit + score
     model.fit(Xtr, ytr)
     yhat = model.predict(Xva)
@@ -326,6 +336,8 @@ def main():
 
     print("\n=== TRY-MODEL ===")
     print(f"Model: {model.__class__.__name__} | f1_macro={f1m:.4f}")
+
+    short = {}
 
     # 4) Afficher quelques hyperparamètres clés
     getp = getattr(model, "get_params", None)

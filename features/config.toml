@@ -128,18 +128,20 @@ random_state = 42
 # ---- SECTION CNN ---- Mettre true pour activer CNN et false pour le désactiver
 [images.cnn]
 enabled = true
-arch = "resnet50"       # "resnet18" | "resnet50" | "resnet101"
-batch_size = 12         # pour Resnet 16 , je teste avec12 pour Vit
-device = "auto"         # "auto" | "cpu" | "cuda"
-use_imagenet_norm = true
-fallback_zero = true
+arch = "resnet50"               # "resnet18" | "resnet50" | "resnet101"
+batch_size = 12                 # pour Resnet 16 , je teste avec12 pour Vit
+device = "cpu"                  # "auto" | "cpu" | "cuda" | "dml" si sur amd
+use_imagenet_norm = true        # applique la normalisation standard des poids ImageNet si on mets False Si tu mets false, alors c’est un prétraitement plus basique (resize + crop + ToTensor), avec des valeurs directement dans [images] size=[224,224].
+fallback_zero = true            # si une image est manquante, on renvoie un vecteur nul plutôt qu’une erreur.
 dtype = "float32"
-num_workers = 4
+num_workers = 4                 # parallélisme pour charger les images plus vite (multi-threads en lecture disque).
 # Ajouts pour la tête et la Grad-CAM Mais attention il faut désactiver images.cnn_vit et enlever son poid
-finetune_epochs = 2          # ≥1 pour apprendre/enregistrer la tête
-trainable_last_n = 1         # déclenche l’unfreeze; pour ResNet on unfreeze layer4
+finetune_epochs = 2             # ≥1 pour apprendre/enregistrer la tête,  nombre d’époques utilisées pour faire un mini fine-tuning supervisé (sur un sous-échantillon, limité par finetune_max_n).         
+trainable_last_n = 1            # déclenche l’unfreeze; pour ResNet on unfreeze layer4
 save_head_path = "artifacts/head_ft.pt"
 save_head_normalize = true
+foreach= true                  # foreach=True mais ne fonctionne pas en dml pour ordi amd  
+use_lr_finder = false  
 
 [images.cnn.dim_reduction]
 enabled = true   
@@ -153,16 +155,18 @@ random_state = 42
 enabled = true
 # HuggingFace (optionnel, alternative à arch=...)
 hf_model_name = "google/vit-base-patch16-224"
-hf_feature_dim = 768
+hf_feature_dim = 768        # dimension de sortie des embeddings ViT-base (standard Hugging Face pour vit-base-patch16)
 hf_revision   = "main"
 batch_size = 12
-device = "auto"
-finetune_epochs = 1              # commencer par 1 (rapide), puis 2-3 si utile
-trainable_last_n = 1          # interrupteur FT nb de paramètres à "défiger" (ex: 5000 à 20000) # ignoré par la branche HF du patch ci-dessus
-trainable_last_layers = 2     # ← nb de blocs Transformer à unfreeze (peut tester 2)
-finetune_lr = 0.0003
-finetune_weight_decay = 0.01
-finetune_max_n = 6000           # limite l'échantillon pour rester rapide
+device = "cpu"                  # "auto" | "cpu" | "cuda" | "dml" si sur amd
+finetune_epochs = 1             # commencer par 1 (rapide), puis 2-3 si utile
+trainable_last_n = 1            # interrupteur FT nb de paramètres à "défiger" (ex: 5000 à 20000) # ignoré par la branche HFignoré si ResNet est activé
+trainable_last_layers = 2       # ← nb de blocs Transformer à unfreeze (peut tester 2)
+finetune_lr = 0.0005            # learning rate du fine-tuning
+finetune_weight_decay = 0.01    # régularisation L2 appliquée aux poids
+finetune_max_n = 6000          # on limite l’échantillon utilisé pour le fine-tuning (utile pour garder un temps de calcul raisonnable)
+foreach= true                   #   
+use_lr_finder = false                  
 
 [images.cnn_vit.dim_reduction]
 enabled = true
@@ -174,7 +178,7 @@ n_components = 256
 text  = 2.2
 image_pixels = 0                        # mettre 0 si image_cnn
 image_cnn = 1
-image_cnn_vit = 1           # ViT
+image_cnn_vit = 1.2           # ViT
 image_stats_combined = 0             # branche stats images
 
 # --- Statistiques des images ---
@@ -222,9 +226,11 @@ tail_min    = 500
 # Choisir le modèle final (dev: LR avec saga) ; 
 # Choisir LR (saga) ou LinearSVC selon les meilleurs scores CV
 # NE PAS combiner class_weight et samplers
+[data]
+n_classes = 27
 
 [model]
-name = "svc"           # "lr" (LogisticRegression) ,"svc" (LinearSVC),"xgb" , "lgbm"
+name = "lgbm"           # "lr" (LogisticRegression) ,"svc" (LinearSVC),"xgb" , "lgbm"
 use_class_weight = false  # si true, class_weight="balanced"
 # Pondération auto des classes
 # true  = appliquer class_weight="balanced"
@@ -265,9 +271,9 @@ C = 1.0
 loss = "squared_hinge"
 dual = false
 penalty = "l2"
-max_iter = 3000
-tol      = 0.001
-verbose  = 0   
+max_iter = 4000
+tol      = 0.0005
+verbose  = 1   
 
 [model.xgb]
 n_estimators = 700
@@ -280,21 +286,29 @@ reg_lambda = 1.0
 tree_method = "hist"        # "hist" (CPU rapide), "gpu_hist" si GPU
 
 [model.lgbm]
-n_estimators = 1000
+# capacité / vitesse
+n_estimators = 1200
 learning_rate = 0.05
-num_leaves = 63
+num_leaves = 255
 max_depth = -1
-subsample = 0.9             # (= bagging_fraction)
-colsample_bytree = 0.8      # (= feature_fraction)
-reg_alpha = 0.0
-reg_lambda = 0.0
-min_child_samples = 10
+
+# échantillonnage par arbre (noms LightGBM)
 feature_fraction = 0.8
-bagging_fraction = 0.9
+bagging_fraction = 0.8
 bagging_freq = 1
+
+# régularisation & splits
+min_child_samples = 40
+reg_alpha  = 0.0
+reg_lambda = 1.0
+min_split_gain = 0.0
+min_sum_hessian_in_leaf = 0.001
 max_bin = 511
+
+# pratique pour CSR + logs
 force_row_wise = true
 verbosity = -1
+
 
 # Paramètres pour la génération de fréquences et translate_map
 [text.vocab_build]

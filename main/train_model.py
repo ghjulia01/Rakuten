@@ -113,7 +113,7 @@ class TqdmLoggingHandler(logging.StreamHandler):
             super().emit(record)
 
 @profile_func
-def setup_logging(log_dir: str = "results/logs", level=logging.INFO):
+def setup_logging(log_dir: str = "results/logs", level=logging.DEBUG):
     log_dir = os.path.expanduser(os.path.expandvars(log_dir))
     os.makedirs(log_dir, exist_ok=True)
 
@@ -144,7 +144,14 @@ def setup_logging(log_dir: str = "results/logs", level=logging.INFO):
     logging.basicConfig(level=level, handlers=[train_fh, console_h], force=True)
 
     # Attacher un fichier dédié aux loggers image
-    for name in ["models.image_pipeline", "features.image_loader", "features.image_stats"]:
+    for name in ["models.image_pipeline", 
+                 "features.image_loader", 
+                 "features.image_stats",
+                 "models.cnn_features",
+                 "models.image_cnn",
+                 "models.vit_features",
+                 "features.image_cnn",
+                 "features.image_vit",]:
         lg = logging.getLogger(name)
         lg.setLevel(level)
         lg.addHandler(img_fh)     # écrira dans image_processing.log
@@ -322,7 +329,25 @@ class LabelEncodingClassifier(BaseEstimator, ClassifierMixin):
     def fit(self, X, y):
         self.le_ = LabelEncoder()
         y_enc = self.le_.fit_transform(y)
+        K = int(len(self.le_.classes_))  # nombre de classes observées
+
+        # Cloner le modèle sous-jacent
         self.est_ = clone(self.base_estimator)
+
+        # Injecter num_class si le modèle le supporte (XGB / LGBM) et si multiclass
+        try:
+            if K > 2 and hasattr(self.est_, "get_params") and hasattr(self.est_, "set_params"):
+                params = self.est_.get_params()
+                # LightGBM / XGBoost exposent 'num_class' dans leurs params sklearn
+                if "num_class" in params:
+                    self.est_.set_params(num_class=K)
+                # Garde-fou XGB : s'assurer d'un objectif multiclass proba
+                if self.est_.__class__.__name__ == "XGBClassifier":
+                    if params.get("objective", None) not in ("multi:softprob", "multi:softmax"):
+                        self.est_.set_params(objective="multi:softprob")
+        except Exception:
+            pass
+
         self.est_.fit(X, y_enc)
         return self
 
@@ -398,9 +423,7 @@ def build_classifier(cfg: dict, seed: int):
             # échantillonnage
             feature_fraction=float(sub.get("feature_fraction", model_cfg.get("feature_fraction", 0.8))),   # alias de colsample
             bagging_fraction=float(sub.get("bagging_fraction", model_cfg.get("bagging_fraction", 0.9))),   # alias de subsample
-            bagging_freq=int(sub.get("bagging_freq", model_cfg.get("bagging_freq", 1))),
-            colsample_bytree=float(sub.get("colsample_bytree", model_cfg.get("colsample_bytree", 0.8))),   
-            subsample=float(sub.get("subsample", model_cfg.get("subsample", 0.9))),                        
+            bagging_freq=int(sub.get("bagging_freq", model_cfg.get("bagging_freq", 1))),                       
             # contraintes de split
             min_child_samples=int(sub.get("min_child_samples", model_cfg.get("min_child_samples", 10))),   
             min_split_gain=float(sub.get("min_split_gain", model_cfg.get("min_split_gain", 0.0))),
@@ -733,6 +756,15 @@ def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="resu
                 model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
                 y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
                 
+                # Enregistrement du modèle dans le cas de ResNet
+                use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
+                if use_cnn:
+                    features_step = model.named_steps["features"]
+                    resnet_model = features_step.named_transformers.image_cnn.named_steps["cnn"]
+
+                    model_path = os.path.join(outdir, f"model_resnet_{kind}_fold_{fold_idx}.pth")
+                    resnet_model.save_model(model_path)
+
                 run_meta["cv_fold_sizes"] = fold_sizes
 
             # ----- Export des features transformées du split de validation -----
@@ -1435,9 +1467,9 @@ def _short_estimator_name_and_params(final_estimator) -> tuple[str, dict]:
         getp = getattr(est, "get_params", None)
 
         if "XGBClassifier" in name:
-            keys = ["n_estimators","learning_rate","max_depth","subsample","colsample_bytree","reg_alpha","reg_lambda","tree_method"]
+            keys = ["n_estimators","learning_rate","max_depth","subsample","colsample_bytree","reg_alpha","reg_lambda","tree_method","num_class"]
         elif "LGBMClassifier" in name:
-            keys = ["n_estimators","learning_rate","num_leaves","max_depth","subsample","colsample_bytree","reg_alpha","reg_lambda"]
+            keys = ["n_estimators","learning_rate","num_leaves","max_depth","bagging_fraction","feature_fraction","reg_alpha","reg_lambda","num_class"]
         elif "LinearSVC" in name:
             keys = ["C","loss","dual","penalty","max_iter","tol"]
         elif "LogisticRegression" in name:
@@ -1459,6 +1491,9 @@ def main():
     # Lire les arguments et la configuration
     args = parse_args()
     cfg = load_config(args.config) # Charger le TOML
+    log_dir = cfg.get("outputs", {}).get("log_dir", "results/logs")
+    setup_logging(log_dir=log_dir, level=logging.DEBUG)
+    logging.getLogger(__name__).info("Config logs -> %s", os.path.abspath(log_dir))
     validate_config(cfg)
     # Si --model est fourni, écraser le nom du modèle de la config
     if args.model:

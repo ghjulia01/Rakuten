@@ -7,10 +7,11 @@ Streamlit – Rakuten Multimodal Dashboard
 - Ajoute des caches pour accélérer le rechargement
 - Ajoute un wordcloud optionnel (si le package est installé)
 - Corrige quelques bugs mineurs
+ python -m streamlit run streamlit_app/config.py
 """
 
 from __future__ import annotations
-
+import glob 
 import os
 import json
 import random
@@ -25,6 +26,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from PIL import Image
+import streamlit.components.v1 as components
 
 # ----------------------------
 # Constantes démo
@@ -32,6 +34,9 @@ from PIL import Image
 APP_DIR = Path(__file__).resolve().parent
 IMAGES_BASE_DIR = (APP_DIR / "demo_images").resolve()  # dossier d'images démo
 DEMO_CSV = IMAGES_BASE_DIR / "demo_images.csv"         # CSV de démo
+RESULTS_DIR = Path("results")
+FIG_DIR = RESULTS_DIR / "figures"
+REP_DIR = RESULTS_DIR / "reports"
 
 # Mapping des labels en dur (exemple basé sur votre projet)
 LABEL_MAP: dict[str, str] = {
@@ -131,17 +136,50 @@ def resolve_image_path(p: str, base_dir: str | Path) -> Optional[str]:
             return str(p1)
     return None
 
+# --- Mermaid (diagrammes) ---
+def render_mermaid(mermaid_text: str, height: int = 700, theme: str = "neutral"):
+    import json as _json
+    code = _json.dumps(mermaid_text)  # protège les caractères spéciaux
+    components.html(
+        f"""
+        <div id="mmd" style="height:{height}px; overflow:auto;"></div>
+        <script type="module">
+          import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+          mermaid.initialize({{
+            startOnLoad: false,
+            securityLevel: 'loose',
+            theme: '{theme}',
+            flowchart: {{ htmlLabels: true, curve: 'basis' }}
+          }});
+          const code = {code};
+          mermaid.render('graphDiv', code).then(({svg}) => {{
+            document.getElementById('mmd').innerHTML = svg;
+          }}).catch(e => {{
+            document.getElementById('mmd').innerHTML = '<pre style="color:#b91c1c">Mermaid error: ' + e.message + '</pre>';
+          }});
+        </script>
+        """,
+        height=height,
+    )
 # ----------------------------
 # Sidebar – Data & Config
 # ----------------------------
 st.set_page_config(page_title="Rakuten Multimodal Dashboard", layout="wide")
 st.title("Rakuten – Dashboard Multimodal")
 
-st.sidebar.header("Données")
-up = st.sidebar.file_uploader("CSV des données (optionnel)", type=["csv"], accept_multiple_files=False)
-path_hint = st.sidebar.text_input("…ou chemin vers un CSV local", value="")
 
-df = load_csv(up if up is not None else (path_hint if path_hint else None))
+st.sidebar.header("Données")
+
+# -> chemin par défaut notebooks/df.csv s'il existe
+DEFAULT_DF = Path("notebooks/df.csv")
+default_path_str = str(DEFAULT_DF) if DEFAULT_DF.exists() else ""
+
+up = st.sidebar.file_uploader("CSV des données (optionnel)", type=["csv"], accept_multiple_files=False)
+path_hint = st.sidebar.text_input("…ou chemin vers un CSV local", value=default_path_str)
+
+# priorité : upload > chemin saisi > notebooks/df.csv > démo
+source = up if up is not None else (path_hint if path_hint else (DEFAULT_DF if DEFAULT_DF.exists() else None))
+df = load_csv(source)
 if df.empty and DEMO_CSV.exists():
     df = pd.read_csv(DEMO_CSV)
     st.sidebar.success("Dataset démo chargé : streamlit_app/demo_images/demo_images.csv")
@@ -180,15 +218,82 @@ n_show = st.sidebar.slider("Lignes à afficher", 0, 50, 10)
 # ----------------------------
 # Onglets
 # ----------------------------
-expl_tab, meth_tab, sim_tab = st.tabs(["Exploration", "Méthode", "Simulation"])
+expl_tab, meth_tab, diag_tab, sim_tab = st.tabs(["Exploration", "Méthode","Diagnostics modèle", "Simulation"])
 
 # ----------------------------
 # Tab 1 – Exploration
 # ----------------------------
 with expl_tab:
     if not df.empty:
-        st.subheader("Aperçu du dataset")
-        st.dataframe(df.head(n_show), width='stretch')
+        # === Aperçu structuré des entrées/sorties (1 large + 2 compacts) ===
+        st.subheader("Jeu d'entraînement — aperçu des entrées / sorties")
+
+        def _short_text(series, n=160):
+            return (
+                series.fillna("")
+                .astype(str)
+                .str.replace(r"\s+", " ", regex=True)
+                .str.slice(0, n)
+            )
+
+        # helper pour cacher l'index même si la version de Streamlit ne supporte pas hide_index
+        def _show_table(df_, hide_index=False):
+            try:
+                st.dataframe(df_, use_container_width=True, hide_index=hide_index)
+            except TypeError:
+                # compat: vieilles versions de Streamlit n'ont pas hide_index
+                st.dataframe(df_.reset_index(drop=True) if hide_index else df_, use_container_width=True)
+
+        # colonnes dispo
+        has = set(df.columns)
+
+        # ► mise en page : gros tableau 1 (≈70%) + deux petits (≈15% + 15%)
+        col_big, col_small = st.columns([7, 3])  # ajuste à 8/3 si tu veux encore plus large
+
+        # ------------------ Tableau 1 (large) ------------------
+        with col_big:
+            c1 = st.container()
+            with c1:
+                st.markdown("**Données d'entrée X_train (produits)**")
+                wanted = ["designation", "description", "productid", "imageid"]
+                cols_1 = [c for c in wanted if c in has]
+                if cols_1:
+                    df1 = df[cols_1].head(n_show).copy()
+                    for tc in ("designation", "description"):
+                        if tc in df1.columns:
+                            df1[tc] = _short_text(df1[tc])
+                    # on laisse l'INDEX visible ici pour numéroter les produits
+                    _show_table(df1, hide_index=False)
+                else:
+                    st.info("Colonnes attendues manquantes : designation, description, productid, imageid.")
+
+        # ------------------ Tableaux 2 & 3 (compacts) ------------------
+        with col_small:
+            c2, c3 = st.columns([1, 1])
+
+            # [3] Labellisation des images produits — uniquement image_name, SANS index
+            with c2:
+                st.markdown("**Labellisation des images**")
+                if "image_name" in has:
+                    df2 = df[["image_name"]].dropna().head(n_show)
+                    _show_table(df2, hide_index=True)
+                elif "image_rel" in has:
+                    from pathlib import Path
+                    tmp = df["image_rel"].dropna().astype(str).map(lambda p: Path(p).name)
+                    df2 = pd.DataFrame({"image_name": tmp}).head(n_show)
+                    _show_table(df2, hide_index=True)
+                    st.caption("Info : 'image_name' manquant, dérivé depuis 'image_rel'.")
+                else:
+                    st.info("Colonne 'image_name' absente.")
+
+            # [2] Y_train — cible (27 catégories) — uniquement prdtypecode, SANS index
+            with c3:
+                st.markdown("**Données cibles Y_train**")
+                if "prdtypecode" in has:
+                    df3 = df[["prdtypecode"]].head(n_show)
+                    _show_table(df3, hide_index=True)
+                else:
+                    st.info("Colonne 'prdtypecode' absente.")
 
         # Valeurs manquantes
         st.markdown(
@@ -372,6 +477,54 @@ def show_b2_walkthrough():
     import math
     from sklearn.metrics import f1_score, confusion_matrix
     import plotly.express as px
+    # Architexture
+
+    st.subheader("Architecture du pipeline (Mermaid)")
+    merm = r"""
+    flowchart TB
+    subgraph T[Texte]
+        C[Combine designation + description]
+        C --> TWC[TextCleaner] --> TWW[TF-IDF word]
+        C --> TCC[TextCleaner no stem] --> TCW[TF-IDF char_wb]
+        C --> TS[TextStats/Pro]
+        C --> TL[Language]
+        C --> TX[Lexicon chi^2]
+        TWW --> TU[Union texte]
+        TCW --> TU
+        TS  --> TU
+        TL  --> TU
+        TX  --> TU
+        TU --> TSV[TruncatedSVD]
+    end
+
+    subgraph I[Images]
+        R50[ResNet embeddings] --> R50S[SVD + L2]
+        VIT[ViT embeddings]   --> VITS[SVD + L2]
+        ISTATS[ImageStatsCombined]
+        PIX[Pixels -> PCA/SVD]
+    end
+
+    FUSION[FeatureUnion multimodale<br/>text + image_cnn + pixels + stats]
+    US[Under-sampling] --> OS[Over-sampling] --> CLF[Classifier (LR/SVC/LGBM)]
+    X1[Diagnostics poids/confusions]:::xp
+    X2[ACP 2D]:::xp
+    X3[Grad-CAM]:::xp
+
+    TSV --> FUSION
+    R50S --> FUSION
+    VITS --> FUSION
+    ISTATS --> FUSION
+    PIX --> FUSION
+    FUSION --> US --> OS --> CLF --> OUT[Scores/Joblib/OOF]
+
+    CLF -.-> X1
+    CLF -.-> X2
+    R50 -.-> X3
+
+    classDef xp fill:#ffebee,stroke:#d32f2f;
+    """
+    render_mermaid(merm, height=900, theme="neutral")
+    # st.code(merm, language="mermaid")  # pour voir la string brute si besoin
 
     # 1) Définition des étapes (tu peux ajuster les bullets)
     steps = [
@@ -786,6 +939,134 @@ with meth_tab:
     }
     """
     st.graphviz_chart(dot, width='stretch')
+# ----------------------------
+# Tab – Diagnostics modèle (nouveaux graphiques/CSV générés par diagnostics_acp_shap.py)
+# ----------------------------
+with diag_tab:
+    st.subheader("Diagnostics modèle (fichiers dans results/)")
+    st.caption("Affiche les sorties générées par tools/diagnostics_acp_shap.py – B4 fidèle (texte rétro-projeté), B4 fin, B2 magnitude, ACP & confusions.")
+
+    # --- B4 fidèle : par classe (texte rétro-projeté) ---
+    st.divider()
+    st.markdown("### B4 — Par classe (fidèle, texte rétro-projeté)")
+    csv_paths = sorted(glob.glob(str(REP_DIR / "block_importance_b4_backproj_text_*.csv")))
+    if not csv_paths:
+        st.info("Aucun CSV trouvé dans results/reports/block_importance_b4_backproj_text_*.csv. Lance d'abord le script diagnostics avec l'option backproj.")
+    else:
+        # extraire l'ID de classe depuis le nom de fichier
+        def _cls_from_path(p: str) -> str:
+            name = Path(p).stem
+            pref = "block_importance_b4_backproj_text_"
+            return name[len(pref):] if name.startswith(pref) else name
+
+        class_ids = [_cls_from_path(p) for p in csv_paths]
+        # Affichage lisible via LABEL_MAP si possible
+        def _nice(c: str) -> str:
+            return LABEL_MAP.get(str(c), LABEL_MAP.get(int(c), str(c))) if (c.isdigit() or c in LABEL_MAP) else c
+
+        options = sorted({_nice(c): c for c in class_ids}.items(), key=lambda x: x[0])
+        disp_labels = [k for k, _ in options]
+        mapping = {k: v for k, v in options}
+
+        sel_disp = st.selectbox("Classe à afficher", disp_labels, key="diag_cls_sel")
+        cls_id = mapping[sel_disp]
+
+        csv_path = REP_DIR / f"block_importance_b4_backproj_text_{cls_id}.csv"
+        fig_path = FIG_DIR / f"block_importance_b4_per_class_signed_mag_backproj_text_{cls_id}.png"
+
+        colA, colB = st.columns([1, 1])
+        with colA:
+            if csv_path.exists():
+                st.markdown("**Contributions par blocs (magnitude signée)**")
+                try:
+                    dfc = pd.read_csv(csv_path)
+                    st.dataframe(dfc)
+                except Exception as e:
+                    st.warning(f"Lecture CSV impossible: {e}")
+                st.download_button("Télécharger CSV", data=csv_path.read_bytes(), file_name=csv_path.name, mime="text/csv", key=f"dl_csv_{cls_id}")
+            else:
+                st.info("CSV de la classe introuvable.")
+        with colB:
+            if fig_path.exists():
+                st.markdown("**Figure par classe**")
+                st.image(str(fig_path))
+            else:
+                st.info("Figure par classe introuvable.")
+
+        # Vue moyenne (facultative)
+        mean_csv = REP_DIR / "block_importance_b4_per_class_signed_mag_backproj_text_summary.csv"
+        mean_fig = FIG_DIR / "block_importance_b4_per_class_signed_mag_backproj_text_mean.png"
+        st.markdown("#### Moyenne sur toutes les classes")
+        colM1, colM2 = st.columns([1,1])
+        with colM1:
+            if mean_csv.exists():
+                try:
+                    dfm = pd.read_csv(mean_csv)
+                    st.dataframe(dfm)
+                    st.download_button("Télécharger CSV de synthèse", mean_csv.read_bytes(), mean_csv.name, mime="text/csv", key="dl_csv_mean")
+                except Exception as e:
+                    st.warning(f"Lecture CSV impossible: {e}")
+            else:
+                st.info("CSV de synthèse introuvable.")
+        with colM2:
+            if mean_fig.exists():
+                st.image(str(mean_fig))
+
+    # --- B4 global : découpage fin ---
+    st.divider()
+    st.markdown("### B4 — Global (découpage fin)")
+    fig_b4_fine = FIG_DIR / "block_importance_b4_fine.png"
+    if fig_b4_fine.exists():
+        st.image(str(fig_b4_fine))
+    else:
+        st.info("Figure non trouvée : results/figures/block_importance_b4_fine.png")
+
+    # --- B2 par classe : magnitude signée ---
+    st.divider()
+    st.markdown("### B2 — Par classe (magnitude signée)")
+    fig_b2 = FIG_DIR / "block_importance_b2_per_class_signed_mag.png"
+    pos_b2 = REP_DIR / "block_importance_b2_per_class_pos_mag.csv"
+    neg_b2 = REP_DIR / "block_importance_b2_per_class_neg_mag.csv"
+    cols_b2 = st.columns([1,1])
+    with cols_b2[0]:
+        if pos_b2.exists():
+            try:
+                st.markdown("**Contributions positives (+)**")
+                st.dataframe(pd.read_csv(pos_b2))
+                st.download_button("Télécharger CSV (+)", pos_b2.read_bytes(), pos_b2.name, key="dl_pos_b2")
+            except Exception as e:
+                st.warning(f"Lecture CSV + impossible: {e}")
+        if neg_b2.exists():
+            try:
+                st.markdown("**Contributions négatives (−)**")
+                st.dataframe(pd.read_csv(neg_b2))
+                st.download_button("Télécharger CSV (−)", neg_b2.read_bytes(), neg_b2.name, key="dl_neg_b2")
+            except Exception as e:
+                st.warning(f"Lecture CSV − impossible: {e}")
+    with cols_b2[1]:
+        if fig_b2.exists():
+            st.image(str(fig_b2))
+        else:
+            st.info("Figure non trouvée : results/figures/block_importance_b2_per_class_signed_mag.png")
+
+    # --- ACP & Confusions ---
+    st.divider()
+    st.markdown("### ACP & Confusions")
+    acp1 = FIG_DIR / "acp_b4_2d.png"
+    acp2 = FIG_DIR / "acp_b4_ok_error.png"
+    cols_acp = st.columns([1,1])
+    with cols_acp[0]:
+        if acp1.exists(): st.image(str(acp1))
+    with cols_acp[1]:
+        if acp2.exists(): st.image(str(acp2))
+    conf_csv = REP_DIR / "top_confusions_b4.csv"
+    if conf_csv.exists():
+        try:
+            st.markdown("**Top confusions (CSV)**")
+            st.dataframe(pd.read_csv(conf_csv))
+            st.download_button("Télécharger confusions", conf_csv.read_bytes(), conf_csv.name, key="dl_conf")
+        except Exception as e:
+            st.warning(f"Lecture confusions impossible: {e}")
 
 # ----------------------------
 # Tab 3 – Simulation (démo sans modèle)
