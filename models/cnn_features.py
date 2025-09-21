@@ -32,7 +32,7 @@ from torchvision.models import (
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Profiling décorateur (optionnel dans ton projet)
+# Profiling décorateur
 from main.profiling_tools import profile_func
 
 # Hugging Face

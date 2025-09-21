@@ -92,7 +92,7 @@ def main():
     fusion_w = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
     want_pixels = not (fusion_w.get("image_pixels", None) == 0)
     want_cnn    = not (fusion_w.get("image_cnn", None) == 0)
-    want_vit    = not (fusion_w.get("image_cnn_vit", None) == 0)   # NEW
+    want_vit    = not (fusion_w.get("image_cnn_vit", None) == 0)   
     want_stats  = not (fusion_w.get("image_stats_combined", None) == 0)
     print(f"Config: {CFG_PATH} | seed={seed} | max_n={MAX_N} | pixels={want_pixels} | cnn={want_cnn} | vit={want_vit} | stats={want_stats}")
     parser = argparse.ArgumentParser()
@@ -267,7 +267,7 @@ def main():
     present_branches = ["text"]
     if X_pix is not None:   present_branches.append("image_pixels")
     if X_cnn is not None:   present_branches.append("image_cnn")
-    if X_vit is not None:   present_branches.append("image_cnn_vit")  # NEW
+    if X_vit is not None:   present_branches.append("image_cnn_vit")  
     if X_stats is not None: present_branches.append("image_stats_combined")
 
 
@@ -284,7 +284,7 @@ def main():
     dim_text  = ncols(X_text)
     dim_pix   = ncols(X_pix)
     dim_cnn   = ncols(X_cnn)
-    dim_vit   = ncols(X_vit)                                 # NEW
+    dim_vit   = ncols(X_vit)                                 
     dim_stats = ncols(X_stats)
     dim_total = dim_text + dim_pix + dim_cnn + dim_vit + dim_stats
     def ncols(arr): return arr.shape[1] if arr is not None else 0
