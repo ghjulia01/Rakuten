@@ -377,7 +377,17 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
             logger.warning("[ViT] Préchargement échoué (%s). Le featurizer tentera quand même le chargement.", e)
         transformers.append(("image_cnn_vit", create_cnn_branch_from_cfg(images_cfg, "cnn_vit", apply_l2=not is_tree_model)))
 
-    union = FeatureUnion(transformer_list=transformers, transformer_weights=fusion_w or None)
+    # Ne garder que les poids des transformeurs effectivement présents
+    present = [name for name, _ in transformers]
+    tw = {}
+    for k, v in (fusion_w or {}).items():
+        if k in present:
+            tw[k] = float(v)
+        else:
+            # log informatif si un poids est fourni pour une branche absente
+            logger.warning("[fusion] Poids fourni pour '%s' mais branche absente → ignoré.", k)
+
+    union = FeatureUnion(transformer_list=transformers, transformer_weights=(tw or None))
     features = SkPipeline([("union", union)])
 
     under = AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)
@@ -742,6 +752,38 @@ def main():
     y_train = pd.read_csv(cfg["paths"]["y_train_csv"]).iloc[:, 0]
     X_test  = pd.read_csv(cfg["paths"]["x_test_csv"])
 
+    # --- Sanity checks & auto-fix target / stray columns ---
+    TARGET_COL = (cfg.get("data", {}) or {}).get("target", "prdtypecode")
+
+    # 1) Si la cible est manifestement un index (ex: 'Unnamed: 0') ou unique par ligne,
+    #    on essaie de la récupérer proprement.
+    if (getattr(y_train, "name", None) is None
+        or str(y_train.name).lower().startswith("unnamed")
+        or y_train.nunique(dropna=False) == len(y_train)):
+
+        # a) Si la cible est dans X_train, on la sort de X -> y
+        if TARGET_COL in X_train.columns:
+            y_train = X_train.pop(TARGET_COL).astype(int)
+            logger.warning("[data] Cible récupérée depuis X_train['%s'] (l'ancienne y était invalide).", TARGET_COL)
+        else:
+            # b) Sinon on relit le CSV y_train en entier et on prend la bonne colonne si elle existe
+            y_df = pd.read_csv(cfg["paths"]["y_train_csv"])
+            if TARGET_COL in y_df.columns:
+                y_train = y_df[TARGET_COL].astype(int)
+                logger.warning("[data] Cible relue depuis y_train.csv['%s'] (l'ancienne y était invalide).", TARGET_COL)
+            else:
+                raise ValueError(f"[data] Target column '{TARGET_COL}' introuvable dans X_train et y_train.csv")
+
+    # 2) On supprime d'éventuelles colonnes d'index oubliées dans X (ex: 'Unnamed: 0')
+    drop_unnamed = [c for c in X_train.columns if c.lower().startswith("unnamed")]
+    if drop_unnamed:
+        X_train = X_train.drop(columns=drop_unnamed)
+        logger.info("[data] Colonnes parasites supprimées dans X_train: %s", drop_unnamed)
+
+    # 3) Petit diagnostic pour confirmer
+    vc = y_train.value_counts()
+    logger.info("[data] Target '%s' → %d classes | min_count=%d | max_count=%d",
+                y_train.name, vc.size, int(vc.min()), int(vc.max()))
     # CV (score + OOF)
     f1m, _ = run_baseline_and_report(args.baseline, X_train, y_train, cfg, outdir="results")
 
