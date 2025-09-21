@@ -115,22 +115,28 @@ def setup_hf_env(cfg: dict) -> None:
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 def ensure_vit_available(model_name: str = "google/vit-base-patch16-224", revision: str = "main") -> None:
-    """Tente de télécharger le modèle ViT & processor (une fois), sinon bascule offline."""
+    """Tente de télécharger le processor + modèle ViT (une fois), sinon offline."""
     try:
         import transformers as tfm
-        _ = tfm.AutoImageProcessor.from_pretrained(model_name, revision=revision, local_files_only=False)
-        _ = tfm.ViTModel.from_pretrained(model_name, revision=revision, local_files_only=False)
+        cfg = tfm.AutoConfig.from_pretrained(model_name, revision=revision, local_files_only=False)
+        if getattr(cfg, "model_type", None) == "vit":
+            cfg.add_pooling_layer = False
+        _ = tfm.AutoImageProcessor.from_pretrained(
+            model_name, revision=revision, use_fast=True, local_files_only=False
+        )
+        _ = tfm.AutoModel.from_pretrained(model_name, revision=revision, config=cfg, local_files_only=False)
         logger.info("[HF] ViT '%s' disponible (réseau).", model_name)
     except Exception as e:
-        logger.warning("[HF] Réseau indisponible (%s). Tentative offline avec les fichiers en cache…", e)
-        try:
-            import transformers as tfm
-            _ = tfm.AutoImageProcessor.from_pretrained(model_name, revision=revision, local_files_only=True)
-            _ = tfm.ViTModel.from_pretrained(model_name, revision=revision, local_files_only=True)
-            logger.info("[HF] ViT '%s' trouvé en cache local.", model_name)
-        except Exception as e2:
-            logger.error("[HF] ViT '%s' introuvable. Télécharge le modèle manuellement (connexion requise).", model_name)
-            raise e2
+        logger.warning("[HF] Réseau indisponible (%s). Tentative offline…", e)
+        import transformers as tfm
+        cfg = tfm.AutoConfig.from_pretrained(model_name, revision=revision, local_files_only=True)
+        if getattr(cfg, "model_type", None) == "vit":
+            cfg.add_pooling_layer = False
+        _ = tfm.AutoImageProcessor.from_pretrained(
+            model_name, revision=revision, use_fast=True, local_files_only=True
+        )
+        _ = tfm.AutoModel.from_pretrained(model_name, revision=revision, config=cfg, local_files_only=True)
+        logger.info("[HF] ViT '%s' trouvé en cache local.", model_name)
 
 # -------------------- Sampling --------------------
 def make_sampling_strategies(y_train: pd.Series,
@@ -371,7 +377,7 @@ def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dic
             logger.warning("[ViT] Préchargement échoué (%s). Le featurizer tentera quand même le chargement.", e)
         transformers.append(("image_cnn_vit", create_cnn_branch_from_cfg(images_cfg, "cnn_vit", apply_l2=not is_tree_model)))
 
-    union = FeatureUnion(transformers=transformers, transformer_weights=fusion_w or None)
+    union = FeatureUnion(transformer_list=transformers, transformer_weights=fusion_w or None)
     features = SkPipeline([("union", union)])
 
     under = AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)
