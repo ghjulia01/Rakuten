@@ -1,31 +1,48 @@
 # models/cnn_features.py
 # =======================================================
-# Extraire un embedding CNN (ResNet) compatible scikit-learn
+# Extraire un embedding CNN/ViT compatible scikit-learn
 # → lit imageid/productid, batch, normalise, renvoie csr_matrix
+# + FT optionnel, MixUp/CutMix, Grad-CAM (ResNet), Attention Rollout (ViT)
 # =======================================================
 from __future__ import annotations
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 import numpy as np
 from PIL import Image
 from scipy import sparse
 
 from sklearn.base import BaseEstimator, TransformerMixin
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, accuracy_score
 
-from main.profiling_tools import profile_func
-from transformers import AutoImageProcessor, AutoModel
+import matplotlib.pyplot as plt
+from datetime import datetime
+import logging
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import transforms
 from torchvision.models import (
     resnet18, ResNet18_Weights,
     resnet50, ResNet50_Weights,
     resnet101, ResNet101_Weights,
 )
-import logging
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Profiling décorateur (optionnel dans ton projet)
+from main.profiling_tools import profile_func
+
+# Hugging Face
+from transformers import AutoImageProcessor, AutoModel
+# from transformers import ViTModel, ViTImageProcessor, ViTConfig
+try:
+    from transformers import AutoConfig
+except Exception:
+    from transformers import ViTConfig as AutoConfig
+
 log = logging.getLogger("models.cnn_features")
 
 ARCH_REGISTRY = {
@@ -34,6 +51,8 @@ ARCH_REGISTRY = {
     "resnet101": (resnet101, ResNet101_Weights.IMAGENET1K_V2, 2048),
 }
 
+
+# ---------------------- HF wrapper pour ViT -----------------------------------
 class HFBackbone(torch.nn.Module):
     def __init__(self, base, processor, device):
         super().__init__()
@@ -41,6 +60,7 @@ class HFBackbone(torch.nn.Module):
         self.processor = processor
         self.device = device
         self.log = logging.getLogger("models.cnn_features")
+
     def forward(self, x):   # x: (B,3,H,W) in [0,1]
         imgs = [transforms.ToPILImage()(xi.cpu()) for xi in x]
         inputs = self.processor(images=imgs, return_tensors="pt").to(self.device)
@@ -53,12 +73,16 @@ class HFBackbone(torch.nn.Module):
             z = z0.mean(dim=1) if z0.ndim == 3 else z0
         return z
 
+
+# ---------------------- Featurizer sklearn ------------------------------------
 class CNNFeaturizer(BaseEstimator, TransformerMixin):
     """
     Transformer sklearn qui :
       - lit les fichiers images à partir de imageid/productid
-      - extrait un embedding CNN pré-entraîné (par défaut ResNet50 → 2048d)
+      - extrait un embedding CNN pré-entraîné (ResNet) OU ViT (HF)
       - renvoie un csr_matrix (bien compatible avec TF-IDF sparse)
+      - peut faire un fine-tuning léger + data augmentation (MixUp/CutMix)
+      - peut générer des heatmaps Grad-CAM (ResNet) / Attention Rollout (ViT)
     """
     @profile_func
     def __init__(
@@ -71,19 +95,29 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         fallback_zero: bool = True,     # image manquante → vecteur 0
         dtype: str = "float32",         # "float32" conseillé (mémoire)
         num_workers: int = 0,
+
         # --- paramètres unfreeze / FT / HF ---
-        trainable_last_n: int = 0,      # nb de paramètres finaux à défiger (0 = tout figé)
-        finetune_epochs: int = 0,       # nb d’époques de fine-tuning (0 = pas de FT)
+        trainable_last_n: int = 0,      # nb de paramètres à défiger (fallback)
+        finetune_epochs: int = 0,       # 0 = pas de FT
         finetune_lr: float = 3e-4,
         finetune_weight_decay: float = 0.01,
-        finetune_max_n: int = 8000,     # échantillon max utilisé pour FT
-        trainable_last_layers: int = 1, # nb de blocs Transformer à défiger (HF)
-        hf_model_name: Optional[str] = None,  # ex: "google/vit-base-patch16-224"
-        hf_revision: Optional[str] = None,    # ex: "main"
-        hf_feature_dim: Optional[int] = None, # si connu, sinon déduit
-        save_head_path: Optional[str] = None,  # si renseigné, sauvegarde la tête FT + classes
-        save_head_normalize: bool = True,      # normalise l'embedding avant la tête (comme en FT)
-        foreach: bool = True,                  # peut être forçé à False sur DML
+        finetune_max_n: int = 8000,     # échantillon max pour FT
+        trainable_last_layers: int = 1, # nb de blocks Transformer à défiger (ViT)
+        hf_model_name: Optional[str] = None,     # ex: "google/vit-base-patch16-224"
+        hf_revision: Optional[str] = "main",
+        hf_feature_dim: Optional[int] = 768,           # ViT base = 768
+        hf_use_fast: bool = True,      
+
+        save_head_path: Optional[str] = None,    # si renseigné, sauvegarde la tête FT + classes
+        save_head_normalize: bool = True,        # normalise l'embedding avant la tête (comme en FT)
+        foreach: bool = True,                    # torch.optim foreach on/off
+
+        # --- Data augmentation (FT uniquement) ---
+        aug_hflip_p: float = 0.2,                # flip horizontal aléatoire
+        aug_color_jitter: float = 0.0,           # 0 -> off ; sinon jitter léger
+        mixup_alpha: float = 0.0,                # 0 -> off
+        cutmix_alpha: float = 0.0,               # 0 -> off
+        ft_patience: int = 3,                 # patience early stopping (FT)    
     ):
         self.image_dir = image_dir
         self.arch = arch
@@ -123,24 +157,26 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         self.label_classes_: Optional[np.ndarray] = None
         self.foreach = bool(foreach)
         self.log = logging.getLogger("models.cnn_features")
+        self.hf_use_fast    = bool(hf_use_fast)
+        self.ft_patience = int(ft_patience)
+
+        # Augmentations
+        self.aug_hflip_p = float(aug_hflip_p)
+        self.aug_color_jitter = float(aug_color_jitter)
+        self.mixup_alpha = float(mixup_alpha)
+        self.cutmix_alpha = float(cutmix_alpha)
 
     # -------- Utilitaires -------------------------------------------------------
-
     def _load_one(self, path: str):
         if not os.path.exists(path):
             return None
         try:
             with Image.open(path).convert("RGB") as im:
                 return self._preprocess(im)
-        except UnicodeDecodeError as e:
-            self.log.warning("UnicodeDecodeError on path=%s -> %r", path, e)
-            return None
         except Exception as e:
-            self.log.warning("PIL failed for path=%s -> %s: %r", path, type(e).__name__, e)
+            self.log.warning("Image load fail path=%s -> %s", path, e)
             return None
 
-        
-        
     @profile_func
     def set_image_dir(self, new_dir: str):
         """Mettre à jour le dossier images (utile pour passer TRAIN → TEST)."""
@@ -150,15 +186,14 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
     def _resolve_device(self):
         if self._device_resolved is not None:
             return self._device_resolved
-
         if self.device == "cuda":
-            self._device_resolved = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+            self._device_resolved = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         elif self.device == "cpu":
             self._device_resolved = torch.device("cpu")
         elif self.device == "dml":
             import torch_directml
             self._device_resolved = torch_directml.device()
-        else:  # "auto"
+        else:  # auto
             if torch.cuda.is_available():
                 self._device_resolved = torch.device("cuda")
             else:
@@ -167,26 +202,42 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                     self._device_resolved = torch_directml.device()
                 except Exception:
                     self._device_resolved = torch.device("cpu")
-
         return self._device_resolved
+
+    def _hf_from_pretrained(self, name: str, revision: Optional[str]):
+        """Chargement robuste HF (réseau → fallback offline), fast processor + no pooler."""
+        try:
+            cfg = AutoConfig.from_pretrained(name, revision=revision, local_files_only=False)
+            if getattr(cfg, "model_type", None) == "vit":
+                cfg.add_pooling_layer = False  # <-- évite l’avertissement sur le pooler
+            proc = AutoImageProcessor.from_pretrained(
+                name, revision=revision, use_fast=self.hf_use_fast, local_files_only=False
+            )
+            base = AutoModel.from_pretrained(name, revision=revision, config=cfg, local_files_only=False)
+            self.log.info("[HF] %s téléchargé.", name)
+        except Exception as e:
+            self.log.warning("[HF] online KO (%s). Essai offline…", e)
+            cfg = AutoConfig.from_pretrained(name, revision=revision, local_files_only=True)
+            if getattr(cfg, "model_type", None) == "vit":
+                cfg.add_pooling_layer = False
+            proc = AutoImageProcessor.from_pretrained(
+                name, revision=revision, use_fast=self.hf_use_fast, local_files_only=True
+            )
+            base = AutoModel.from_pretrained(name, revision=revision, config=cfg, local_files_only=True)
+            self.log.info("[HF] %s trouvé en cache.", name)
+        return proc, base
+
 
     @profile_func
     def _build_model(self):
         # HF branch (ViT & co)
         if self.hf_model_name:
             device = self._resolve_device()
-            processor = AutoImageProcessor.from_pretrained(
-                self.hf_model_name, revision=self.hf_revision, use_fast=True
-            )
-            base = AutoModel.from_pretrained(
-                self.hf_model_name, revision=self.hf_revision
-            ).to(device)
-            base.eval()
-
+            processor, base = self._hf_from_pretrained(self.hf_model_name, self.hf_revision)
+            base = base.to(device).eval()
             model = HFBackbone(base, processor, device).to(device)
             self._feat_dim = int(self.hf_feature_dim or 768)  # ViT-base = 768
-            # Le processor gère resize/crop/normalisation → juste ToTensor ici
-            preprocess = transforms.ToTensor()
+            preprocess = transforms.ToTensor()  # HF processor s'occupe du resize/crop/norm
             return model, preprocess
 
         # Torchvision branch (ResNet)
@@ -197,8 +248,7 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         weights = weights_enum
         model = ctor(weights=weights)
         model.fc = nn.Identity()
-        model.eval()
-        model.to(self._resolve_device())
+        model.eval().to(self._resolve_device())
         preprocess = weights.transforms() if self.use_imagenet_norm else transforms.Compose([
             transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor()
         ])
@@ -251,16 +301,47 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         fname = f"image_{int(row['imageid'])}_product_{int(row['productid'])}.jpg"
         return os.path.join(self.image_dir, fname)
 
-    # -------- API sklearn -------------------------------------------------------
+    # ------------------- Data Augmentation utils (MixUp/CutMix) ----------------
+    @staticmethod
+    def _mixup(x: torch.Tensor, y: torch.Tensor, alpha: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        lam = np.random.beta(alpha, alpha) if alpha > 0 else 1.0
+        idx = torch.randperm(x.size(0), device=x.device)
+        mixed_x = lam * x + (1 - lam) * x[idx, :]
+        y_a, y_b = y, y[idx]
+        return mixed_x, y_a, y_b, float(lam)
+
+    @staticmethod
+    def _rand_bbox(W: int, H: int, lam: float):
+        cut_rat = np.sqrt(1. - lam)
+        cut_w = int(W * cut_rat)
+        cut_h = int(H * cut_rat)
+        cx = np.random.randint(W)
+        cy = np.random.randint(H)
+        x1 = np.clip(cx - cut_w // 2, 0, W)
+        y1 = np.clip(cy - cut_h // 2, 0, H)
+        x2 = np.clip(cx + cut_w // 2, 0, W)
+        y2 = np.clip(cy + cut_h // 2, 0, H)
+        return x1, y1, x2, y2
+
+    @staticmethod
+    def _cutmix(x: torch.Tensor, y: torch.Tensor, alpha: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        lam = np.random.beta(alpha, alpha) if alpha > 0 else 1.0
+        idx = torch.randperm(x.size(0), device=x.device)
+        x1, y1, x2, y2 = CNNFeaturizer._rand_bbox(x.size(3), x.size(2), lam)
+        x[:, :, y1:y2, x1:x2] = x[idx, :, y1:y2, x1:x2]
+        lam = 1 - ((x2 - x1) * (y2 - y1) / (x.size(-1) * x.size(-2) + 1e-9))
+        y_a, y_b = y, y[idx]
+        return x, y_a, y_b, float(lam)
+
+    # ------------------------ API sklearn --------------------------------------
     @profile_func
     def fit(self, X, y=None):
         self._lazy_load()
         self.n_total = self.n_loaded = self.n_missing = self.n_failed = 0
 
-        # --- Fine-tuning optionnel (supervisé), SANS LR-FINDER ---
+        # --- Fine-tuning optionnel ---
         if self.finetune_epochs and y is not None and (self.trainable_last_n > 0 or getattr(self, "trainable_last_layers", 0) > 0):
             from sklearn.preprocessing import LabelEncoder
-            import math
 
             # 1) Encode labels
             le = LabelEncoder()
@@ -273,78 +354,185 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
             X_ft = X.iloc[idx].reset_index(drop=True)
             y_ft = y_enc[idx]
 
-            # 3) Préparer training minimal
+            # 2bis) Split interne 90/10
+            X_tr_ft, X_va_ft, y_tr_ft, y_va_ft = train_test_split(
+                X_ft, y_ft, test_size=0.1, random_state=42, stratify=y_ft)
+
+            # 3) Préparer training
             device = self._resolve_device()
             self._set_trainable_tail(self.trainable_last_n)
             self._model.train()
 
-            head = nn.Linear(self._feat_dim, int(len(le.classes_))).to(device)
+            head = nn.Linear(int(self._feat_dim), int(len(le.classes_))).to(device)
 
-            # Optim principal (utilise self.finetune_lr)
-            # Sécurisation DirectML optionnelle : foreach=False
+            # Optim
             is_dml = (str(self.device).lower() == "dml") or ("directml" in str(type(device)).lower())
-
             param_groups = [
                 {"params": [p for p in self._model.parameters() if p.requires_grad], "lr": self.finetune_lr},
                 {"params": head.parameters(), "lr": self.finetune_lr},
             ]
-
-            adamw_kwargs = dict(
-                weight_decay=self.finetune_weight_decay,
-                betas=(0.9, 0.999),
-                eps=1e-8,
-            )
-
-            # Certains PyTorch n’acceptent pas foreach/fused → on tente puis on retombe sans
+            adamw_kwargs = dict(weight_decay=self.finetune_weight_decay, betas=(0.9, 0.999), eps=1e-8)
             try:
-                opt = torch.optim.AdamW(
-                param_groups,
-                **adamw_kwargs,
-                foreach=False if is_dml else bool(self.foreach),  # DML: False impératif
-                fused=False,  # éviter les implémentations fusionnées non supportées
-                )
+                opt = torch.optim.AdamW(param_groups, **adamw_kwargs,
+                                        foreach=False if is_dml else bool(self.foreach), fused=False)
             except TypeError:
-                # Ancienne version de PyTorch: pas de foreach/fused
                 opt = torch.optim.AdamW(param_groups, **adamw_kwargs)
-
             criterion = nn.CrossEntropyLoss()
 
-            # 4) Entraînement court
-            bs = int(self.batch_size)
-            steps_per_epoch = math.ceil(len(X_ft) / bs)
+            # Augmentations simples (hors MixUp/CutMix)
+            aug_list = []
+            if self.aug_hflip_p > 0:
+                aug_list.append(transforms.RandomHorizontalFlip(p=self.aug_hflip_p))
+            if self.aug_color_jitter > 0:
+                cj = self.aug_color_jitter
+                aug_list.append(transforms.ColorJitter(brightness=cj, contrast=cj, saturation=cj, hue=min(0.1, cj)))
+            aug = transforms.Compose(aug_list) if aug_list else None
 
-            i = 0
-            for _ in range(int(self.finetune_epochs)):
+            bs = int(self.batch_size)
+            history = {"train_loss": [], "val_loss": [], "val_f1": [], "val_acc": []}
+            best_f1, best_epoch = -1.0, -1
+            best_backbone = None
+            best_head = None
+            patience = int(self.ft_patience) # patience early stopping
+
+            def _iterate_rows_to_batches(X_rows, y_vec, batch_size):
                 i = 0
-                while i < len(X_ft):
-                    j = min(i + bs, len(X_ft))
-                    paths_slice = [self._path_from_row(X_ft.iloc[k]) for k in range(i, j)]
+                nloc = len(X_rows)
+                while i < nloc:
+                    j = min(i + batch_size, nloc)
+                    paths_slice = [self._path_from_row(X_rows.iloc[k]) for k in range(i, j)]
                     imgs, ys = [], []
                     for k, p in enumerate(paths_slice, start=i):
                         if os.path.exists(p):
                             try:
                                 with Image.open(p).convert("RGB") as im:
-                                    imgs.append(self._preprocess(im))
-                                ys.append(y_ft[k])
+                                    t = self._preprocess(im)
+                                    if aug is not None:
+                                        # repasse par PIL pour les aug torchvision
+                                        t = transforms.ToPILImage()(t)
+                                        t = aug(t)
+                                        t = transforms.ToTensor()(t)
+                                    imgs.append(t)
+                                ys.append(int(y_vec[k]))
                             except Exception:
                                 pass
-                    if imgs:
+                    yield imgs, ys
+                    i = j
+
+            for epoch in range(int(self.finetune_epochs)):
+                # ===== TRAIN =====
+                self._model.train()
+                running_tr, n_tr = 0.0, 0
+                for imgs, ys in _iterate_rows_to_batches(X_tr_ft, y_tr_ft, bs):
+                    if not imgs:
+                        continue
+                    batch = torch.stack(imgs, dim=0).to(device)
+                    yb = torch.tensor(ys, dtype=torch.long, device=device)
+
+                    # MixUp / CutMix
+                    used_mix = None
+                    if self.mixup_alpha > 0 and (self.cutmix_alpha <= 0 or np.random.rand() < 0.5):
+                        batch, ya, yb2, lam = self._mixup(batch, yb, self.mixup_alpha)
+                        used_mix = ("mixup", lam, ya, yb2)
+                    elif self.cutmix_alpha > 0:
+                        batch, ya, yb2, lam = self._cutmix(batch, yb, self.cutmix_alpha)
+                        used_mix = ("cutmix", lam, ya, yb2)
+
+                    feats = self._model(batch)
+                    feats = feats / (feats.norm(dim=1, keepdim=True) + 1e-12)
+                    logits = head(feats)
+
+                    if used_mix is None:
+                        loss = criterion(logits, yb)
+                    else:
+                        _, lam, ya, yb2 = used_mix
+                        loss = lam * criterion(logits, ya) + (1 - lam) * criterion(logits, yb2)
+
+                    opt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(list(self._model.parameters()) + list(head.parameters()), max_norm=1.0)
+                    opt.step()
+
+                    running_tr += float(loss.item()) * (yb.size(0))
+                    n_tr += yb.size(0)
+                train_loss = running_tr / max(1, n_tr)
+
+                # ===== VAL =====
+                self._model.eval()
+                running_val, n_val = 0.0, 0
+                all_preds, all_true = [], []
+                with torch.no_grad():
+                    for imgs, ys in _iterate_rows_to_batches(X_va_ft, y_va_ft, bs):
+                        if not imgs:
+                            continue
                         batch = torch.stack(imgs, dim=0).to(device)
                         yb = torch.tensor(ys, dtype=torch.long, device=device)
+
                         feats = self._model(batch)
                         feats = feats / (feats.norm(dim=1, keepdim=True) + 1e-12)
                         logits = head(feats)
                         loss = criterion(logits, yb)
 
-                        opt.zero_grad()
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(list(self._model.parameters()) + list(head.parameters()), max_norm=1.0)
-                        opt.step()
-                    i = j
+                        running_val += float(loss.item()) * yb.size(0)
+                        n_val += yb.size(0)
 
-            # 5) Eval + stockage tête
+                        preds = logits.argmax(dim=1).detach().cpu().numpy()
+                        all_preds.append(preds)
+                        all_true.append(yb.detach().cpu().numpy())
+
+                val_loss = running_val / max(1, n_val) if n_val else float("nan")
+                y_true = np.concatenate(all_true) if all_true else np.array([])
+                y_pred = np.concatenate(all_preds) if all_preds else np.array([])
+                val_f1  = f1_score(y_true, y_pred, average="macro") if y_true.size else float("nan")
+                val_acc = accuracy_score(y_true, y_pred)            if y_true.size else float("nan")
+
+                history["train_loss"].append(train_loss)
+                history["val_loss"].append(val_loss)
+                history["val_f1"].append(val_f1)
+                history["val_acc"].append(val_acc)
+
+                self.log.info(f"[FT] epoch {epoch+1}/{self.finetune_epochs}  "
+                              f"loss_tr={train_loss:.4f}  loss_val={val_loss:.4f}  "
+                              f"F1_val={val_f1:.4f}  acc_val={val_acc:.4f}")
+
+                # best checkpoint (F1)
+
+                if y_true.size and val_f1 > best_f1 + 1e-4:
+                    best_f1, best_epoch = val_f1, epoch
+                    best_backbone = {k: v.detach().cpu().clone() for k,v in self._model.state_dict().items()}
+                    best_head     = {k: v.detach().cpu().clone() for k,v in head.state_dict().items()}
+                elif epoch - best_epoch >= patience:
+                    self.log.info(f"[FT] early stop @ epoch {epoch+1} (patience={patience})")
+                    break
+
+            # Recharger meilleur état
+            if best_backbone is not None and best_head is not None:
+                self._model.load_state_dict(best_backbone)
+                head.load_state_dict(best_head)
+
+            # === COURBES ===
+            os.makedirs("results", exist_ok=True)
+            arch_or_name = (self.hf_model_name or self.arch).replace("/", "-")
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+            plt.figure(figsize=(7.5,4))
+            plt.plot(history["train_loss"], label="train")
+            plt.plot(history["val_loss"],   label="val")
+            plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Fine-tuning — loss"); plt.legend(); plt.tight_layout()
+            plt.savefig(f"results/ft_{arch_or_name}_{ts}_loss.png", dpi=150); plt.close()
+
+            plt.figure(figsize=(7.5,4))
+            plt.plot(history["val_f1"], label="F1-macro (val)")
+            plt.plot(history["val_acc"], label="accuracy (val)", linestyle="--")
+            plt.xlabel("epoch"); plt.ylabel("score"); plt.title("Fine-tuning — validation F1/accuracy"); plt.legend(); plt.tight_layout()
+            plt.savefig(f"results/ft_{arch_or_name}_{ts}_f1.png", dpi=150); plt.close()
+
+            print(f"[INFO] Courbes FT : results/ft_{arch_or_name}_{ts}_loss.png | results/ft_{arch_or_name}_{ts}_f1.png")
+
+            # 5) Stockage tête
             self._model.eval()
             self._trained_head = head.to(device).eval()
+            from sklearn.preprocessing import LabelEncoder
             self.label_classes_ = le.classes_
             if self.save_head_path:
                 to_save = {
@@ -417,7 +605,6 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                 batch = torch.stack([t for t in imgs if t is not None], dim=0).to(device)
                 feats = self._embed_batch(batch, normalize=self.save_head_normalize)
                 logits = self._trained_head(feats).detach().cpu().numpy()
-                # Remettre dans l’ordre avec des lignes vides pour les manquantes
                 it = iter(logits)
                 for t in imgs:
                     if t is None:
@@ -425,24 +612,19 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                     else:
                         logits_all.append(next(it)[None, :])
             else:
-                # tout manquant dans ce batch
                 logits_all.extend([np.full((1, len(self.label_classes_)), np.nan) for _ in imgs])
-
             i = j
 
         return np.vstack(logits_all)
 
     def idx_to_label(self, class_idx: int) -> str:
-        """Map index de classe -> libellé d’origine (si disponible)."""
         if self.label_classes_ is None:
             return str(class_idx)
         return str(self.label_classes_[class_idx])
 
     @torch.no_grad()
     def predict_proba_from_paths(self, paths: List[str]) -> np.ndarray:
-        """Probabilités softmax (même gabarit que predict_logits_from_paths)."""
         logits = self.predict_logits_from_paths(paths)
-        # Gestion NaN: on laisse NaN si ligne entière NaN
         mask = ~np.isnan(logits).any(axis=1)
         proba = np.full_like(logits, np.nan, dtype=np.float64)
         if mask.any():
@@ -452,7 +634,6 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
 
     @torch.no_grad()
     def topk_from_paths(self, paths: List[str], k: int = 5):
-        """Retourne pour chaque image: [(idx,label,logit,proba), ...] triés par logit desc."""
         logits = self.predict_logits_from_paths(paths)
         proba  = self.predict_proba_from_paths(paths)
         out = []
@@ -499,7 +680,6 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                 imgs, idxs = [], []
 
                 if self.num_workers > 0:
-                    # Chargement multi-threads des images (I/O bound)
                     with ThreadPoolExecutor(max_workers=self.num_workers) as ex:
                         futs = {ex.submit(self._load_one, p): k for k, p in enumerate(paths_slice, start=i)}
                         for fut in as_completed(futs):
@@ -514,7 +694,6 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                                 imgs.append(t)
                                 idxs.append(k)
                 else:
-                    # Chargement séquentiel
                     for k, p in enumerate(paths_slice, start=i):
                         if os.path.exists(p):
                             try:
@@ -535,17 +714,16 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                     for t, k in enumerate(idxs):
                         out[k, :] = feats[t]
                     self.n_loaded += len(idxs)
-                if i % 100 == 0:
+                if i % 200 == 0:
                     self.log.info("CNN progress: sample %d/%d", i, n)
 
                 i = j
 
         return sparse.csr_matrix(out)
 
-    # -------- Diagnostics -------------------------------------------------------
+    # ------------------------ Diagnostics & save --------------------------------
     @profile_func
     def get_diagnostics(self) -> Dict[str, object]:
-        """Résumé du run (device, arch, tailles, taux manquants)."""
         input_size = None
         try:
             tf = getattr(self, "_preprocess", None)
@@ -555,7 +733,7 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         except Exception:
             pass
         return {
-            "arch": self.arch,
+            "arch": self.arch if not self.hf_model_name else self.hf_model_name,
             "device": str(self._resolve_device()),
             "feat_dim": int(self._feat_dim or 0),
             "batch_size": int(self.batch_size),
@@ -571,11 +749,13 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
             "finetune_epochs": int(getattr(self, "finetune_epochs", 0)),
             "hf_model_name": getattr(self, "hf_model_name", None),
             "foreach": bool(getattr(self, "foreach", False)),
+            "mixup_alpha": float(self.mixup_alpha),
+            "cutmix_alpha": float(self.cutmix_alpha),
+            "hf_use_fast": bool(getattr(self, "hf_use_fast", True)),
         }
 
     @profile_func
     def save_model(self, path):
-        """Sauvegarder le modèle et ses paramètres."""
         state = {
             'state_dict': self._model.state_dict(),
             'arch': self.arch,
@@ -583,3 +763,110 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
             'use_imagenet_norm': self.use_imagenet_norm,
         }
         torch.save(state, path)
+
+    # ------------------------ Grad-CAM (ResNet) --------------------------------
+    def export_gradcam(self, image_paths: List[str], out_dir: str, alpha_overlay: float = 0.65):
+        """Heatmaps Grad-CAM pour ResNet (layer4)."""
+        self._lazy_load()
+        if not hasattr(self._model, "layer4"):
+            self.log.warning("Grad-CAM: layer4 introuvable (probablement ViT).")
+            return
+        os.makedirs(out_dir, exist_ok=True)
+        device = self._resolve_device()
+        model = self._model
+        model.eval()
+
+        feats, grads = [], []
+
+        def fwd_hook(m, i, o): feats.append(o.detach())
+        def bwd_hook(m, gi, go): grads.append(go[0].detach())
+
+        h1 = model.layer4.register_forward_hook(fwd_hook)
+        h2 = model.layer4.register_full_backward_hook(bwd_hook)
+
+        for p in image_paths:
+            try:
+                with Image.open(p).convert("RGB") as im:
+                    x = self._preprocess(im).unsqueeze(0).to(device)
+                model.zero_grad()
+                out = model(x)               # [1, C, H, W] après layer4→global pool→fc(Identity ici)
+                score = out.mean()
+                score.backward()
+
+                A = feats.pop().squeeze(0)   # [C,H,W]
+                G = grads.pop().squeeze(0)   # [C,H,W]
+                weights = G.mean(dim=(1,2))
+                cam = F.relu((weights[:, None, None] * A).sum(0))
+                cam = (cam - cam.min()) / (cam.max() + 1e-9)
+                cam = F.interpolate(cam[None, None, ...], size=im.size[::-1], mode="bilinear", align_corners=False).squeeze()
+
+                heat = (cam.cpu().numpy() * 255).astype(np.uint8)
+                heat = plt.cm.jet(heat)[:, :, :3]
+                overlay = (1 - alpha_overlay)*np.asarray(im)/255. + alpha_overlay*heat
+                overlay = np.clip(overlay, 0, 1)
+                out_path = os.path.join(out_dir, os.path.basename(p).rsplit(".",1)[0] + "_gradcam.png")
+                plt.imsave(out_path, overlay)
+            except Exception as e:
+                self.log.warning("Grad-CAM fail for %s: %s", p, e)
+
+        h1.remove(); h2.remove()
+
+    # ------------------- Attention Rollout (ViT) --------------------------------
+    def _get_vit_model_processor(self):
+        """Renvoie (model_HF, processor) pour rollout; construit si besoin."""
+        self._lazy_load()
+        if hasattr(self._model, "base") and hasattr(self._model, "processor"):
+            return self._model.base, self._model.processor
+        # si pas construit via HFBackbone (cas rare), on recharge
+        proc, base = self._hf_from_pretrained(self.hf_model_name, self.hf_revision)
+        base = base.to(self._resolve_device()).eval()
+        return base, proc
+
+    def export_vit_attention_rollout(self, image_paths: List[str], out_dir: str,
+                                     head_fusion: str = "mean", discard_ratio: float = 0.0, alpha_residual: float = 0.5):
+        """Attention Rollout pour ViT (CLS→patches)."""
+        if not self.hf_model_name:
+            self.log.warning("Attention Rollout: nécessite une branche ViT.")
+            return
+        os.makedirs(out_dir, exist_ok=True)
+        model, processor = self._get_vit_model_processor()
+        device = self._resolve_device()
+
+        def fuse_heads(att):  # [H,T,T] -> [T,T]
+            return att.max(dim=0).values if head_fusion == "max" else att.mean(dim=0)
+
+        for p in image_paths:
+            try:
+                with Image.open(p).convert("RGB") as im:
+                    inputs = processor(images=im, return_tensors="pt")
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    out = model(**inputs, output_attentions=True)
+                atts = out.attentions  # list len=L, each [1,H,T,T]
+                joint = torch.eye(atts[0].shape[-1], device=device)
+                for A in atts:
+                    A = fuse_heads(A[0])                     # [T,T]
+                    if discard_ratio > 0:
+                        flat = A.view(-1)
+                        k = int(flat.numel() * discard_ratio)
+                        if k > 0:
+                            thresh = torch.topk(-flat, k).values.max().neg()
+                            A = torch.where(A < thresh, torch.zeros_like(A), A)
+                    A = A + alpha_residual * torch.eye(A.size(0), device=device)
+                    A = A / A.sum(dim=-1, keepdim=True)
+                    joint = A @ joint
+                cls_to_patches = joint[0, 1:]             # [T-1]
+                grid = int(np.sqrt(cls_to_patches.numel()))
+                mask = cls_to_patches.reshape(1, 1, grid, grid)
+                mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-9)
+                mask = F.interpolate(mask, size=im.size[::-1], mode="bilinear", align_corners=False)[0,0]
+                heat = (mask.detach().cpu().numpy() * 255).astype(np.uint8)
+                heat = plt.cm.jet(heat)[:, :, :3]
+                overlay = 0.35*np.asarray(im)/255. + 0.65*heat
+                overlay = np.clip(overlay, 0, 1)
+                out_path = os.path.join(out_dir, os.path.basename(p).rsplit(".",1)[0] + "_vitrollout.png")
+                plt.imsave(out_path, overlay)
+            except Exception as e:
+                self.log.warning("ViT rollout fail for %s: %s", p, e)
+
+

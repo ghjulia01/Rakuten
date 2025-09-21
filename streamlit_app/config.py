@@ -152,15 +152,24 @@ def render_mermaid(mermaid_text: str, height: int = 700, theme: str = "neutral")
             flowchart: {{ htmlLabels: true, curve: 'basis' }}
           }});
           const code = {code};
-          mermaid.render('graphDiv', code).then(({svg}) => {{
-            document.getElementById('mmd').innerHTML = svg;
-          }}).catch(e => {{
-            document.getElementById('mmd').innerHTML = '<pre style="color:#b91c1c">Mermaid error: ' + e.message + '</pre>';
-          }});
+          mermaid.render('graphDiv', code)
+            .then((res) => {{
+              // res.svg contient le SVG rendu
+              document.getElementById('mmd').innerHTML = res.svg;
+            }})
+            .catch((e) => {{
+              document.getElementById('mmd').innerHTML =
+                '<pre style="color:#b91c1c">Mermaid error: ' + e.message + '</pre>';
+            }});
         </script>
         """,
         height=height,
     )
+def _show_table(df_, hide_index=False):
+    try:
+        st.dataframe(df_, width='stretch', hide_index=hide_index)
+    except TypeError:
+        st.dataframe(df_.reset_index(drop=True) if hide_index else df_, width='stretch')
 # ----------------------------
 # Sidebar – Data & Config
 # ----------------------------
@@ -235,14 +244,6 @@ with expl_tab:
                 .str.replace(r"\s+", " ", regex=True)
                 .str.slice(0, n)
             )
-
-        # helper pour cacher l'index même si la version de Streamlit ne supporte pas hide_index
-        def _show_table(df_, hide_index=False):
-            try:
-                st.dataframe(df_, use_container_width=True, hide_index=hide_index)
-            except TypeError:
-                # compat: vieilles versions de Streamlit n'ont pas hide_index
-                st.dataframe(df_.reset_index(drop=True) if hide_index else df_, use_container_width=True)
 
         # colonnes dispo
         has = set(df.columns)
@@ -504,7 +505,7 @@ def show_b2_walkthrough():
         PIX[Pixels -> PCA/SVD]
     end
 
-    FUSION[FeatureUnion multimodale<br/>text + image_cnn + pixels + stats]
+    FUSION[FeatureUnion multimodale text + image_cnn + pixels + stats]
     US[Under-sampling] --> OS[Over-sampling] --> CLF[Classifier (LR/SVC/LGBM)]
     X1[Diagnostics poids/confusions]:::xp
     X2[ACP 2D]:::xp

@@ -1,241 +1,142 @@
+# -*- coding: utf-8 -*-
 """
-Classification Rakuten – Baselines & Pipeline (version commentée)
+Classification Rakuten — pipeline consolidée (b2/b3/b4)
+- CV avec early stopping (dans l’espace de features)
+- Entraînement final + re-fit full data au best_iter+1
+- Sauvegardes .joblib b2/b3/b4
+- Exports analytiques: ACP/SVD, SHAP, BLOCKs
+- Re-pointage images vers test_dir
+- Préparation HuggingFace pour ViT (cache local + fallback offline)
 
-Objectif général :
-- Construire une pipeline multimodale (texte + image) avec rééchantillonnage pour traiter le déséquilibre des classes.
-- Comparer rapidement deux classifieurs (LogisticRegression et LinearSVC) en validation croisée.
-- Entraîner le modèle complet sur X_train/Y_train puis prédire sur X_test.
-
-Baselines :
-- B0 — Naïf (majoritaire) : DummyClassifier(strategy="most_frequent").
-- B1 — Naïf (aléatoire stratifié) : DummyClassifier(strategy="stratified").
-- B2 — Texte seul (TF-IDF → LR) : branche texte sans rééchantillonnage (référence).
-- B3 — Image seule (ImageLoader → flatten → PCA → LR) : sans texte.
-- B4 — Multimodal complet : Texte (TF-IDF) + Images (pixels + stats optionnelles).
-      Rééchantillonnage : under-sampling adaptatif par fold + over-sampling ciblé.
-      (Under-sampling “capé” par classe, recalculé à chaque fold → CV-safe.)
-
-Fonctionnalités CLI :
-- --model {lr,svc} : définir le classifieur final (défaut : lr).
-- --compare : comparer LR et LinearSVC via validation croisée stratifiée (F1-macro)
-              sur X_train/Y_train, en conservant le split Rakuten d’origine.
-- --config : lire un fichier TOML pour centraliser chemins & hyperparams.
-
-Détails pipeline :
-- Fusionner texte+image avec FeatureUnion.
-- Branche images “pixels” : charger RGB, redimensionner, aplatir, (option) PCA/SVD.
-- Branche images “stats” : ImageStatsFeaturizer (width, height, occupancy, white_ratio, black_ratio).
-  Les seuils venir du TOML : [images.stats] white_threshold, black_threshold, min_area.
-  Si out_prefix="auto", faire refléter ces seuils dans les noms de colonnes (ex. img_w230_b25_*).
-- Rééchantillonnage :
-  * Under-sampling : AdaptiveUnderSampler(cap_dict) → pour chaque fold, fixer la cible à min(plafond, effectif_du_fold).
-  * Over-sampling : RandomOverSampler(sampling_strategy=...).
-- Placer StandardScaler(with_mean=False) APRÈS under/over pour scaler la distribution réellement vue par le modèle.
-- Sérialiser avec Joblib, sauvegarder les prédictions X_test (index produit), journaliser les étapes.
-
-Exécution :
-# Baselines
-python -m main.train_model --config features/config.toml --baseline b0
-python -m main.train_model --config features/config.toml --baseline b1
-python -m main.train_model --config features/config.toml --baseline b2
-python -m main.train_model --config features/config.toml --baseline b3
-
-# Modèle multimodal “B4” (entraînement + prédictions)
-python -m main.train_model --config features/config.toml
-
-# Comparaison LR vs SVC (CV stratifiée F1-macro, avec under adaptatif)
-python -m main.train_model --config features/config.toml --compare
+Dépendances : numpy, pandas, scikit-learn, imbalanced-learn, xgboost ou lightgbm (selon config),
+matplotlib, shap (optionnel), transformers (pour ViT via CNNFeaturizer).
 """
 
-# === Importer les bibliothèques standard et ML ==================================
-# === Importer les bibliothèques standard et ML ==================================
-import os
-import re
-import time
-import argparse
-import joblib
-import json
-import random
-from collections import Counter
+import os, re, time, json, random, argparse, logging
+import sys
 from pathlib import Path
-import logging
-import toml
-from typing import Dict, Any, Union, Optional, Tuple, List
-from tqdm.auto import tqdm
 from datetime import datetime
-
-
+from typing import Optional, Tuple, Union, List, Dict, Any
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
-from sklearn.dummy import DummyClassifier
-from sklearn.pipeline import Pipeline as SkPipeline, FeatureUnion, make_pipeline
-from sklearn.decomposition import PCA
-from sklearn.metrics import f1_score, classification_report
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
-from sklearn.preprocessing import StandardScaler
+from scipy import sparse
+
+# sklearn / imblearn
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.pipeline import Pipeline as SkPipeline, FeatureUnion
+from sklearn.preprocessing import LabelEncoder, StandardScaler, Normalizer
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.metrics import f1_score, classification_report, precision_recall_fscore_support
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
-from sklearn.base import BaseEstimator, ClassifierMixin, clone
-from sklearn.preprocessing import LabelEncoder
+from sklearn.decomposition import TruncatedSVD
+from sklearn.dummy import DummyClassifier
 
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
 from imblearn.base import BaseSampler
 
-# Importer nos modules personnalisés
+from joblib import Memory
+
+# --- modules projet
+import tomllib  # Python 3.11+
 from features.image_loader import ImageLoader
-from models.text_pipeline import create_text_pipeline_from_cfg
-from models.image_pipeline import create_image_pipeline
-from models.image_pipeline import create_image_pipeline_from_cfg 
 from features.image_stats import ImageStatsCombinedFeaturizer
-from models.image_pipeline import diagnostic_reduction
-from models.cnn_features import CNNFeaturizer
-from sklearn.decomposition import TruncatedSVD
-from sklearn.preprocessing import Normalizer
-from sklearn.multiclass import OneVsRestClassifier
-from logging.handlers import RotatingFileHandler
-from main.profiling_tools import profile_func, print_function_stats, list_debug_add, print_list_debug, write_function_stats_to_file, write_list_debug_to_file 
-
-logger = logging.getLogger(__name__)
-
-class TqdmLoggingHandler(logging.StreamHandler):
-    """Écrit les logs via tqdm.write pour ne pas casser la barre de progression."""
-    def emit(self, record):
-        try:
-            from tqdm.auto import tqdm
-            msg = self.format(record)
-            tqdm.write(msg)
-            self.flush()
-        except Exception:
-            super().emit(record)
-
-@profile_func
-def setup_logging(log_dir: str = "results/logs", level=logging.DEBUG):
-    log_dir = os.path.expanduser(os.path.expandvars(log_dir))
-    os.makedirs(log_dir, exist_ok=True)
-
-    # Format commun
-    fmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-    # Handlers fichiers
-    train_fh = RotatingFileHandler(
-        os.path.join(log_dir, "training.log"),
-        encoding="utf-8", maxBytes=5_000_000, backupCount=3, delay=True
-    )
-    train_fh.setLevel(level)
-    train_fh.setFormatter(fmt)
-
-    img_fh = RotatingFileHandler(
-        os.path.join(log_dir, "image_processing.log"),
-        encoding="utf-8", maxBytes=5_000_000, backupCount=3, delay=True
-    )
-    img_fh.setLevel(level)
-    img_fh.setFormatter(fmt)
-
-    # Handler console compatible tqdm
-    console_h = TqdmLoggingHandler()
-    console_h.setLevel(level)
-    console_h.setFormatter(fmt)
-
-    # (Re)configurer radicalement la racine
-    logging.basicConfig(level=level, handlers=[train_fh, console_h], force=True)
-
-    # Attacher un fichier dédié aux loggers image
-    for name in ["models.image_pipeline", 
-                 "features.image_loader", 
-                 "features.image_stats",
-                 "models.cnn_features",
-                 "models.image_cnn",
-                 "models.vit_features",
-                 "features.image_cnn",
-                 "features.image_vit",]:
-        lg = logging.getLogger(name)
-        lg.setLevel(level)
-        lg.addHandler(img_fh)     # écrira dans image_processing.log
-        lg.propagate = True       # et remontera aussi vers la racine
-
-    # Exemple : logger principal
-    root = logging.getLogger(__name__)
-    root.info("Logging initialisé — logs dans %s", os.path.abspath(log_dir))
-
-# Importer ImageLoader depuis le module features
-
-@profile_func
-def validate_config(cfg: Dict[str, Any]) -> None:
-    """
-    Valide la configuration en vérifiant la présence des sections requises.
-    
-    Args:
-        cfg: Dictionnaire de configuration chargé depuis le fichier TOML
-        
-    Raises:
-        ValueError: Si une section requise est manquante
-    """
-    required = ['paths', 'model', 'compute']
-    for key in required:
-        if key not in cfg:
-            raise ValueError(f"Configuration manquante: {key}")
-
-@profile_func            
-def train_model(config_path: str = "features/config.toml"):
-    """Entraîne le modèle avec la configuration spécifiée."""
-    logger.info("Chargement de la configuration...")
-    
-    try:
-        with open(config_path) as f:
-            config = toml.load(f)
-        validate_config(config)  # Validation après chargement
-        logger.debug("Configuration validée avec succès")
-    except Exception as e:
-        logger.error(f"Erreur de configuration: {e}")
-        raise
+from models.text_pipeline import create_text_pipeline_from_cfg
+from models.image_pipeline import create_image_pipeline_from_cfg
+from models.cnn_features import CNNFeaturizer  # gère ResNet/ViT selon cfg
 
 
-# === Définir le chemin par défaut du TOML ======================================
-# Définir un chemin par défaut vers features/config.toml (relatif à ce fichier)
 DEFAULT_CFG = Path(__file__).resolve().parents[1] / "features" / "config.toml"
 
-# === Charger la configuration TOML =============================================
-# Utiliser tomllib (Py>=3.11) sinon rétroporter sur tomli
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # fallback si environnement < 3.11
-    import tomli as tomllib
+# --- logging helper (compat tools/peek_features.py) ---
+def setup_logging(level=logging.INFO,
+                  fmt="%(asctime)s | %(levelname)s | %(message)s",
+                  name="rakuten",
+                  log_dir: str | None = None,
+                  filename: str | None = None,
+                  *, force: bool = False):
+    """
+    Initialise le logging console + (optionnel) fichier.
+    - log_dir: dossier où écrire le .log (nom par défaut: <name>.log)
+    - filename: chemin complet du fichier de log (prend le pas sur log_dir)
+    """
+    handlers = [logging.StreamHandler(sys.stdout)]
+    if filename or log_dir:
+        if not filename:
+            os.makedirs(log_dir, exist_ok=True)
+            filename = os.path.join(log_dir, f"{name}.log")
+        else:
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+        handlers.append(logging.FileHandler(filename, mode="a", encoding="utf-8"))
+    logging.basicConfig(level=level, format=fmt, handlers=handlers, force=force)
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    return logger
+
+logger = setup_logging()
 
 
-@profile_func
+# -------------------- Config & Seed --------------------
 def load_config(config_path: str | Path | None = None) -> dict:
-    """Charger le fichier TOML et retourner un dict Python."""
     cfg_path = Path(config_path) if config_path else DEFAULT_CFG
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
     return cfg
 
-
-# === Initialiser les graines de hasard (reproductibilité) =======================
-@profile_func
 def init_seeds(seed: int) -> None:
-    """Fixer les graines pour numpy, random et Python hash."""
     np.random.seed(seed)
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
 
+def get_cache(cfg: dict) -> Optional[Memory]:
+    use_cache = bool(cfg.get("compute", {}).get("use_cache", False))
+    if not use_cache:
+        return None
+    cache_dir = os.path.join(cfg["outputs"]["log_dir"], "skcache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return Memory(cache_dir)
 
-# === Construire les stratégies d'échantillonnage ================================
-@profile_func
+
+
+# -------------------- HuggingFace (ViT) --------------------
+def setup_hf_env(cfg: dict) -> None:
+    """Prépare un cache HF local et désactive la télémétrie (robuste en entreprise/proxy)."""
+    base = cfg.get("outputs", {}).get("log_dir", "logs")
+    hf_cache = os.path.join(base, "hf_cache")
+    os.makedirs(hf_cache, exist_ok=True)
+    os.environ.setdefault("HF_HOME", hf_cache)
+    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", hf_cache)
+    os.environ.setdefault("TRANSFORMERS_CACHE", hf_cache)
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
+def ensure_vit_available(model_name: str = "google/vit-base-patch16-224", revision: str = "main") -> None:
+    """Tente de télécharger le modèle ViT & processor (une fois), sinon bascule offline."""
+    try:
+        import transformers as tfm
+        _ = tfm.AutoImageProcessor.from_pretrained(model_name, revision=revision, local_files_only=False)
+        _ = tfm.ViTModel.from_pretrained(model_name, revision=revision, local_files_only=False)
+        logger.info("[HF] ViT '%s' disponible (réseau).", model_name)
+    except Exception as e:
+        logger.warning("[HF] Réseau indisponible (%s). Tentative offline avec les fichiers en cache…", e)
+        try:
+            import transformers as tfm
+            _ = tfm.AutoImageProcessor.from_pretrained(model_name, revision=revision, local_files_only=True)
+            _ = tfm.ViTModel.from_pretrained(model_name, revision=revision, local_files_only=True)
+            logger.info("[HF] ViT '%s' trouvé en cache local.", model_name)
+        except Exception as e2:
+            logger.error("[HF] ViT '%s' introuvable. Télécharge le modèle manuellement (connexion requise).", model_name)
+            raise e2
+
+# -------------------- Sampling --------------------
 def make_sampling_strategies(y_train: pd.Series,
-                             major_class: int = 2583,
-                             major_cap: int = 6000,
-                             tail_min: int = 1500):
-    """
-    Construire deux stratégies pour imblearn :
-      - under : plafonner uniquement la classe major_class à major_cap
-      - over  : remonter toutes les classes d'effectif < tail_min à tail_min
-    Retourner (under_dict, over_dict).
-    """
+                             major_class: int,
+                             major_cap: int,
+                             tail_min: int) -> Tuple[dict, dict]:
     vc = y_train.value_counts()
     under = {
         int(cls): (min(int(cnt), int(major_cap)) if int(cls) == int(major_class) else int(cnt))
@@ -244,80 +145,41 @@ def make_sampling_strategies(y_train: pd.Series,
     over = {int(cls): int(tail_min) for cls, cnt in vc.items() if int(cnt) < int(tail_min)}
     return under, over
 
-
-# === Définir un under-sampler adaptatif (CV-safe) ===============================
-
 class AdaptiveUnderSampler(BaseSampler):
-    """
-    Under-sampler adaptatif : à chaque fold de CV, borner l'effectif de chaque
-    classe à min(plafond_configuré, effectif_du_fold).
-    cap_dict : {classe: plafond_max} (ex. {2583: 6000})
-    """
-    # imblearn/sklearn validations
-    _parameter_constraints = {
-        "cap_dict": [dict, None],
-        "random_state": [None, int],
-        "sampling_strategy": [str, dict, float, callable, None],  # ex. 'auto'
-    }
-    _sampling_type = "under-sampling"  # requis par BaseSampler
-
-    @profile_func
+    _parameter_constraints = {"cap_dict": [dict, None], "random_state": [None, int], "sampling_strategy": [str, dict, float, callable, None]}
+    _sampling_type = "under-sampling"
     def __init__(self, cap_dict=None, random_state=None, sampling_strategy="auto"):
         self.cap_dict = cap_dict or {}
         self.random_state = random_state
-        # requis par BaseSampler.fit_resample (même si non utilisé ensuite)
         self.sampling_strategy = sampling_strategy
-
-    @profile_func
     def _fit_resample(self, X, y):
-        # sécuriser y en 1D
         y_arr = np.asarray(y).ravel()
-
-        # effectifs observés dans CE fold
-        cnt = Counter(y_arr)
-
-        # stratégie bornée par cap_dict : min(effectif_fold, plafond_configuré)
-        sampling_strategy = {
-            cls: min(n, self.cap_dict.get(cls, n))
-            for cls, n in cnt.items()
-        }
-
-        # déléguer à RandomUnderSampler avec cette stratégie
-        rus = RandomUnderSampler(
-            sampling_strategy=sampling_strategy,
-            random_state=self.random_state
-        )
-        X_res, y_res = rus.fit_resample(X, y_arr)
-        return X_res, y_res
-
-    @profile_func
+        cnt = {k: int(v) for k, v in zip(*np.unique(y_arr, return_counts=True))}
+        sampling_strategy = {cls: min(n, self.cap_dict.get(cls, n)) for cls, n in cnt.items()}
+        rus = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=self.random_state)
+        return rus.fit_resample(X, y_arr)
     def _more_tags(self):
         return {"allow_nan": False, "X_types": ["2darray", "sparse"]}
 
-# --- utils mémoire : caster en float32 pour réduire l'empreinte ---
-from scipy import sparse
+# -------------------- Utils --------------------
 class ToFloat32:
-    def fit(self, X, y=None): 
-        return self
+    def fit(self, X, y=None): return self
     def transform(self, X):
         try:
             return X.astype("float32") if sparse.issparse(X) else X.astype(np.float32)
         except Exception:
-            return X  # garde-fou si un bloc ne supporte pas astype 
+            return X
 
-### Définir le classifieur avec encodage des labels ================================   
+# -------------------- LabelEncoding wrapper --------------------
 class LabelEncodingClassifier(BaseEstimator, ClassifierMixin):
-    """Encode y en 0..K-1 pour fit/predict du classifieur sous-jacent, et redécode en sortie."""
     def __init__(self, base_estimator=None):
         self.base_estimator = base_estimator
-
     def get_params(self, deep=True):
         params = {"base_estimator": self.base_estimator}
         if deep and hasattr(self.base_estimator, "get_params"):
             for k, v in self.base_estimator.get_params(deep=True).items():
                 params[f"base_estimator__{k}"] = v
         return params
-
     def set_params(self, **params):
         if "base_estimator" in params:
             self.base_estimator = params.pop("base_estimator")
@@ -325,827 +187,106 @@ class LabelEncodingClassifier(BaseEstimator, ClassifierMixin):
         if base_params and hasattr(self.base_estimator, "set_params"):
             self.base_estimator.set_params(**base_params)
         return self
-
-    def fit(self, X, y):
+    def fit(self, X, y, **fit_params):
         self.le_ = LabelEncoder()
         y_enc = self.le_.fit_transform(y)
-        K = int(len(self.le_.classes_))  # nombre de classes observées
-
-        # Cloner le modèle sous-jacent
+        if "eval_set" in fit_params and isinstance(fit_params["eval_set"], list):
+            new_eval = []
+            for (Xv, yv) in fit_params["eval_set"]:
+                new_eval.append((Xv, self.le_.transform(np.asarray(yv))))
+            fit_params["eval_set"] = new_eval
         self.est_ = clone(self.base_estimator)
-
-        # Injecter num_class si le modèle le supporte (XGB / LGBM) et si multiclass
         try:
-            if K > 2 and hasattr(self.est_, "get_params") and hasattr(self.est_, "set_params"):
+            K = len(self.le_.classes_)
+            if K > 2 and hasattr(self.est_, "get_params"):
                 params = self.est_.get_params()
-                # LightGBM / XGBoost exposent 'num_class' dans leurs params sklearn
                 if "num_class" in params:
                     self.est_.set_params(num_class=K)
-                # Garde-fou XGB : s'assurer d'un objectif multiclass proba
                 if self.est_.__class__.__name__ == "XGBClassifier":
                     if params.get("objective", None) not in ("multi:softprob", "multi:softmax"):
                         self.est_.set_params(objective="multi:softprob")
         except Exception:
             pass
-
-        self.est_.fit(X, y_enc)
+        self.est_.fit(X, y_enc, **fit_params)
         return self
-
     def predict(self, X):
         y_enc = self.est_.predict(X)
         return self.le_.inverse_transform(np.asarray(y_enc))
-
     def predict_proba(self, X):
         if hasattr(self.est_, "predict_proba"):
             return self.est_.predict_proba(X)
         raise AttributeError("Le modèle sous-jacent ne supporte pas predict_proba.")
-    
-# === Fabriquer le classifieur à partir de la config =============================
-@profile_func
+
+# -------------------- Classifier builder --------------------
 def build_classifier(cfg: dict, seed: int):
-    """
-    Construire le classifieur final depuis la section [model] du TOML.
-
-    Support :
-      - name="lr"  -> LogisticRegression
-      - name="svc" -> LinearSVC (utile pour TF-IDF clairsemé)
-
-    Clés TOML reconnues (section [model]) :
-      name              = "lr" | "svc"
-      solver            = "saga" | "lbfgs" | "liblinear" | "newton-cg" | "sag"
-      penalty           = "l2" | "l1" | "elasticnet" | "none"
-      C                 = float
-      max_iter          = int
-      tol               = float
-      verbose           = int (0/1)
-      use_class_weight  = true/false   # -> "balanced" si true
-      fit_intercept     = true/false
-      l1_ratio          = float (0..1) # utilisé seulement si penalty="elasticnet"
-      multi_class       = "auto" | "ovr" | "multinomial"  # si omis: on laisse sklearn décider
-      ovr               = true/false   # envelopper en OneVsRestClassifier
-    """
     model_cfg = cfg.get("model", {}) or {}
     name = str(model_cfg.get("name", "lr")).lower()
-    sub = model_cfg.get(name, {}) if isinstance(model_cfg.get(name, {}), dict) else {}
-
     n_jobs = int(cfg.get("compute", {}).get("n_jobs", -1))
 
     if name in ("xgb", "xgboost"):
         from xgboost import XGBClassifier
         return XGBClassifier(
-            n_estimators=int(sub.get("n_estimators", model_cfg.get("n_estimators", 700))),
-            learning_rate=float(sub.get("learning_rate", model_cfg.get("learning_rate", 0.05))),
-            max_depth=int(sub.get("max_depth", model_cfg.get("max_depth", 8))),
-            subsample=float(sub.get("subsample", model_cfg.get("subsample", 0.8))),
-            colsample_bytree=float(sub.get("colsample_bytree", model_cfg.get("colsample_bytree", 0.8))),
-            reg_alpha=float(sub.get("reg_alpha", model_cfg.get("reg_alpha", 0.0))),
-            reg_lambda=float(sub.get("reg_lambda", model_cfg.get("reg_lambda", 1.0))),
-            tree_method=str(sub.get("tree_method", model_cfg.get("tree_method", "hist"))),
-            n_jobs=n_jobs,
-            random_state=seed,
-            objective="multi:softprob",
-            eval_metric="mlogloss",
+            n_estimators=int(model_cfg.get("xgb", {}).get("n_estimators", model_cfg.get("n_estimators", 2000))),
+            learning_rate=float(model_cfg.get("xgb", {}).get("learning_rate", model_cfg.get("learning_rate", 0.05))),
+            max_depth=int(model_cfg.get("xgb", {}).get("max_depth", model_cfg.get("max_depth", 8))),
+            subsample=float(model_cfg.get("xgb", {}).get("subsample", model_cfg.get("subsample", 0.8))),
+            colsample_bytree=float(model_cfg.get("xgb", {}).get("colsample_bytree", model_cfg.get("colsample_bytree", 0.8))),
+            reg_alpha=float(model_cfg.get("xgb", {}).get("reg_alpha", model_cfg.get("reg_alpha", 0.0))),
+            reg_lambda=float(model_cfg.get("xgb", {}).get("reg_lambda", model_cfg.get("reg_lambda", 1.0))),
+            tree_method=str(model_cfg.get("xgb", {}).get("tree_method", model_cfg.get("tree_method", "hist"))),
+            n_jobs=n_jobs, random_state=seed, objective="multi:softprob", eval_metric="mlogloss",
         )
 
     if name in ("lgbm", "lightgbm"):
         from lightgbm import LGBMClassifier
-        import warnings
-        warnings.filterwarnings(
-            "ignore",
-            message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
-            category=UserWarning
-        )
         return LGBMClassifier(
-            n_estimators=int(sub.get("n_estimators", model_cfg.get("n_estimators", 1000))),
-            learning_rate=float(sub.get("learning_rate", model_cfg.get("learning_rate", 0.05))),
-            num_leaves=int(sub.get("num_leaves", model_cfg.get("num_leaves", 127))),  # ↑
-            max_depth=int(sub.get("max_depth", model_cfg.get("max_depth", -1))),
-            # échantillonnage
-            feature_fraction=float(sub.get("feature_fraction", model_cfg.get("feature_fraction", 0.8))),   # alias de colsample
-            bagging_fraction=float(sub.get("bagging_fraction", model_cfg.get("bagging_fraction", 0.9))),   # alias de subsample
-            bagging_freq=int(sub.get("bagging_freq", model_cfg.get("bagging_freq", 1))),                       
-            # contraintes de split
-            min_child_samples=int(sub.get("min_child_samples", model_cfg.get("min_child_samples", 10))),   
-            min_split_gain=float(sub.get("min_split_gain", model_cfg.get("min_split_gain", 0.0))),
-            min_sum_hessian_in_leaf=float(sub.get("min_sum_hessian_in_leaf", model_cfg.get("min_sum_hessian_in_leaf", 1e-3))),
-            max_bin=int(sub.get("max_bin", model_cfg.get("max_bin", 511))),                                
-            # régularisation
-            reg_alpha=float(sub.get("reg_alpha", model_cfg.get("reg_alpha", 0.0))),
-            reg_lambda=float(sub.get("reg_lambda", model_cfg.get("reg_lambda", 0.0))),
-            # perf / logs / sparse
-            force_row_wise=bool(sub.get("force_row_wise", model_cfg.get("force_row_wise", True))),         # mieux pour CSR
-            verbosity=int(sub.get("verbosity", model_cfg.get("verbosity", -1))),                           # coupe le spam
-            n_jobs=n_jobs,
-            random_state=seed,
-            objective="multiclass",
+            n_estimators=int(model_cfg.get("lgbm", {}).get("n_estimators", model_cfg.get("n_estimators", 1200))),
+            learning_rate=float(model_cfg.get("lgbm", {}).get("learning_rate", model_cfg.get("learning_rate", 0.05))),
+            num_leaves=int(model_cfg.get("lgbm", {}).get("num_leaves", model_cfg.get("num_leaves", 255))),
+            max_depth=int(model_cfg.get("lgbm", {}).get("max_depth", model_cfg.get("max_depth", -1))),
+            feature_fraction=float(model_cfg.get("lgbm", {}).get("feature_fraction", model_cfg.get("feature_fraction", 0.8))),
+            bagging_fraction=float(model_cfg.get("lgbm", {}).get("bagging_fraction", model_cfg.get("bagging_fraction", 0.8))),
+            bagging_freq=int(model_cfg.get("lgbm", {}).get("bagging_freq", model_cfg.get("bagging_freq", 1))),
+            min_child_samples=int(model_cfg.get("lgbm", {}).get("min_child_samples", model_cfg.get("min_child_samples", 40))),
+            reg_alpha=float(model_cfg.get("lgbm", {}).get("reg_alpha", model_cfg.get("reg_alpha", 0.0))),
+            reg_lambda=float(model_cfg.get("lgbm", {}).get("reg_lambda", model_cfg.get("reg_lambda", 1.0))),
+            n_jobs=n_jobs, random_state=seed, objective="multiclass",
         )
 
     if name == "svc":
         cw = "balanced" if model_cfg.get("use_class_weight", False) else None
-        loss    = str(sub.get("loss",    model_cfg.get("loss", "squared_hinge")))
-        dual    = bool(sub.get("dual",    model_cfg.get("dual", True)))
-        penalty = str(sub.get("penalty", model_cfg.get("penalty", "l2")))
-        # Penalty autorisée
-        if penalty not in {"l2"}:
-            raise ValueError("LinearSVC ne supporte que penalty='l2'.")
-
-        # Perte/dual cohérents
-        if loss not in {"hinge", "squared_hinge"}:
-            raise ValueError("LinearSVC loss ∈ {'hinge','squared_hinge'}.")
-
-        # Règles scikit-learn :
-        # - loss='hinge' ⇒ dual doit être True
-        # - dual=False n’est permis qu’avec loss='squared_hinge'
-        if loss == "hinge" and dual is False:
-            raise ValueError("LinearSVC : loss='hinge' nécessite dual=True.")
-        if dual is False and loss != "squared_hinge":
-            raise ValueError("LinearSVC : dual=False uniquement avec loss='squared_hinge'.")
-        # multi_class cohérent si tu forces OvR
-        if model_cfg.get("ovr", False):
-            # Eviter multinomial quand on va wrapper en OvR (sinon redondant/confus)
-            if sub.get("multi_class", model_cfg.get("multi_class", "auto")) == "multinomial":
-                logger.warning("`ovr=true` mais multi_class='multinomial' pour LR → "
-                               "je passe implicitement en OvR.")
         return LinearSVC(
-            C=float(sub.get("C", model_cfg.get("C", 1.0))),
-            tol=float(sub.get("tol", model_cfg.get("tol", 1e-3))),
-            max_iter=int(sub.get("max_iter", model_cfg.get("max_iter", 2000))),
-            class_weight=cw,
-            loss=loss,
-            dual=dual,
-            penalty=penalty,
+            C=float(model_cfg.get("svc", {}).get("C", model_cfg.get("C", 1.0))),
+            tol=float(model_cfg.get("svc", {}).get("tol", model_cfg.get("tol", 5e-4))),
+            max_iter=int(model_cfg.get("svc", {}).get("max_iter", model_cfg.get("max_iter", 4000))),
+            class_weight=cw, loss="squared_hinge", dual=False, penalty="l2",
         )
 
-    # default: LR
+    # défaut : LR
     use_cw = bool(model_cfg.get("use_class_weight", False))
     class_weight = "balanced" if use_cw else None
-    solver  = str(sub.get("solver",  model_cfg.get("solver", "saga")))
-    penalty = str(sub.get("penalty", model_cfg.get("penalty", "l2")))
-    C       = float(sub.get("C",      model_cfg.get("C", 1.0)))
-    max_it  = int(sub.get("max_iter", model_cfg.get("max_iter", 3000)))
-    tol     = float(sub.get("tol",    model_cfg.get("tol", 1e-3)))
-    verbose = int(sub.get("verbose",  model_cfg.get("verbose", 0)))
-    fit_intercept = bool(sub.get("fit_intercept", model_cfg.get("fit_intercept", True)))
-    multi = sub.get("multi_class", model_cfg.get("multi_class", None))
-    l1_ratio = sub.get("l1_ratio", model_cfg.get("l1_ratio", None))
-    if penalty != "elasticnet":
-        l1_ratio = None
-    params = dict(
-        solver=solver, penalty=penalty, C=C, max_iter=max_it, tol=tol,
-        verbose=verbose, class_weight=class_weight, random_state=seed,
-        n_jobs=n_jobs, fit_intercept=fit_intercept,
+    return LogisticRegression(
+        solver=str(model_cfg.get("lr", {}).get("solver", model_cfg.get("solver", "saga"))),
+        penalty=str(model_cfg.get("lr", {}).get("penalty", model_cfg.get("penalty", "l2"))),
+        C=float(model_cfg.get("lr", {}).get("C", model_cfg.get("C", 1.0))),
+        max_iter=int(model_cfg.get("lr", {}).get("max_iter", model_cfg.get("max_iter", 4000))),
+        tol=float(model_cfg.get("lr", {}).get("tol", model_cfg.get("tol", 1e-3))),
+        verbose=int(model_cfg.get("lr", {}).get("verbose", model_cfg.get("verbose", 0))),
+        class_weight=class_weight,
+        fit_intercept=True,
+        n_jobs=int(cfg.get("compute", {}).get("n_jobs", -1)),
     )
-    if l1_ratio is not None: params["l1_ratio"] = float(l1_ratio)
-    if multi is not None and str(multi).lower() != "auto": params["multi_class"] = str(multi)
-    if penalty == "l1" and solver not in {"liblinear", "saga"}:
-        raise ValueError("penalty='l1' nécessite solver 'liblinear' ou 'saga'.")
 
-    if penalty == "elasticnet" and solver != "saga":
-        raise ValueError("penalty='elasticnet' nécessite solver 'saga'.")
-
-    # multi_class cohérent si tu forces OvR
-    if model_cfg.get("ovr", False):
-        # Eviter multinomial quand on va wrapper en OvR (sinon redondant/confus)
-        if sub.get("multi_class", model_cfg.get("multi_class", "auto")) == "multinomial":
-            logger.warning("`ovr=true` mais multi_class='multinomial' pour LR → "
-                       "je passe implicitement en OvR.")
-    return LogisticRegression(**params)
-
-    
-# === Construire les pipelines baselines sans rééchantillonnage ==================
-from typing import Optional
-from joblib import Memory
-
-@profile_func
-def get_cache(cfg: dict):
-    """Retourne un objet Memory si use_cache=true dans [compute], sinon None."""
-    use_cache = bool(cfg.get("compute", {}).get("use_cache", False))
-    if not use_cache:
-        return None
-    cache_dir = os.path.join(cfg["outputs"]["log_dir"], "skcache")
-    os.makedirs(cache_dir, exist_ok=True)
-    return Memory(cache_dir)
-
-@profile_func
-def build_baseline_pipeline(
-    kind: str,
-    cfg: dict,
-    seed: int,
-    y_train: Optional[pd.Series] = None,   # <- nouveau
-):
-    """
-    Construire une pipeline baseline.
-    kind in {'b0','b1','b2','b3','b4'}
-    """
-    need_cols = ["designation", "description", "productid", "imageid"]
-
-    if kind == "b0":
-        pipe = DummyClassifier(strategy="most_frequent")
-        return pipe, ["designation"]
-
-    if kind == "b1":
-        pipe = DummyClassifier(strategy="stratified", random_state=seed)
-        return pipe, ["designation"]
-
-    if kind == "b2":
-        text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
-        clf = build_classifier(cfg, seed)
-        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
-        if model_name in ("xgb","xgboost","lgbm","lightgbm"):
-            clf = LabelEncodingClassifier(clf)
-
-        cache = get_cache(cfg)
-        if cache is not None and hasattr(cache, "location"):
-            logger.info(f"Cache sklearn activé: {cache.location}")
-
-        pipe = SkPipeline(
-            [("text", text_branch), ("clf", clf)],
-            memory=cache
-        )
-        return pipe, ["designation", "description"]
-
-    if kind == "b3":
-    # Si [images.cnn.enabled]=true → utiliser CNN, sinon pixels
-        use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
-        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
-        is_tree_model = model_name in ("xgb","xgboost","lgbm","lightgbm")
-        if use_cnn:
-            img_branch = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model)
-        else:
-            img_branch = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
-
-        img_union = FeatureUnion([("img", img_branch)])
-
-        stats_c = cfg.get("images", {}).get("stats_combined", {})
-        if bool(stats_c.get("enabled", False)):
-            img_union.transformer_list.append((
-                "image_stats_combined",
-                ImageStatsCombinedFeaturizer(
-                    image_dir=cfg["images"]["train_dir"],
-                    imgid_col="imageid", pid_col="productid",
-                    white_threshold=int(stats_c.get("white_threshold", 230)),
-                    black_threshold=int(stats_c.get("black_threshold", 25)),
-                    min_area=int(stats_c.get("min_area", 16)),
-                    prefix_basic=str(stats_c.get("prefix_basic", "img_")),
-                    prefix_pro=str(stats_c.get("prefix_pro", "pro_")),
-                )
-            ))
-
-        clf = build_classifier(cfg, seed)
-        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
-        if is_tree_model:
-            clf = LabelEncodingClassifier(clf)
-        cache = get_cache(cfg)
-        pipe = SkPipeline([("img", img_union), ("clf", clf)], memory=cache)
-        return pipe, ["productid", "imageid"]
-    
-    # ---------- B4 : multimodal (texte + image) avec sampling ----------
-    if kind == "b4":
-        if y_train is None:
-            raise ValueError("b4 a besoin de y_train pour calculer les stratégies d'échantillonnage.")
-        under, over = make_sampling_strategies(
-            y_train,
-            major_class=cfg["sampling"]["major_class"],
-            major_cap=cfg["sampling"]["major_cap"],
-            tail_min=cfg["sampling"]["tail_min"],
-        )
-        seed = int(cfg.get("random", {}).get("seed", 42))
-        pipe = create_combined_pipeline(cfg, under, over, seed)
-        return pipe, ["designation", "description", "productid", "imageid"]
-
-    # ---------- fin ----------
-    raise ValueError(f"Baseline inconnue: {kind}")
-
-
-# === Exécuter une baseline et écrire un rapport CV ==============================
-@profile_func
-def run_baseline_and_report(kind: str, X_train, y_train, cfg: dict, outdir="results"):
-    """Exécute la baseline avec validation croisée et diagnostics."""
-    logger.info(f"Évaluation baseline {kind}...")
-    """
-    Exécuter la baseline 'kind' en CV, puis écrire un résumé clair :
-      - results/baseline_results_summary.csv (append)
-      - results/report_{kind}_cv.txt        (rapport complet par classe)
-    """
-    os.makedirs(outdir, exist_ok=True)
-
-    seed = int(cfg.get("random", {}).get("seed", 42))
-    splits = int(cfg.get("cv", {}).get("splits", 3))
-    shuffle = bool(cfg.get("cv", {}).get("shuffle", True))
-    cv_seed = int(cfg.get("cv", {}).get("random_state", seed))
-
-    pipe, need_cols = build_baseline_pipeline(kind, cfg, seed, y_train=y_train if kind=="b4" else None)
-
-    # --- run metadata pour le CSV ---
-    run_meta = {}
-
-    # CNN (depuis la cfg)
-    cnn_cfg = cfg.get("images", {}).get("cnn", {}) or {}
-    run_meta["cnn_enabled"] = bool(cnn_cfg.get("enabled", False))
-    run_meta["cnn_arch"]    = cnn_cfg.get("arch", None)
-    dr = cnn_cfg.get("dim_reduction", {}) or {}
-    run_meta["cnn_svd"]   = bool(dr.get("enabled", False))
-    run_meta["cnn_svd_n"] = int(dr.get("n_components", 0)) if run_meta["cnn_svd"] else 0
-
-    # branches de fusion et poids réellement utilisés
-    fusion_branches = []
-    fusion_weights  = {}
-
-    # selon la baseline, retrouver la FeatureUnion
-    features_step = pipe.named_steps.get("features")
-    if features_step is None:
-        # b2 : texte seul
-        features_step = pipe.named_steps.get("text")
-        # b3 : image seule
-        if features_step is None:
-            features_step = pipe.named_steps.get("img")
-
-    feat_union = features_step
-    if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
-        feat_union = features_step.named_steps["union"]
-
-    try:
-        fusion_branches = [name for name, _ in getattr(feat_union, "transformer_list", [])]
-        fusion_weights  = getattr(feat_union, "transformer_weights", {}) or {}
-    except Exception:
-        pass
-
-    run_meta["fusion_branches"] = fusion_branches
-    run_meta["fusion_weights"]  = fusion_weights
-
-    # détection de branche prunée (pixels absents)
-    pruned = []
-    if "image_pixels" not in fusion_branches:
-        pruned.append("image_pixels")
-    run_meta["pruned_branches"] = pruned
-
-    # weights texte appliqués / ignorés (si la branche texte est une union)
-    applied_text_weights = {}
-    ignored_text_weights = []
-    try:
-        text_trf = None
-        for name, sub in getattr(feat_union, "transformer_list", []):
-            if name == "text":
-                text_trf = sub
-                break
-        if text_trf is not None and hasattr(text_trf, "named_steps"):
-            inner = text_trf.named_steps.get("text")  # create_text_pipeline_from_cfg retourne souvent une union sous le nom "text"
-            if inner is not None and hasattr(inner, "transformer_list"):
-                present_text_keys = {n for n, _ in inner.transformer_list}
-                text_w_cfg = dict(cfg.get("text", {}).get("weights", {}))
-                applied_text_weights = {k: float(v) for k, v in text_w_cfg.items() if k in present_text_keys}
-                ignored_text_weights = sorted(set(text_w_cfg) - set(applied_text_weights))
-    except Exception:
-        pass
-
-    run_meta["text_weights"]    = applied_text_weights
-    run_meta["ignored_weights"] = ignored_text_weights
-
-    # modèle final (nom + params clés)
-    final_est = pipe.named_steps.get("model") or pipe.named_steps.get("clf")
-    mname, mparams = _short_estimator_name_and_params(final_est) if final_est else ("<unknown>", {})
-    run_meta["model_name"]   = mname
-    run_meta["model_params"] = mparams
-
-    # tailles des folds remplies dans la boucle
-    fold_sizes = []
-
-    # Construire une CV stratifiée
-    cv = StratifiedKFold(n_splits=splits, shuffle=shuffle, random_state=cv_seed)
-
-    # ===== Export features pour ACP/SHAP (OOF, même ordre que y_pred_cv) =====
-    export_features = True  # False pour couper
-    feat_blocks = []        # liste de blocs (sparse/dense) par fold (validation uniquement)
-    feat_indices = []       # index du jeu de validation, pour réordonner ensuite
-    use_svd_for_preview = True   # compressions 2D/100D pour ACP rapide (optionnel)
-    svd_components_preview = 100 # 100 pour ACP exploratoire, 2 pour projeter directement
-    EXPORT_K = 256   # (128/256/512 au choix)
-
-    # ==== Prédictions OOF avec barre de progression ====
-    from sklearn.base import clone
-    import numpy as np
-
-    splits_iter = list(cv.split(X_train, y_train))
-    y_pred_cv = np.empty_like(y_train.values)
-
-
-    pbar = tqdm(
-    total=len(splits_iter),
-    desc=f"{kind.upper()} CV",
-    unit="fold",
-    dynamic_ncols=True,  # s’adapte à la largeur du terminal
-    leave=True
-)
-    t0_total = time.time()
-    try:
-        for fold_idx, (tr, va) in enumerate(splits_iter, 1):
-            fold_sizes.append({"train": int(len(tr)), "val": int(len(va))})
-            logger.info(f"Fold {fold_idx}/{cv.get_n_splits()} | train={len(tr)} val={len(va)}")
-            logger.info("Classes train: %s", pd.Series(y_train.iloc[tr]).value_counts().to_dict())
-            logger.info("Classes val  : %s", pd.Series(y_train.iloc[va]).value_counts().to_dict())
-            t0 = time.time()
-            model = clone(pipe)
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message=r"This Pipeline instance is not fitted yet",
-                    category=FutureWarning,
-                    module=r"sklearn\.pipeline",
-                )
-                model.fit(X_train.iloc[tr][need_cols], y_train.iloc[tr])
-                y_pred_cv[va] = model.predict(X_train.iloc[va][need_cols])
-                
-                # Enregistrement du modèle dans le cas de ResNet
-                use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
-                if use_cnn:
-                    features_step = model.named_steps["features"]
-                    resnet_model = features_step.named_transformers.image_cnn.named_steps["cnn"]
-
-                    model_path = os.path.join(outdir, f"model_resnet_{kind}_fold_{fold_idx}.pth")
-                    resnet_model.save_model(model_path)
-
-                run_meta["cv_fold_sizes"] = fold_sizes
-
-            # ----- Export des features transformées du split de validation -----
-            if export_features:
-                try:
-                    Xtr = X_train.iloc[tr][need_cols]
-                    Xv  = X_train.iloc[va][need_cols]
-
-                    if kind == "b4":
-                        Ztr = model.named_steps["features"].transform(Xtr)
-                        if "scaler" in model.named_steps:
-                            Ztr = model.named_steps["scaler"].transform(Ztr)
-                        Zv = model.named_steps["features"].transform(Xv)
-                        if "scaler" in model.named_steps:
-                            Zv = model.named_steps["scaler"].transform(Zv)
-
-                    elif kind == "b2":
-                        Ztr = model.named_steps["text"].transform(Xtr)
-                        Zv  = model.named_steps["text"].transform(Xv)
-
-                    elif kind == "b3":
-                        Ztr = model.named_steps["img"].transform(Xtr)
-                        Zv  = model.named_steps["img"].transform(Xv)
-
-                    else:
-                        Ztr = Zv = None
-
-                    if Ztr is not None and Zv is not None:
-                        # SVD "local au fold" appris sur TRAIN → projette VAL vers une dimension fixe
-                        k = min(EXPORT_K, (Ztr.shape[1] - 1)) if hasattr(Ztr, "shape") else EXPORT_K
-                        if k < 2:  # garde-fou si très peu de colonnes
-                            k = 2
-                        svd_fold = TruncatedSVD(n_components=k, random_state=cv_seed)
-                        Ztr_red = svd_fold.fit_transform(Ztr)
-                        var_ratio = getattr(svd_fold, "explained_variance_ratio_", None)
-                        if var_ratio is not None:
-                            logger.debug("Fold %d SVD var_explained=%.2f%%", fold_idx, 100*var_ratio.sum())
-                        Zv_red  = svd_fold.transform(Zv)
-
-                        feat_blocks.append(Zv_red)            # (n_val, k) — dimension fixe
-                        feat_indices.append(X_train.index[va])
-                except Exception as e:
-                    logger.warning("Export features impossible sur fold %d: %s", fold_idx, e)
-            pbar.set_postfix(time=f"{time.time()-t0:.1f}s")
-            pbar.update(1)
-    finally:
-        pbar.close()
-
-    dt = time.time() - t0_total
-
-    preds_df = pd.DataFrame({
-        "y_true": y_train,
-        "y_pred": y_pred_cv
-    }, index=y_train.index)
-
-    preds_path = os.path.join(outdir, f"preds_{kind}.csv")
-    preds_df.to_csv(preds_path, index=True)
-    print(f"> Prédictions sauvegardées: {preds_path}")
-
-    # ===== Sauvegarde finale des features OOF =====
-    if export_features and len(feat_blocks) == len(splits_iter):
-        try:  
-            from scipy import sparse        
-            # Empilement en respectant l'ordre OOF
-            # On réordonne avec l'index global de X_train
-            all_idx = np.concatenate([np.asarray(idx) for idx in feat_indices])   # index pandas des lignes
-            # Concaténer les blocs (sparse compatible)
-            if sparse.issparse(feat_blocks[0]):
-                Z_all = sparse.vstack(feat_blocks, format="csr")
-            else:
-                Z_all = np.vstack(feat_blocks)
-
-            # Réordonner Z_all selon l'ordre de y_train (OOF dans l'ordre de l'index)
-            # astuce : on crée une position pour chaque index
-            pos = pd.Series(np.arange(len(all_idx)), index=all_idx)
-            order = pos.loc[y_train.index].values   # positions correspondant à l'ordre de y_train
-            if sparse.issparse(Z_all):
-                Z_all = Z_all[order]
-            else:
-                Z_all = Z_all[order, :]
-
-            # Sauvegarde sparse + une version "preview" compressée pour ACP
-            os.makedirs(outdir, exist_ok=True)
-            base = os.path.join(outdir, f"features_{kind}")
-
-            # 3.1) Sauvegarde sparse (si applicable)
-            try:
-                from scipy.sparse import save_npz
-                if sparse.issparse(Z_all):
-                    save_npz(base + "_oof.npz", Z_all)
-                    logger.info("Features OOF sauvegardées (sparse): %s_oof.npz", base)
-                else:
-                    np.save(base + "_oof.npy", Z_all)
-                    logger.info("Features OOF sauvegardées (npy): %s_oof.npy", base)
-            except Exception as e:
-                logger.warning("Impossible de sauver en sparse/NPY: %s", e)
-
-            # 3.2) Aperçu SVD 100D pour ACP rapide (optionnel)
-            if use_svd_for_preview:
-                try:
-                    # Si déjà scalé (with_mean=False), on peut appliquer directement SVD
-                    svd = TruncatedSVD(n_components=svd_components_preview, random_state=cv_seed)
-                    Z_svd = svd.fit_transform(Z_all)
-                    # Sauvegarder un CSV léger (avec y_true/y_pred pour colorer en ACP)
-                    svd_df = pd.DataFrame(Z_svd, index=y_train.index,
-                                      columns=[f"svd_{i+1}" for i in range(svd_components_preview)])
-                    svd_df["y_true"] = y_train.astype(str).values
-                    svd_df["y_pred"] = pd.Series(y_pred_cv, index=y_train.index).astype(str).values
-                    svd_csv = base + f"_svd{svd_components_preview}_preview.csv"
-                    svd_df.to_csv(svd_csv, index=True)
-                    logger.info("Aperçu SVD %dD sauvegardé: %s", svd_components_preview, svd_csv)
-                except Exception as e:
-                    logger.warning("SVD preview impossible: %s", e)
-
-        except Exception as e:
-            logger.warning("Consolidation features OOF échouée: %s", e)
-
-    # ==== Harmoniser les types pour éviter toute surprise int/str ====
-    yt = y_train.astype(str)
-    yp = pd.Series(y_pred_cv, index=y_train.index).astype(str)
-
-    # ==== Métriques & rapport ====
-    from sklearn.metrics import f1_score, classification_report, precision_recall_fscore_support
-
-    f1_macro = f1_score(yt, yp, average="macro")
-    f1_weighted = f1_score(yt, yp, average="weighted")
-
-    # --- mapping lisible ---
-    labels_map_path = os.path.join("features", "labels_map.json")
-    lblmap = None
-    if os.path.exists(labels_map_path):
-        import json
-        with open(labels_map_path, "r", encoding="utf-8") as f:
-            lblmap = {str(k): v for k, v in json.load(f).items()}
-
-    # Construire un tableau de labels (dans l'ordre trié) et leurs noms lisibles
-    labels_vec = np.array(sorted(np.unique(yt)), dtype=str)
-    target_names = [lblmap.get(l, l) for l in labels_vec] if lblmap else None
-
-    # Rapports sklearn (id + lisible)
-    report = classification_report(yt, yp, labels=labels_vec, digits=4, zero_division=0)
-
-    report_readable = None
-    if target_names is not None:
-        report_readable = classification_report(
-            yt, yp, labels=labels_vec, target_names=target_names, digits=4, zero_division=0
-        )
-
-    # === Rapport par classe (CSV propre) ===
-    prec, rec, f1, supp = precision_recall_fscore_support(yt, yp, labels=labels_vec, zero_division=0)
-    per_class = pd.DataFrame({
-        "class_id": labels_vec,
-        "precision": prec,
-        "recall": rec,
-        "f1": f1,
-        "support": supp
-    }).sort_values("support", ascending=False)
-
-    # Sauvegarder le résumé
-
-
-    use_cnn = bool(cfg.get("images", {}).get("cnn", {}).get("enabled", False))
-    notes = []
-    notes.append(f"dummy={kind in ['b0','b1']}")
-    notes.append(f"text_only={kind=='b2'}")
-    notes.append(f"image_only={kind=='b3'}")
-    notes.append(f"multimodal={kind=='b4'}")
-    if kind in ['b3','b4']:
-        notes.append(f"cnn={'true' if use_cnn else 'false'}")
-    notes_str = " | ".join(notes)
-
-
-    summary_csv = Path(outdir) / "baseline_results_summary.csv"
-    summary_csv.parent.mkdir(parents=True, exist_ok=True)
-    row = {
-        "baseline": kind.upper(),
-        "cv_splits": splits,
-        "f1_macro": f1_macro,
-        "f1_weighted": f1_weighted,
-        "train_infer_time_sec": round(dt, 3),
-        "notes": notes_str,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "fusion_branches": "|".join(run_meta.get("fusion_branches", [])),
-        "fusion_weights": json.dumps(run_meta.get("fusion_weights", {}), ensure_ascii=False),
-        "text_weights": json.dumps(run_meta.get("text_weights", {}), ensure_ascii=False),
-        "ignored_weights": ",".join(run_meta.get("ignored_weights", [])),
-        "pruned_branches": ",".join(run_meta.get("pruned_branches", [])),
-        "cnn_enabled": run_meta.get("cnn_enabled", False),
-        "cnn_arch": run_meta.get("cnn_arch", None),
-        "cnn_svd": run_meta.get("cnn_svd", False),
-        "cnn_svd_n": run_meta.get("cnn_svd_n", 0),
-        "cv_fold_sizes": "|".join(f"{d['train']}/{d['val']}" for d in run_meta.get("cv_fold_sizes", [])),
-        "model_name": run_meta.get("model_name", ""),
-        "model_params": json.dumps(run_meta.get("model_params", {}), ensure_ascii=False),
-        }
-    pd.DataFrame([row]).to_csv(
-    summary_csv, index=False,
-    mode="a", header=not summary_csv.exists())
-
-
-    # Sauvegarder le rapport détaillé
-    with open(os.path.join(outdir, f"report_{kind}_cv.txt"), "w", encoding="utf-8") as f:
-        f.write(f"=== Baseline {kind.upper()} — CV (n_splits={splits}) ===\n")
-        f.write(f"F1-macro     : {f1_macro:.4f}\n")
-        f.write(f"F1-weighted  : {f1_weighted:.4f}\n")
-        f.write(f"Time (sec)   : {dt:.2f}\n\n")
-        f.write(report)
-
-    # Afficher un résumé console
-    print(f"[{kind.upper()}] F1-macro={f1_macro:.4f} | F1-weighted={f1_weighted:.4f} | time={dt:.1f}s")
-    print(f"> Résumé: {summary_csv}")
-    print(f"> Rapport: {os.path.join(outdir, f'report_{kind}_cv.txt')}")
-    print(f"[CV] terminé ({splits} folds)")
-    if report_readable is not None:
-        with open(os.path.join(outdir, f"report_{kind}_cv_readable.txt"), "w", encoding="utf-8") as f:
-            f.write(f"=== Baseline {kind.upper()} — CV (n_splits={splits}) ===\n")
-            f.write(f"F1-macro     : {f1_macro:.4f}\n")
-            f.write(f"F1-weighted  : {f1_weighted:.4f}\n\n")
-            f.write(report_readable)
-
-
-    # === Version lisible (mapping) ===
-    if lblmap is not None:
-        per_class_readable = per_class.assign(
-            class_name=per_class["class_id"].map(lblmap).fillna(per_class["class_id"])
-        )
-        cols = ["class_id", "class_name", "support", "precision", "recall", "f1"]
-        per_class_readable[cols].to_csv(os.path.join(outdir, f"report_{kind}_per_class_readable.csv"), index=False)
-
-    # === Petit résumé Markdown (lisible) ===
-    md_lines = [
-        f"# Baseline {kind.upper()} — CV ({splits} folds) — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"- **F1-macro**: {f1_macro:.4f}",
-        f"- **F1-weighted**: {f1_weighted:.4f}",
-        "",
-        "## Top 20 classes (par support)",
-    ]
-    top20 = per_class.head(20).copy()
-    if os.path.exists(labels_map_path):
-        top20["name"] = top20["class_id"].map(lblmap).fillna(top20["class_id"])
-        md_lines.append("| id | nom | support | precision | recall | f1 |")
-        md_lines.append("|---:|:-----|-------:|----------:|-------:|----:|")
-        for _, r in top20.iterrows():
-            md_lines.append(f"| {r['class_id']} | {top20.loc[_,'name']} | {int(r['support'])} | {r['precision']:.3f} | {r['recall']:.3f} | {r['f1']:.3f} |")
-    else:
-        md_lines.append("| id | support | precision | recall | f1 |")
-        md_lines.append("|---:|--------:|----------:|-------:|----:|")
-        for _, r in top20.iterrows():
-            md_lines.append(f"| {r['class_id']} | {int(r['support'])} | {r['precision']:.3f} | {r['recall']:.3f} | {r['f1']:.3f} |")
-
-    with open(os.path.join(outdir, f"report_{kind}_summary.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(md_lines))
-
-    # ---- Diagnostics (pour baselines images) ----
-    if kind in ("b3", "b4"):
-        logger.info("Exécution diagnostics baseline %s...", kind.upper())
-        sample_size = min(1000, len(X_train))
-        sample_idx = np.random.choice(len(X_train), sample_size, replace=False)
-        X_sample = X_train.iloc[sample_idx]
-        y_sample = y_train.iloc[sample_idx]
-
-    # Entraîner un modèle sur l'échantillon pour diagnostiquer
-        pipe.fit(X_sample[need_cols], y_sample)
-
-    # 1) Diagnostic réduction (PCA / SVD)
-        info = diagnostic_reduction(pipe)
-        logger.info("Diagnostic réduction (%s): %s", kind.upper(), info)
-
-    # 2) Autres diagnostics (classes prédites, proba, F1 sur l'échantillon)
-        diags = diagnostic_baseline(pipe, X_sample[need_cols], y_sample)
-        diags["reduction_info"] = info
-
-    # 2bis) Diagnostic CNN (si présent)
-        try:
-            features_step = pipe.named_steps.get("features") if "features" in pipe.named_steps else None
-            if features_step is not None:
-                if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
-                    feat_union = features_step.named_steps["union"]
-                else:
-                    feat_union = features_step
-                for name, sub in getattr(feat_union, "transformer_list", []):
-                    if name == "image_cnn" and hasattr(sub, "named_steps") and "cnn" in sub.named_steps:
-                        cnn = sub.named_steps["cnn"]
-                        if hasattr(cnn, "get_diagnostics"):
-                            diags["cnn_info"] = cnn.get_diagnostics()
-                            logger.info("Diagnostic CNN: %s", diags["cnn_info"])
-                    else:
-                        logger.debug("Pas de CNN dans le transformeur '%s' — ignoré pour le diagnostic.", name)
-        except Exception as e:
-            logger.warning("Impossible d'extraire le diagnostic CNN: %s", e)
-
-    # 3) Sauvegarder
-        diag_path = os.path.join(outdir, f"diagnostics_{kind}.json")
-        with open(diag_path, "w") as f:
-            json.dump(diags, f, indent=2)
-        logger.info("Diagnostics sauvegardés: %s", diag_path)
-
-@profile_func
-def diagnostic_baseline(
-    pipe: Union[SkPipeline, ImbPipeline],
-    X_sample: pd.DataFrame,
-    y_sample: pd.Series,
-    outdir: str = "results"
-) -> Dict[str, Any]:
-    """
-    Effectue des diagnostics sur le pipeline.
-    
-    Args:
-        pipe: Pipeline entraîné (sklearn ou imblearn)
-        X_sample: Échantillon de données
-        y_sample: Labels correspondants
-        outdir: Dossier de sortie des résultats
-        
-    Returns:
-        Dict contenant les métriques de diagnostic
-    """
-    logger.info("Exécution diagnostics pipeline...")
-    
-    diagnostics = {}
-    
-    try:
-        # 1. Vérification réduction dimension
-        if hasattr(pipe, "named_steps"):
-            for step_name, step in pipe.named_steps.items():
-                if hasattr(step, "explained_variance_ratio_"):
-                    var_ratio = step.explained_variance_ratio_.sum()
-                    diagnostics[f"{step_name}_variance_explained"] = var_ratio
-                    logger.info(f"Variance expliquée {step_name}: {var_ratio:.2%}")
-
-        # 1. Vérification réduction dimension SVD
-        if 'svd' in pipe.named_steps:
-            svd = pipe.named_steps['svd']
-            var_ratio = svd.explained_variance_ratio_.sum()
-            diagnostics["variance_explained"] = float(var_ratio)
-            logger.info(f"Variance expliquée SVD: {var_ratio:.2%}")
-        
-        # 2. Test prédictions
-        y_pred = pipe.predict(X_sample)
-        unique_classes = np.unique(y_pred)
-        diagnostics["n_predicted_classes"] = len(unique_classes)
-        diagnostics["predicted_classes"] = unique_classes.tolist()
-        logger.info(f"Classes uniques prédites: {unique_classes}")
-        
-        # 3. Vérification probabilités
-        if hasattr(pipe, "predict_proba"):
-            probs = pipe.predict_proba(X_sample)
-            max_prob = float(probs.max())
-            mean_prob = float(probs.mean())
-            diagnostics["max_probability"] = max_prob
-            diagnostics["mean_probability"] = mean_prob
-            logger.info(f"Probabilité max: {max_prob:.3f}, moyenne: {mean_prob:.3f}")
-            
-        # 4. Calcul F1-score sur échantillon
-        if y_sample is not None:
-            f1_macro = f1_score(y_sample, y_pred, average='macro')
-            diagnostics["sample_f1_macro"] = float(f1_macro)
-            logger.info(f"F1-macro sur échantillon: {f1_macro:.4f}")
-        
-        return diagnostics
-        
-    except Exception as e:
-        logger.error(f"Erreur durant diagnostic: {e}")
-        return {"error": str(e)}
-
-# === Construire la branche CNN depuis la config =================================
-# (avec post-réduction optionnelle)    
-@profile_func
-def create_cnn_branch_from_cfg(images_cfg: dict, apply_l2: bool = True, section: str = "cnn") -> SkPipeline:
-    """
-    Construire la branche CNN (embedding ResNet) depuis [images.cnn] du TOML.
-    Support : post-réduction optionnelle (TruncatedSVD) + normalisation L2 (conditionnelle).
-    """
+# -------------------- CNN / ViT branches --------------------
+def create_cnn_branch_from_cfg(images_cfg: dict, section: str = "cnn", apply_l2: bool = True) -> SkPipeline:
     cnn_cfg = images_cfg.get(section, {}) or {}
     if not bool(cnn_cfg.get("enabled", False)):
-        raise ValueError(f"CNN demandée mais [images.{section}.enabled] est false dans le TOML.")
+        raise ValueError(f"[images.{section}.enabled] = false")
 
-    image_dir = images_cfg["train_dir"]
     featurizer = CNNFeaturizer(
-        image_dir=image_dir,
+        image_dir=images_cfg["train_dir"],
         arch=str(cnn_cfg.get("arch", "resnet50")),
-        batch_size=int(cnn_cfg.get("batch_size", 16)),
+        batch_size=int(cnn_cfg.get("batch_size", 12)),
         device=str(cnn_cfg.get("device", "auto")),
         use_imagenet_norm=bool(cnn_cfg.get("use_imagenet_norm", True)),
         trainable_last_layers=int(cnn_cfg.get("trainable_last_layers", 1)),
@@ -1156,410 +297,486 @@ def create_cnn_branch_from_cfg(images_cfg: dict, apply_l2: bool = True, section:
         finetune_lr=float(cnn_cfg.get("finetune_lr", 3e-4)),
         finetune_weight_decay=float(cnn_cfg.get("finetune_weight_decay", 0.01)),
         finetune_max_n=int(cnn_cfg.get("finetune_max_n", 8000)),
-        # HF
+        # ViT/HF
         hf_model_name=cnn_cfg.get("hf_model_name", None),
-        hf_revision=cnn_cfg.get("hf_revision", None),
-        hf_feature_dim=cnn_cfg.get("hf_feature_dim", None),
+        hf_revision=cnn_cfg.get("hf_revision", "main"),
+        hf_feature_dim=cnn_cfg.get("hf_feature_dim", 768),
+        hf_use_fast=bool(cnn_cfg.get("use_fast", True)),
+        ft_patience=int(cnn_cfg.get("ft_patience", 3)),
     )
-
     steps = [("cnn", featurizer)]
-
     dr = cnn_cfg.get("dim_reduction", {}) or {}
     if bool(dr.get("enabled", False)):
-        n_comp = int(dr.get("n_components", 256))
-        rs = int(dr.get("random_state", 42))
-        steps += [
-            ("to32_pre", ToFloat32()),
-            ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
-        ]
+        steps += [("to32_pre", ToFloat32()),
+                  ("svd", TruncatedSVD(n_components=int(dr.get("n_components", 256)),
+                                       random_state=int(dr.get("random_state", 42))))]
         if apply_l2:
             steps.append(("l2norm", Normalizer(copy=False)))
         steps.append(("to32_post", ToFloat32()))
     else:
-        # Pas de SVD : on ne met L2 que si demandé
         if apply_l2:
             steps.append(("l2norm", Normalizer(copy=False)))
-
     return SkPipeline(steps)
 
-
-# === Construire la pipeline multimodale complète ================================
-@profile_func
-def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dict, seed: int):
-    # --- Texte ---
+# -------------------- Combined pipeline (b4) --------------------
+def create_combined_pipeline(cfg: dict, under_strategy: dict, over_strategy: dict, seed: int) -> ImbPipeline:
     text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
 
-    # Modèle cible (pour choisir d'appliquer L2 ou pas)
     model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
     is_tree_model = model_name in ("xgb", "xgboost", "lgbm", "lightgbm")
 
-    # (SVD text optionnel conservé tel quel, avec L2 auto-off pour arbres)
     svd_cfg = (cfg.get("text", {}).get("svd", {}) or {})
     if bool(svd_cfg.get("enabled", True)):
-        n_comp = int(svd_cfg.get("n_components", 600))
-        rs     = int(svd_cfg.get("random_state", seed))
-        l2_cfg = bool(svd_cfg.get("l2norm", True))
-        use_l2 = l2_cfg and not is_tree_model  # ← coupe L2 pour XGB/LGBM
-
-        from sklearn.pipeline import Pipeline as _SkPipe
-        # On normalise le flux en float32 autour du SVD
-        steps_txt = [
+        text_branch = SkPipeline([
             ("text", text_branch),
             ("to32_pre", ToFloat32()),
-            ("svd", TruncatedSVD(n_components=n_comp, random_state=rs)),
-        ]
-        if use_l2:
-            from sklearn.preprocessing import Normalizer
-            steps_txt.append(("l2", Normalizer(copy=False)))
-        steps_txt.append(("to32_post", ToFloat32()))
-
-        text_branch = _SkPipe(steps_txt)
-
-    # --- LIRE les poids de fusion en amont ---
-    fusion_cfg = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
-    want_pixels = not (fusion_cfg.get("image_pixels", None) == 0)
+            ("svd", TruncatedSVD(n_components=int(svd_cfg.get("n_components", 700)),
+                                 random_state=int(svd_cfg.get("random_state", seed)))),
+            *([("l2", Normalizer(copy=False))] if (svd_cfg.get("l2norm", True) and not is_tree_model) else []),
+            ("to32_post", ToFloat32()),
+        ])
 
     transformers = [("text", text_branch)]
+    images_cfg = cfg.get("images", {}) or {}
+    fusion_w = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
 
-# --- CNN (L2 auto OFF pour modèles arbres : xgb/lgbm) ---
-    try:
-        images_cfg = (cfg.get("images", {}) or {})
-        cnn_cfg = (images_cfg.get("cnn", {}) or {})
-        if bool(cnn_cfg.get("enabled", False)):
-            image_cnn = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model)
-            arch = cnn_cfg.get("arch", "resnet50")
-            dr   = cnn_cfg.get("dim_reduction", {}) or {}
-            logger.info("CNN activée: arch=%s, svd=%s/%s", arch, bool(dr.get("enabled", False)), dr.get("n_components", None))
-            transformers.append(("image_cnn", image_cnn))
-    except Exception as e:
-        logger.warning("CNN désactivée (raison: %s)", e)
-
-    # --- CNN ViT (branch "cnn_vit") ---
-    try:
-        vit_cfg = (images_cfg.get("cnn_vit", {}) or {})
-        if bool(vit_cfg.get("enabled", False)):
-            image_cnn_vit = create_cnn_branch_from_cfg(cfg["images"], apply_l2=not is_tree_model, section="cnn_vit")
-            arch = vit_cfg.get("hf_model_name", vit_cfg.get("arch", "vit"))
-            dr   = vit_cfg.get("dim_reduction", {}) or {}
-            logger.info("CNN ViT activée: model=%s, svd=%s/%s", arch, bool(dr.get("enabled", False)), dr.get("n_components", None))
-            transformers.append(("image_cnn_vit", image_cnn_vit))
-    except Exception as e:
-        logger.warning("CNN ViT désactivée (raison: %s)", e)
-
-        
-    # --- Pixels : NE PAS AJOUTER si poids=0 (pruning) ---
+    want_pixels = not (fusion_w.get("image_pixels", None) == 0)
     if want_pixels:
-        image_pixels = create_image_pipeline_from_cfg(cfg["images"], use_test_dir=False)
-        transformers.append(("image_pixels", image_pixels))
-    else:
-        logger.info("Branche 'image_pixels' PRUNÉE (poids=0) — non construite et non concaténée.")
+        img_pixels = create_image_pipeline_from_cfg(images_cfg, use_test_dir=False)
+        transformers.append(("image_pixels", img_pixels))
 
-    # --- Stats image (inchangé) ---
-    stats_cfg = cfg.get("images", {}).get("stats_combined", {})
-    if bool(stats_cfg.get("enabled", False)):
+    stats_c = images_cfg.get("stats_combined", {}) or {}
+    if bool(stats_c.get("enabled", False)) and not (fusion_w.get("image_stats_combined", None) == 0):
         transformers.append(("image_stats_combined", ImageStatsCombinedFeaturizer(
-        image_dir=cfg["images"]["train_dir"],
-        imgid_col="imageid", pid_col="productid",
-        white_threshold=int(stats_cfg.get("white_threshold", 230)),
-        black_threshold=int(stats_cfg.get("black_threshold", 25)),
-        min_area=int(stats_cfg.get("min_area", 16)),
-        prefix_basic="img_", prefix_pro="pro_",
-        fast=bool(stats_cfg.get("fast", False)),
-        fast_size=int(stats_cfg.get("fast_size", 96)),
-        entropy_bins=int(stats_cfg.get("entropy_bins", 256)),
-    )))
+            image_dir=images_cfg["train_dir"],
+            imgid_col="imageid", pid_col="productid",
+            white_threshold=int(stats_c.get("white_threshold", 230)),
+            black_threshold=int(stats_c.get("black_threshold", 25)),
+            min_area=int(stats_c.get("min_area", 16)),
+            prefix_basic=str(stats_c.get("prefix_basic", "img_")),
+            prefix_pro=str(stats_c.get("prefix_pro", "pro_")),
+        )))
 
-    # --- Appliquer les poids uniquement pour les branches présentes ---
-    present = {name for name, _ in transformers}
-    fusion_weights = {k: v for k, v in fusion_cfg.items() if k in present} or None
+    # CNN (ResNet)
+    if bool(images_cfg.get("cnn", {}).get("enabled", False)) and not (fusion_w.get("image_cnn", None) == 0):
+        transformers.append(("image_cnn", create_cnn_branch_from_cfg(images_cfg, "cnn", apply_l2=not is_tree_model)))
 
-    logger.info("Branches fusionnées: %s | weights=%s", [n for n, _ in transformers], fusion_weights)
-
-    union = FeatureUnion(
-        transformer_list=transformers,
-        transformer_weights=fusion_weights,
-        n_jobs=1
-    )
-    model = build_classifier(cfg, seed)
-    model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
-    # Pour XGBoost/LightGBM, encoder les labels à l'intérieur du classifieur
-    if model_name in ("xgb", "xgboost", "lgbm", "lightgbm"):
-        model = LabelEncodingClassifier(model)
-    cache = get_cache(cfg)
-    if cache is not None and hasattr(cache, "location"):
-        logger.info(f"Cache sklearn activé: {cache.location}")
-
-    steps = [
-        ("features", union),
-        ("under", AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)),
-        ("over", RandomOverSampler(sampling_strategy=over_strategy, random_state=seed)),
-    ]
-
-    model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
-    if model_name not in ("xgb", "xgboost", "lgbm", "lightgbm"):
-        steps.append(("scaler", StandardScaler(with_mean=False)))  # utile pour LR/SVC
-    # Détecter class_weight sur les modèles qui l’acceptent
-    has_class_weight = False
-    if model_name in ("lr", "svc"):
+    # ViT (HF) — préparer le cache et s’assurer que le modèle est dispo
+    if bool(images_cfg.get("cnn_vit", {}).get("enabled", False)) and not (fusion_w.get("image_cnn_vit", None) == 0):
+        setup_hf_env(cfg)
         try:
-            has_class_weight = (getattr(model, "class_weight", None) is not None)
-        except Exception:
-            pass
+            ensure_vit_available(images_cfg["cnn_vit"].get("hf_model_name", "google/vit-base-patch16-224"),
+                                 images_cfg["cnn_vit"].get("hf_revision", "main"))
+        except Exception as e:
+            logger.warning("[ViT] Préchargement échoué (%s). Le featurizer tentera quand même le chargement.", e)
+        transformers.append(("image_cnn_vit", create_cnn_branch_from_cfg(images_cfg, "cnn_vit", apply_l2=not is_tree_model)))
 
-    samplers_on = bool(under_strategy or over_strategy)  # si non vides
-    if has_class_weight and samplers_on:
-        logger.warning("Éviter de cumuler class_weight et under/over-sampling "
-                    "(double compensation). Je conseille de laisser class_weight=None.")
+    union = FeatureUnion(transformers=transformers, transformer_weights=fusion_w or None)
+    features = SkPipeline([("union", union)])
 
-    steps.append(("model", model))
+    under = AdaptiveUnderSampler(cap_dict=under_strategy, random_state=seed)
+    over  = RandomOverSampler(sampling_strategy=over_strategy, random_state=seed)
 
-    pipe = ImbPipeline(steps=steps, memory=cache)
+    base_clf = build_classifier(cfg, seed)
+    if is_tree_model:
+        clf = LabelEncodingClassifier(base_clf)
+        scaler_step = []  # arbres : pas de scaler
+    else:
+        clf = base_clf
+        scaler_step = [("scaler", StandardScaler(with_mean=False))]
+
+    cache = get_cache(cfg)
+    steps = [("features", features), ("under", under), ("over", over), *scaler_step, ("model", clf)]
+    pipe = ImbPipeline(steps, memory=cache)
     return pipe
 
-
-# === Entraîner sur le train, prédire sur le test ================================
-@profile_func
-def train_and_predict_on_test(X_train, y_train, X_test, cfg: dict):
-    """Entraîner la pipeline complète sur X_train/Y_train puis prédire y_test (labels) pour X_test."""
-    # Lire les seeds
-    seed = int(cfg.get("random", {}).get("seed", 42))
-
-    # Construire les stratégies d'échantillonnage à partir de y_train
-    under, over = make_sampling_strategies(
-        y_train,
-        major_class=cfg["sampling"]["major_class"],
-        major_cap=cfg["sampling"]["major_cap"],
-        tail_min=cfg["sampling"]["tail_min"],
-    )
-
-    # Construire la pipeline complète
-    seed = int(cfg.get("random", {}).get("seed", 42))
-    pipe = create_combined_pipeline(cfg, under, over, seed)
-
-    # Entraîner la pipeline
-    print(">> Entraîner la pipeline complète…")
-    pipe.fit(X_train, y_train)
-
-    # Re-pointer les dossiers images vers TEST pour l'inférence
-    print(">> Re-pointer les lecteurs d'images vers le dossier TEST…")
-    features_step = pipe.named_steps["features"]  # peut être une FeatureUnion OU un Pipeline
-    # Si c’est un Pipeline avec la union dedans, aller chercher la union
-    if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
-        feat_union = features_step.named_steps["union"]
-    else:
-        feat_union = features_step  # c’est la FeatureUnion directement
-
-    image_test_dir = cfg["images"]["test_dir"]
-
-    # Parcourir les transformeurs et mettre à jour les répertoires d'images
-    new_list = []
-    for name, sub in feat_union.transformer_list:
-        if name == "image_pixels":
-            # sub est une sklearn.Pipeline (loader → transformations)
-            if "loader" in sub.named_steps:
-                loader = sub.named_steps["loader"]
-                if hasattr(loader, "set_image_dir"):
-                    loader.set_image_dir(image_test_dir)
-                elif hasattr(loader, "image_dir"):
-                    loader.image_dir = image_test_dir
-                else:
-                    raise RuntimeError("ImageLoader n'avoir ni 'set_image_dir' ni attribut 'image_dir'.")
-            new_list.append((name, sub))
-
-        elif name == "image_stats_combined":   # NEW
-            if hasattr(sub, "set_image_dir"):
-                sub.set_image_dir(image_test_dir)
-            else:
-                sub.image_dir = image_test_dir
-            new_list.append((name, sub))
-    
-        elif name == "image_cnn":
-            # sub est une sklearn.Pipeline ; le featurizer est 'cnn'
-            if "cnn" in sub.named_steps:
-                cnn = sub.named_steps["cnn"]
-                if hasattr(cnn, "set_image_dir"):
-                    cnn.set_image_dir(image_test_dir)
-                else:
-                    cnn.image_dir = image_test_dir
-            new_list.append((name, sub))
-        else:
-            new_list.append((name, sub))
-    feat_union.transformer_list = new_list
-
-    # Prédire sur X_test
-    print(">> Prédire sur X_test…")
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"This Pipeline instance is not fitted yet",
-            category=FutureWarning,
-            module=r"sklearn\.pipeline",
+# -------------------- Baselines builder --------------------
+def build_baseline_pipeline(kind: str, cfg: dict, seed: int, y_train: Optional[pd.Series]=None):
+    if kind == "b0":  # trivial
+        return DummyClassifier(strategy="most_frequent"), ["designation"]
+    if kind == "b1":
+        return DummyClassifier(strategy="stratified", random_state=seed), ["designation"]
+    if kind == "b2":  # texte only
+        text_branch = create_text_pipeline_from_cfg(cfg.get("text", {}))
+        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+        clf = build_classifier(cfg, seed)
+        if model_name in ("xgb","xgboost","lgbm","lightgbm"):
+            clf = LabelEncodingClassifier(clf)
+        pipe = SkPipeline([("features", text_branch), ("model", clf)], memory=get_cache(cfg))
+        return pipe, ["designation","description"]
+    if kind == "b3":  # image only (pixels/CNN/ViT/… selon cfg)
+        images_cfg = cfg.get("images", {})
+        # optionnel : prépare HF si ViT activé
+        if bool(images_cfg.get("cnn_vit", {}).get("enabled", False)):
+            setup_hf_env(cfg)
+            try:
+                ensure_vit_available(images_cfg["cnn_vit"].get("hf_model_name", "google/vit-base-patch16-224"),
+                                     images_cfg["cnn_vit"].get("hf_revision", "main"))
+            except Exception as e:
+                logger.warning("[ViT] Préchargement échoué (%s).", e)
+        img_branch = create_image_pipeline_from_cfg(images_cfg, use_test_dir=False)
+        model_name = str(cfg.get("model", {}).get("name", "lr")).lower()
+        clf = build_classifier(cfg, seed)
+        if model_name in ("xgb","xgboost","lgbm","lightgbm"):
+            clf = LabelEncodingClassifier(clf)
+        pipe = SkPipeline([("features", img_branch), ("model", clf)], memory=get_cache(cfg))
+        return pipe, ["productid","imageid"]
+    if kind == "b4":
+        if y_train is None:
+            raise ValueError("b4 nécessite y_train pour construire les stratégies de sampling.")
+        under, over = make_sampling_strategies(
+            y_train,
+            major_class=cfg["sampling"]["major_class"],
+            major_cap=cfg["sampling"]["major_cap"],
+            tail_min=cfg["sampling"]["tail_min"],
         )
-        y_pred = pipe.predict(X_test)
+        pipe = create_combined_pipeline(cfg, under, over, seed)
+        return pipe, ["designation","description","productid","imageid"]
+    raise ValueError(f"Baseline inconnue: {kind}")
 
-    return pipe, y_pred
-
-
-# === Comparer LR et SVC en CV stratifiée =======================================
-@profile_func
-def compare_models_cv(X_train, y_train, cfg: dict):
-    """Comparer LR et LinearSVC avec la même pipeline (sauf le classifieur), en CV F1-macro."""
+# -------------------- CV (features-only + ES) --------------------
+def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict, outdir="results"):
+    os.makedirs(outdir, exist_ok=True)
     seed = int(cfg.get("random", {}).get("seed", 42))
-    n_jobs = int(cfg.get("compute", {}).get("n_jobs", 1))
-    cv_splits = int(cfg.get("cv", {}).get("splits", 3))
+    splits = int(cfg.get("cv", {}).get("splits", 3))
     shuffle = bool(cfg.get("cv", {}).get("shuffle", True))
     cv_seed = int(cfg.get("cv", {}).get("random_state", seed))
 
-    # Construire les stratégies under/over à partir de y_train
-    under, over = make_sampling_strategies(
-        y_train,
-        major_class=cfg["sampling"]["major_class"],
-        major_cap=cfg["sampling"]["major_cap"],
-        tail_min=cfg["sampling"]["tail_min"],
-    )
+    pipe, need_cols = build_baseline_pipeline(kind, cfg, seed, y_train=y_train if kind=="b4" else None)
 
-    # Définir la CV
-    cv = StratifiedKFold(n_splits=cv_splits, shuffle=shuffle, random_state=cv_seed)
+    # --- Safe CV for long-tail datasets ---
+    min_count = int(y_train.value_counts().min())
+    if min_count >= 2:
+        new_splits = min(splits, min_count)
+        if new_splits != splits:
+            logger.warning("[CV] n_splits=%d > min class count=%d → réduction à %d",
+                       splits, min_count, new_splits)
+        cv = StratifiedKFold(n_splits=new_splits, shuffle=shuffle, random_state=cv_seed)
+    else:
+        logger.warning("[CV] Au moins une classe n'a qu'un seul exemple (min=%d). "
+                    "Fallback vers une CV non stratifiée.", min_count)
+        from sklearn.model_selection import ShuffleSplit
+        cv = ShuffleSplit(n_splits=max(3, splits), test_size=0.1, random_state=cv_seed)
+    y_pred_cv = np.empty_like(y_train.values)
+    if min_count < splits:
+        rare = y_train.value_counts().sort_values().head(10)
+        logger.info("[CV] Comptes par classe (10 plus rares) :\n%s", rare.to_string())
 
-    # Évaluer les deux modèles
-    rows = []
-    for name in ["lr", "svc", "xgb", "lgbm"]:
-        cfg_local = {**cfg, "model": {**cfg.get("model", {}), "name": name}}
-        pipe = create_combined_pipeline(cfg_local, under, over, seed)
-        scores = cross_val_score(
-            pipe, X_train, y_train,
-            scoring="f1_macro", cv=cv, n_jobs=n_jobs
-        )
-        print(f"   - {name.upper()} | F1-macro = {scores.mean():.4f} ± {scores.std():.4f} | {scores}")
-        rows.append({
-            "model": name.upper(),
-            "cv_mean_f1_macro": scores.mean(),
-            "cv_std": scores.std(),
-            "cv_scores": scores.tolist(),
-        })
+    t0 = time.time()
+    n_splits_used = cv.get_n_splits()
+    for fold, (tr, va) in enumerate(cv.split(X_train, y_train), 1):
+        logger.info("[CV] Fold %d/%d", fold, n_splits_used)
 
-    return pd.DataFrame(rows)
+        X_tr, y_tr = X_train.iloc[tr][need_cols], y_train.iloc[tr]
+        X_va, y_va = X_train.iloc[va][need_cols], y_train.iloc[va]
 
+        # 1) features-only
+        pre_feat = SkPipeline([("features", pipe.named_steps["features"])])
+        pre_feat.fit(X_tr, y_tr)
+        Z_tr = pre_feat.transform(X_tr); Z_va = pre_feat.transform(X_va)
 
-# === Parser les arguments CLI ===================================================
-@profile_func
-def parse_args():
-    """Définir les arguments CLI et retourner l'objet Namespace."""
-    p = argparse.ArgumentParser(description="Entraîner la pipeline texte+image avec rééchantillonnage ; comparer LR vs SVC en option")
-    p.add_argument("--config", default=str(DEFAULT_CFG), help="Chemin vers le TOML (défaut: features/config.toml)")
-    p.add_argument("--compare", action="store_true", help="Comparer LR vs SVC via CV sur X_train (F1-macro)")
-    p.add_argument("--baseline", choices=["b0", "b1", "b2", "b3", "b4"], help="Exécuter une baseline simple et sortir")
-    p.add_argument("--compare-all", action="store_true", 
-                  help="Compare tous les modèles (B0-B4) et génère des graphiques")
-    p.add_argument("--model", choices=["lr", "svc", "xgb", "xgboost", "lgbm", "lightgbm"], default=None,
-                help="Forcer le modèle (écrase [model].name)")
-    return p.parse_args()
+        # 2) sampling TRAIN only (si présents)
+        Z_tr_rs, y_tr_rs = Z_tr, y_tr
+        if "under" in pipe.named_steps and "over" in pipe.named_steps:
+            Z_tr_rs, y_tr_rs = pipe.named_steps["under"].fit_resample(Z_tr, y_tr)
+            Z_tr_rs, y_tr_rs = pipe.named_steps["over"].fit_resample(Z_tr_rs, y_tr_rs)
 
-def _short_estimator_name_and_params(final_estimator) -> tuple[str, dict]:
-    """Return a readable model name and a minimal set of params for the summary CSV."""
+        # 3) scaler (si présent)
+        Z_va_rs = Z_va
+        if "scaler" in pipe.named_steps:
+            scaler = pipe.named_steps["scaler"]
+            scaler.fit(Z_tr_rs)
+            Z_tr_rs = scaler.transform(Z_tr_rs)
+            Z_va_rs = scaler.transform(Z_va)
+
+        # 4) Classifier (avec ES si possible) 
+        clf = pipe.named_steps["model"]
+        if hasattr(clf, "fit"):
+            # XGB/LGBM via LabelEncodingClassifier -> eval_set re-encodé en interne
+            try:
+                clf.fit(
+                    Z_tr_rs, y_tr_rs,
+                    eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+                    eval_metric=["mlogloss", "merror"],
+                    early_stopping_rounds=50,
+                    verbose=False,
+                )
+            except TypeError:
+                # modèles sans ES -> fit standard
+                clf.fit(Z_tr_rs, y_tr_rs)
+        y_pred_cv[va] = clf.predict(Z_va_rs)
+
+    dt = time.time() - t0
+    f1m = f1_score(y_train, y_pred_cv, average="macro")
+    f1w = f1_score(y_train, y_pred_cv, average="weighted")
+    logger.info("[CV] F1-macro=%.4f | F1-weighted=%.4f (%.1fs)", f1m, f1w, dt)
+
+    # OOF
+    out_oof = Path(cfg["outputs"].get("oof_out", f"{outdir}/preds_oof_{kind}.csv"))
+    pd.DataFrame({"y_true": y_train.astype(str).values, "y_pred": y_pred_cv.astype(str)}, index=y_train.index).to_csv(out_oof, index=True)
+    logger.info("[CV] OOF écrit: %s", out_oof)
+    return f1m, y_pred_cv
+
+# -------------------- Courbes & repointage --------------------
+def _save_curve(xs, ys, title, ylabel, out_png):
+    plt.figure(figsize=(7.5, 4))
+    plt.plot(xs, label="train")
+    plt.plot(ys, label="val")
+    plt.xlabel("iteration"); plt.ylabel(ylabel); plt.title(title)
+    plt.legend(); plt.tight_layout()
+    Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_png, dpi=150); plt.close()
+    print(f"[INFO] Courbe: {out_png}")
+
+def _plot_training_curves_from_est(est):
     try:
-        est = final_estimator
-        if hasattr(est, "base_estimator") and est.base_estimator is not None:
-            est = est.base_estimator
-        name = est.__class__.__name__
-        params = {}
-        getp = getattr(est, "get_params", None)
+        if est.__class__.__name__ == "XGBClassifier":
+            hist = est.evals_result()
+            for metric in hist["validation_0"].keys():
+                _save_curve(hist["validation_0"][metric], hist["validation_1"][metric],
+                            f"Final fit — XGB ({metric})", metric,
+                            f"results/training_curve_final_xgb_{metric}.png")
+        elif "LGBM" in est.__class__.__name__ and hasattr(est, "evals_result_"):
+            hist = est.evals_result_
+            train_key = "training" if "training" in hist else next(iter(hist.keys()))
+            valid_key = "valid_1" if "valid_1" in hist else "valid_0"
+            for metric in hist[train_key].keys():
+                _save_curve(hist[train_key][metric], hist[valid_key][metric],
+                            f"Final fit — LGBM ({metric})", metric,
+                            f"results/training_curve_final_lgbm_{metric}.png")
+    except Exception as e:
+        print(f"[WARN] Courbes non générées: {e}")
 
-        if "XGBClassifier" in name:
-            keys = ["n_estimators","learning_rate","max_depth","subsample","colsample_bytree","reg_alpha","reg_lambda","tree_method","num_class"]
-        elif "LGBMClassifier" in name:
-            keys = ["n_estimators","learning_rate","num_leaves","max_depth","bagging_fraction","feature_fraction","reg_alpha","reg_lambda","num_class"]
-        elif "LinearSVC" in name:
-            keys = ["C","loss","dual","penalty","max_iter","tol"]
-        elif "LogisticRegression" in name:
-            keys = ["solver","penalty","C","max_iter","tol","fit_intercept","multi_class","l1_ratio","class_weight"]
+def _repoint_images_to_test(pipe: Union[SkPipeline, ImbPipeline], cfg: dict):
+    features_step = pipe.named_steps["features"]
+    feat_union = features_step.named_steps["union"] if (hasattr(features_step, "named_steps") and "union" in features_step.named_steps) else features_step
+    image_test_dir = cfg["images"]["test_dir"]
+    new_list = []
+    for name, sub in getattr(feat_union, "transformer_list", []):
+        if name == "image_pixels":
+            if "loader" in getattr(sub, "named_steps", {}):
+                loader = sub.named_steps["loader"]
+                if hasattr(loader, "set_image_dir"): loader.set_image_dir(image_test_dir)
+                elif hasattr(loader, "image_dir"): loader.image_dir = image_test_dir
+        elif name == "image_stats_combined":
+            if hasattr(sub, "set_image_dir"): sub.set_image_dir(image_test_dir)
+            else: sub.image_dir = image_test_dir
+        elif name in ("image_cnn", "image_cnn_vit"):
+            if "cnn" in getattr(sub, "named_steps", {}):
+                cnn = sub.named_steps["cnn"]
+                if hasattr(cnn, "set_image_dir"): cnn.set_image_dir(image_test_dir)
+                else: cnn.image_dir = image_test_dir
+        new_list.append((name, sub))
+    feat_union.transformer_list = new_list
+
+# -------------------- Exports analytiques (ACP / SHAP / BLOCKs) --------------------
+def _features_only_transform(pipe_or_model, X, y=None):
+    if isinstance(pipe_or_model, (ImbPipeline, SkPipeline)) and "features" in pipe_or_model.named_steps:
+        features_step = pipe_or_model.named_steps["features"]
+        clf = pipe_or_model.named_steps.get("model") or pipe_or_model.named_steps.get("clf")
+        has_scaler = "scaler" in pipe_or_model.named_steps
+    else:
+        features_step = pipe_or_model.named_steps.get("text") or pipe_or_model.named_steps.get("img") or pipe_or_model.named_steps.get("features")
+        clf = pipe_or_model.named_steps.get("model") or pipe_or_model.named_steps.get("clf")
+        has_scaler = "scaler" in pipe_or_model.named_steps
+
+    pre_feat = SkPipeline([("features", features_step)])
+    pre_feat.fit(X, y)
+    Z = pre_feat.transform(X)
+
+    feat_union = features_step.named_steps["union"] if (hasattr(features_step, "named_steps") and "union" in features_step.named_steps) else features_step
+    slices = {}
+    start = 0
+    for name, trans in getattr(feat_union, "transformer_list", []):
+        try:
+            Zi = SkPipeline([(name, trans)]).fit(X, y).transform(X)
+            end = start + Zi.shape[1]
+            slices[name] = (start, end)
+            start = end
+        except Exception:
+            pass
+
+    scaler = pipe_or_model.named_steps["scaler"] if has_scaler else None
+    if scaler is not None:
+        Z = scaler.fit_transform(Z)
+    return Z, slices, has_scaler, scaler, clf, pre_feat
+
+def export_blocks_importance(pipe, X, y, outdir="results", tag="bX"):
+    Z, slices, _, _, clf, _ = _features_only_transform(pipe, X, y)
+    is_tree = hasattr(clf, "est_") and clf.est_.__class__.__name__ in {"XGBClassifier","LGBMClassifier"}
+    importances = {}
+    if not is_tree and hasattr(clf, "coef_"):
+        W = clf.coef_
+        w_mag = np.mean(np.abs(W), axis=0) if W.ndim > 1 else np.abs(W)
+        for name, (a, b) in slices.items():
+            importances[name] = float(np.mean(w_mag[a:b]))
+    else:
+        try:
+            import shap
+            base = clf.est_ if hasattr(clf, "est_") else clf
+            expl = shap.TreeExplainer(base, data=Z, feature_perturbation="interventional", model_output="probability")
+            SH = expl.shap_values(Z)
+            SH_abs = np.mean(np.abs(SH), axis=0) if isinstance(SH, list) else np.mean(np.abs(SH), axis=0)
+            for name, (a, b) in slices.items():
+                importances[name] = float(np.mean(SH_abs[a:b]))
+        except Exception as e:
+            print(f"[WARN] SHAP indisponible pour BLOCKs: {e}")
+            return
+    df = pd.DataFrame({"block": list(importances.keys()), "importance": list(importances.values())}).sort_values("importance", ascending=False)
+    Path(outdir).mkdir(parents=True, exist_ok=True)
+    df.to_csv(f"{outdir}/blocks_importance_{tag}.csv", index=False)
+    plt.figure(figsize=(8,6)); plt.barh(df["block"], df["importance"]); plt.gca().invert_yaxis()
+    plt.title(f"Importance par bloc — {tag}"); plt.xlabel("importance moyenne"); plt.tight_layout()
+    plt.savefig(f"{outdir}/blocks_importance_{tag}.png", dpi=150); plt.close()
+
+def export_pca_preview(pipe, X, y, outdir="results", tag="bX", n_comp=100):
+    Z, _, _, _, _, _ = _features_only_transform(pipe, X, y)
+    svd = TruncatedSVD(n_components=min(n_comp, Z.shape[1]-1), random_state=42)
+    Zs = svd.fit_transform(Z)
+    Path(outdir).mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(Zs[:, :10]).to_csv(f"{outdir}/features_{tag}_svd10_preview.csv", index=False)
+    pd.DataFrame({"component": np.arange(len(svd.explained_variance_ratio_)),
+                  "var_ratio": svd.explained_variance_ratio_}).to_csv(f"{outdir}/pca_{tag}_explained_variance.csv", index=False)
+
+def export_shap(pipe, X, y, outdir="results", tag="bX", max_samples=3000):
+    Z, _, _, _, clf, _ = _features_only_transform(pipe, X, y)
+    if Z.shape[0] > max_samples:
+        idx = np.random.RandomState(42).choice(Z.shape[0], size=max_samples, replace=False)
+        Z = Z[idx]; y = y.iloc[idx] if isinstance(y, pd.Series) else y[idx]
+    try:
+        import shap
+        base = clf.est_ if hasattr(clf, "est_") else clf
+        if base.__class__.__name__ in {"XGBClassifier","LGBMClassifier"}:
+            expl = shap.TreeExplainer(base, data=Z, feature_perturbation="interventional", model_output="probability")
+            SH = expl.shap_values(Z)
         else:
-            keys = []
+            expl = shap.LinearExplainer(base, Z, feature_dependence="independent")
+            SH = expl.shap_values(Z)
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        shap.summary_plot(SH, Z, plot_type="bar", show=False, max_display=20)
+        plt.tight_layout(); plt.savefig(f"{outdir}/shap_{tag}_bar.png", dpi=150); plt.close()
+        shap.summary_plot(SH, Z, show=False, max_display=20)
+        plt.tight_layout(); plt.savefig(f"{outdir}/shap_{tag}_beeswarm.png", dpi=150); plt.close()
+        print(f"[INFO] SHAP: figures sous {outdir}")
+    except Exception as e:
+        print(f"[WARN] SHAP non généré ({e}).")
 
-        if getp is not None:
-            full = est.get_params()
-            params = {k: full.get(k) for k in keys if k in full}
-        return name, params
-    except Exception:
-        return type(final_estimator).__name__, {}
+# -------------------- Final training with ES + refit --------------------
+def train_and_predict_on_test(pipe: ImbPipeline, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, cfg: dict):
+    logger.info(">> Entraînement final avec early stopping (split 90/10)")
+    need_cols = ["designation","description","productid","imageid"]
 
+    X_tr, X_va, y_tr, y_va = train_test_split(X_train[need_cols], y_train, test_size=0.10, random_state=42, stratify=y_train)
 
-# === Fonction principale ========================================================
-@profile_func
+    # 1) features-only
+    pre_feat = SkPipeline([("features", pipe.named_steps["features"])])
+    pre_feat.fit(X_tr, y_tr)
+    Z_tr = pre_feat.transform(X_tr); Z_va = pre_feat.transform(X_va)
+
+    # 2) sampling TRAIN
+    Z_tr_rs, y_tr_rs = pipe.named_steps["under"].fit_resample(Z_tr, y_tr)
+    Z_tr_rs, y_tr_rs = pipe.named_steps["over"].fit_resample(Z_tr_rs, y_tr_rs)
+
+    # 3) scaler
+    has_scaler = "scaler" in pipe.named_steps
+    Z_va_rs = Z_va
+    if has_scaler:
+        scaler = pipe.named_steps["scaler"]
+        scaler.fit(Z_tr_rs); Z_tr_rs = scaler.transform(Z_tr_rs); Z_va_rs = scaler.transform(Z_va)
+
+    # 4) fit classifieur avec ES
+    clf = pipe.named_steps["model"]
+    clf.fit(
+        Z_tr_rs, y_tr_rs,
+        eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+        eval_metric=["mlogloss", "merror"],
+        early_stopping_rounds=50,
+        verbose=False,
+    )
+    _plot_training_curves_from_est(clf.est_)
+
+    # 5) re-fit FULL DATA
+    best_iter = getattr(clf.est_, "best_iteration", None) or getattr(clf.est_, "best_iteration_", None)
+    if best_iter is not None:
+        pipe.set_params(**{"model__base_estimator__n_estimators": int(best_iter) + 1})
+        pipe.fit(X_train[need_cols], y_train)
+        logger.info("[INFO] Refit full data avec n_estimators=%d", int(best_iter)+1)
+    else:
+        steps = [("features", pre_feat.named_steps["features"])]
+        if has_scaler: steps.append(("scaler", scaler))
+        pipe = SkPipeline(steps + [("model", clf)], memory=getattr(pipe, "memory", None))
+
+    # 6) repointer images → test
+    _repoint_images_to_test(pipe, cfg)
+
+    # 7) exports analytiques b4 (optionnels)
+    try:
+        export_blocks_importance(pipe, X_train[need_cols], y_train, outdir="results", tag="b4")
+        export_pca_preview(pipe, X_train[need_cols], y_train, outdir="results", tag="b4")
+        export_shap(pipe, X_train[need_cols], y_train, outdir="results", tag="b4")
+    except Exception as e:
+        print(f"[WARN] Exports analytiques b4 échoués: {e}")
+
+    # 8) prédire test
+    y_pred = pipe.predict(X_test[need_cols])
+    return pipe, y_pred
+
+# -------------------- Main --------------------
 def main():
-    # Lire les arguments et la configuration
-    args = parse_args()
-    cfg = load_config(args.config) # Charger le TOML
-    log_dir = cfg.get("outputs", {}).get("log_dir", "results/logs")
-    setup_logging(log_dir=log_dir, level=logging.DEBUG)
-    logging.getLogger(__name__).info("Config logs -> %s", os.path.abspath(log_dir))
-    validate_config(cfg)
-    # Si --model est fourni, écraser le nom du modèle de la config
-    if args.model:
-        cfg.setdefault("model", {})["name"] = args.model
-    if args.compare_all:
-        from tools.compare_models import compare_all_models
-        compare_all_models()
-        return
-    setup_logging(log_dir=cfg.get("outputs", {}).get("log_dir", "results/logs"))
-    logger.info("Configuration chargée.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default=str(DEFAULT_CFG), help="Chemin du fichier TOML.")
+    parser.add_argument("--baseline", type=str, default="b4", choices=["b0","b1","b2","b3","b4"])
+    args = parser.parse_args()
 
-    # Initialiser les graines pour la reproductibilité
+    cfg = load_config(args.config)
+    init_seeds(int(cfg.get("random", {}).get("seed", 42)))
+
+    # CSV
+    X_train = pd.read_csv(cfg["paths"]["x_train_csv"])
+    y_train = pd.read_csv(cfg["paths"]["y_train_csv"]).iloc[:, 0]
+    X_test  = pd.read_csv(cfg["paths"]["x_test_csv"])
+
+    # CV (score + OOF)
+    f1m, _ = run_baseline_and_report(args.baseline, X_train, y_train, cfg, outdir="results")
+
     seed = int(cfg.get("random", {}).get("seed", 42))
-    init_seeds(seed)
 
-    # Charger les chemins de données depuis le TOML
-    print(">> Charger les données…")
-    X_train = pd.read_csv(cfg["paths"]["x_train_csv"], index_col=0)
-    y_train = pd.read_csv(cfg["paths"]["y_train_csv"], index_col=0).squeeze()
-    X_test = pd.read_csv(cfg["paths"]["x_test_csv"], index_col=0)
+    # Entraînement final + sauvegardes selon baseline
+    if args.baseline in {"b2","b3"}:
+        pipe, need_cols = build_baseline_pipeline(args.baseline, cfg, seed)
+        pipe.fit(X_train[need_cols], y_train)
 
-    # Option de downsampling via variable d'environnement
-    max_n = int(os.environ.get("RAKUTEN_MAX_N", "0"))
-    if max_n > 0:
-        X_train = X_train.iloc[:max_n].copy()
-        y_train = y_train.iloc[:max_n].copy()
-        logger.info(f"Downsampling activé: RAKUTEN_MAX_N={max_n} -> X_train={len(X_train)} y_train={len(y_train)}")
-         
-    # Vérifier les colonnes nécessaires
-    needed = ["designation", "description", "productid", "imageid"]
-    for col in needed:
-        if col not in X_train.columns:
-            raise ValueError(f"Colonne manquante dans X_train : '{col}'")
-        if col not in X_test.columns:
-            raise ValueError(f"Colonne manquante dans X_test : '{col}'")
+        # Préd test & joblib
+        Path(cfg["outputs"]["pred_out"]).parent.mkdir(parents=True, exist_ok=True)
+        y_pred = pipe.predict(X_test[need_cols])
+        pd.DataFrame({"id": X_test.index, "y_pred": y_pred}).to_csv(
+            cfg["outputs"]["pred_out"].replace(".csv", f"_{args.baseline}.csv"), index=False)
 
-    # Exécuter une baseline et sortir si demandé
-    if args.baseline:
-        run_baseline_and_report(args.baseline, X_train, y_train, cfg, outdir="results")
-        return
+        Path(cfg["outputs"]["model_out"]).parent.mkdir(parents=True, exist_ok=True)
+        import joblib
+        joblib.dump(pipe, cfg["outputs"]["model_out"].replace(".joblib", f"_{args.baseline}.joblib"))
+        logger.info("Pipeline %s sauvegardée.", args.baseline.upper())
 
-    # Comparer LR vs SVC en CV si demandé
-    if args.compare:
-        print(">> Comparer LR vs SVC (CV F1-macro)…")
-        df_cmp = compare_models_cv(X_train[needed], y_train, cfg)
-        out_cmp = cfg["outputs"]["compare_out"]
-        os.makedirs(os.path.dirname(out_cmp), exist_ok=True)
-        df_cmp.to_csv(out_cmp, index=False)
-        print(f">> Sauvegarder les résultats de comparaison : {out_cmp}")
-        return
+        # Exports analytiques
+        try:
+            export_blocks_importance(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
+            export_pca_preview(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
+            export_shap(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
+        except Exception as e:
+            print(f"[WARN] Exports analytiques {args.baseline} échoués: {e}")
 
-    # Entraîner la pipeline complète et prédire sur X_test
-    pipe, y_pred = train_and_predict_on_test(X_train[needed], y_train, X_test[needed], cfg)
+    elif args.baseline == "b4":
+        under, over = make_sampling_strategies(y_train, cfg["sampling"]["major_class"], cfg["sampling"]["major_cap"], cfg["sampling"]["tail_min"])
+        pipe = create_combined_pipeline(cfg, under, over, seed)
+        pipe, y_pred = train_and_predict_on_test(pipe, X_train, y_train, X_test, cfg)
 
-    # Sauvegarder le modèle et les prédictions
-    os.makedirs(os.path.dirname(cfg["outputs"]["model_out"]), exist_ok=True)
-    joblib.dump(pipe, cfg["outputs"]["model_out"])
-    print(f">> Sauvegarder le modèle : {cfg['outputs']['model_out']}")
+        # Sauvegardes
+        Path(cfg["outputs"]["pred_out"]).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"id": X_test.index, "y_pred": y_pred}).to_csv(cfg["outputs"]["pred_out"], index=False)
+        import joblib
+        Path(cfg["outputs"]["model_out"]).parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(pipe, cfg["outputs"]["model_out"])
+        logger.info("Pipeline b4 sauvegardée: %s", cfg["outputs"]["model_out"])
 
-    pred_df = pd.DataFrame(y_pred, index=X_test.index, columns=["predicted_label"])
-    pred_df.to_csv(cfg["outputs"]["pred_out"])
-    print(f">> Sauvegarder les prédictions : {cfg['outputs']['pred_out']}")
-
-
-# === Entrée script ==============================================================
 if __name__ == "__main__":
     main()
-    write_function_stats_to_file(outdir="results")
-    write_list_debug_to_file(outdir="results")

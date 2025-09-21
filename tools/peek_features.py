@@ -88,11 +88,13 @@ def main():
     seed = int(cfg.get("random", {}).get("seed", 42))
     init_seeds(seed)
 
+    # Branches activées selon les poids de fusion)
     fusion_w = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
     want_pixels = not (fusion_w.get("image_pixels", None) == 0)
-    want_cnn = not (fusion_w.get("image_cnn", None) == 0)
+    want_cnn    = not (fusion_w.get("image_cnn", None) == 0)
+    want_vit    = not (fusion_w.get("image_cnn_vit", None) == 0)   # NEW
     want_stats  = not (fusion_w.get("image_stats_combined", None) == 0)
-    print(f"Config: {CFG_PATH} | seed={seed} | max_n={MAX_N} | pixels={want_pixels} | cnn={want_cnn} | stats={want_stats}")
+    print(f"Config: {CFG_PATH} | seed={seed} | max_n={MAX_N} | pixels={want_pixels} | cnn={want_cnn} | vit={want_vit} | stats={want_stats}")
     parser = argparse.ArgumentParser()
     parser.add_argument("--try-model", choices=["lr","svc","xgb","lgbm"], default=None,
                         help="Optionnel: entraîne vite un modèle sur l'échantillon et affiche son nom/params")
@@ -214,6 +216,29 @@ def main():
     else:
         print("\n=== CNN SKIPPED (poids=0 ou disabled) ===")
 
+    # --------- BRANCHE ViT (HF) ----------
+    X_vit = None
+    vit_cfg = cfg.get("images", {}).get("cnn_vit", {})
+    if want_vit and bool(vit_cfg.get("enabled", False)):
+        print("\n=== ViT (HF) ===")
+        try:
+            vit_pipe = create_cnn_branch_from_cfg(cfg.get("images", {}), section="cnn_vit")
+            X_vit, dt = timer(vit_pipe.fit_transform, X[need_cols], y)
+            remember("vit", dt)
+            describe_sparse("vit_branch", X_vit if sparse.issparse(X_vit) else X_vit)
+            print(f"   ↳ fit_transform vit: {dt/60:.2f} min")
+            try:
+                cstep = getattr(vit_pipe, "named_steps", {}).get("cnn", None)
+                if cstep is not None and hasattr(cstep, "get_diagnostics"):
+                    diag = cstep.get_diagnostics()
+                    print(f"   ↳ ViT raw feat_dim: {diag.get('feat_dim')} | device: {diag.get('device')} | batch_size: {diag.get('batch_size')}")
+            except Exception as e:
+                print(f"[WARN] Impossible de lire les diag ViT: {e}")
+        except Exception as e:
+            print(f"[WARN] ViT non disponible: {e}")
+    else:
+        print("\n=== ViT SKIPPED (poids=0 ou disabled) ===")
+
     # --------- BRANCHE STATS IMAGE (si activée) ----------
     X_stats = None
     stats_cfg = cfg.get("images", {}).get("stats_combined", {})
@@ -238,13 +263,14 @@ def main():
         print("\n=== IMAGE STATS SKIPPED (poids=0 ou disabled) ===")
 
     print("\n=== RÉCAP (comme en training) ===")
+
     present_branches = ["text"]
-    if X_pix is not None:
-        present_branches.append("image_pixels")
-    if X_cnn is not None:
-        present_branches.append("image_cnn")
-    if X_stats is not None:
-        present_branches.append("image_stats_combined")
+    if X_pix is not None:   present_branches.append("image_pixels")
+    if X_cnn is not None:   present_branches.append("image_cnn")
+    if X_vit is not None:   present_branches.append("image_cnn_vit")  # NEW
+    if X_stats is not None: present_branches.append("image_stats_combined")
+
+
 
     # Poids effectifs = uniquement ceux des branches présentes
     fusion_w = (cfg.get("fusion", {}) or {}).get("weights", {}) or {}
@@ -254,11 +280,15 @@ def main():
     def ncols(arr):
         return arr.shape[1] if arr is not None else 0
 
-    dim_text  = ncols(X_text)   # si tu as appliqué SVD texte, c'est déjà la taille réduite
+
+    dim_text  = ncols(X_text)
     dim_pix   = ncols(X_pix)
     dim_cnn   = ncols(X_cnn)
+    dim_vit   = ncols(X_vit)                                 # NEW
     dim_stats = ncols(X_stats)
-    dim_total = dim_text + dim_pix + dim_cnn + dim_stats
+    dim_total = dim_text + dim_pix + dim_cnn + dim_vit + dim_stats
+    def ncols(arr): return arr.shape[1] if arr is not None else 0
+    print(f"Dimensions         : text={dim_text}, pixels={dim_pix}, cnn={dim_cnn}, vit={dim_vit}, stats={dim_stats}")
 
     print(f"Branches fusionnées: {present_branches}")
     print(f"Weights effectifs  : {effective_weights}")
@@ -277,7 +307,7 @@ def main():
 
     # --------- HSTACK MANUEL (estimation fusion) ----------
     print("\n=== FUSION (hstack) — estimation ===")
-    blocks = [b for b in [X_text, X_pix, X_cnn, X_stats] if b is not None]
+    blocks = [b for b in [X_text, X_pix, X_cnn, X_vit, X_stats] if b is not None]
     blocks_csr = [b.tocsr() if sparse.issparse(b) else sparse.csr_matrix(b) for b in blocks]
     X_all = sparse.hstack(blocks_csr).tocsr()
     describe_sparse("FUSION_total", X_all, float_bytes=8, index_bytes=4)
