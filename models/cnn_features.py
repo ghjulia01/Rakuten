@@ -117,7 +117,10 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         aug_color_jitter: float = 0.0,           # 0 -> off ; sinon jitter léger
         mixup_alpha: float = 0.0,                # 0 -> off
         cutmix_alpha: float = 0.0,               # 0 -> off
-        ft_patience: int = 3,                 # patience early stopping (FT)    
+        ft_patience: int = 3,                 # patience early stopping (FT)   
+        random_resized_crop_scale: Tuple[float, float] = (0.9, 1.0),
+        random_resized_crop_ratio: Tuple[float, float] = (0.95, 1.05),
+        label_smoothing: float = 0.0, 
     ):
         self.image_dir = image_dir
         self.arch = arch
@@ -165,6 +168,9 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         self.aug_color_jitter = float(aug_color_jitter)
         self.mixup_alpha = float(mixup_alpha)
         self.cutmix_alpha = float(cutmix_alpha)
+        self.rrc_scale  = tuple(random_resized_crop_scale)
+        self.rrc_ratio  = tuple(random_resized_crop_ratio)
+        self.label_smoothing = float(label_smoothing)
 
     # -------- Utilitaires -------------------------------------------------------
     def _load_one(self, path: str):
@@ -377,10 +383,17 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
                                         foreach=False if is_dml else bool(self.foreach), fused=False)
             except TypeError:
                 opt = torch.optim.AdamW(param_groups, **adamw_kwargs)
-            criterion = nn.CrossEntropyLoss()
+            try:
+                criterion = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
+            except TypeError:
+                # PyTorch ancien : pas d’arg label_smoothing
+                criterion = nn.CrossEntropyLoss()
 
             # Augmentations simples (hors MixUp/CutMix)
             aug_list = []
+            if self.rrc_scale is not None and self.rrc_ratio is not None:
+                aug_list.append(transforms.RandomResizedCrop(size=224, scale=self.rrc_scale, ratio=self.rrc_ratio))
+
             if self.aug_hflip_p > 0:
                 aug_list.append(transforms.RandomHorizontalFlip(p=self.aug_hflip_p))
             if self.aug_color_jitter > 0:

@@ -175,6 +175,71 @@ class ToFloat32:
             return X.astype("float32") if sparse.issparse(X) else X.astype(np.float32)
         except Exception:
             return X
+# -------------------- Summary helpers --------------------
+def _append_summary_row(baseline: str, cv_splits: int, f1_macro: float, f1_weighted: float,
+                        train_infer_time_sec: float, notes: str, out_csv: str = "baseline_results_summary.csv"):
+    """Append one line to the summary CSV, create header if missing."""
+    import os, csv
+    header = ["baseline","cv_splits","f1_macro","f1_weighted","train_infer_time_sec","notes"]
+    exists = os.path.exists(out_csv)
+    with open(out_csv, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if not exists:
+            w.writerow(header)
+        # notes may contain commas -> keep it as the last field; csv.writer will quote if needed
+        w.writerow([baseline, cv_splits, f1_macro, f1_weighted, f"{train_infer_time_sec:.3f}", notes])
+
+def _make_notes(pipe, cfg: dict, *, y_train=None, y_val=None, best_iter=None) -> str:
+    """Faire une synthèse textuelle de la config + pipeline."""
+    # text/image switches
+    text_on  = bool(cfg.get("text", {}))
+    image_on = bool(cfg.get("images", {}))
+    dummy_on = False
+
+    # CNN/ViT details
+    img_cfg  = cfg.get("images", {}) or {}
+    cnn_cfg  = img_cfg.get("cnn", {}) or {}
+    vit_cfg  = img_cfg.get("cnn_vit", {}) or {}
+    cnn_arch = cnn_cfg.get("arch", None)
+    cnn_svd  = (cnn_cfg.get("dim_reduction", {}) or {}).get("enabled", None)
+    cnn_svd_k= (cnn_cfg.get("dim_reduction", {}) or {}).get("n_components", None)
+    vit_on   = bool(vit_cfg.get("enabled", False))
+
+    # active branches + weights (si dispo)
+    active_branches, weights = None, None
+    try:
+        feats = pipe.named_steps.get("features", None)
+        if feats is not None:
+            # FeatureUnion
+            union = feats.named_steps["union"] if "union" in feats.named_steps else feats
+            active_branches = [name for name, _ in getattr(union, "transformer_list", [])]
+            weights = getattr(union, "transformer_weights", None)
+    except Exception:
+        pass
+
+    # sizes
+    n_train = (len(y_train) if y_train is not None else None)
+    n_val   = (len(y_val) if y_val is not None else None)
+
+    # classifier name + eval_metric from ctor if available
+    clf = pipe.named_steps.get("model", None)
+    clf_name = clf.__class__.__name__ if clf is not None else "NA"
+    eval_metric_ctor = getattr(getattr(clf, "est_", clf), "eval_metric", None)
+
+    parts = [
+        f"text_only={text_on and not image_on}",
+        f"image_only={image_on and not text_on}",
+        f"dummy={dummy_on}",
+        f"CNN arch={cnn_arch} svd={cnn_svd}/{cnn_svd_k}",
+        f"ViT={'on' if vit_on else 'off'}",
+        f"branches={active_branches}" if active_branches else None,
+        f"weights={weights}" if weights else None,
+        f"train={n_train} val={n_val}" if n_train is not None else None,
+        f"clf={clf_name}",
+        f"best_iter={best_iter if best_iter is not None else 'NA'}",
+        f"eval_metric={eval_metric_ctor}",
+    ]
+    return " | ".join(p for p in parts if p)
 
 # -------------------- LabelEncoding wrapper --------------------
 class LabelEncodingClassifier(BaseEstimator, ClassifierMixin):
@@ -289,6 +354,37 @@ def create_cnn_branch_from_cfg(images_cfg: dict, section: str = "cnn", apply_l2:
     if not bool(cnn_cfg.get("enabled", False)):
         raise ValueError(f"[images.{section}.enabled] = false")
 
+    # --- lecture des augs & label smoothing depuis TOML ---
+    aug_cfg = cnn_cfg.get("aug", {}) or {}
+    rrc_cfg = aug_cfg.get("random_resized_crop", {}) or {}
+
+    aug_hflip_p      = float(aug_cfg.get("hflip_p", aug_cfg.get("aug_hflip_p", 0.2)))
+    aug_color_jitter = float(aug_cfg.get("color_jitter", 0.05))
+    mixup_alpha      = float(aug_cfg.get("mixup_alpha", 0.1))
+    cutmix_alpha     = float(aug_cfg.get("cutmix_alpha", 0.0))
+    rrc_scale        = tuple(rrc_cfg.get("scale", (0.9, 1.0)))
+    rrc_ratio        = tuple(rrc_cfg.get("ratio", (0.95, 1.05)))
+
+    label_smoothing  = float(cnn_cfg.get("label_smoothing", 0.0))
+
+    # >>> LOG DE CONTROLE
+    logger.info(
+        "[AUG] %s | hflip_p=%.2f | color_jitter=%.2f | mixup=%.2f | cutmix=%.2f | "
+        "rrc_scale=%s | rrc_ratio=%s | label_smoothing=%.3f",
+        section, aug_hflip_p, aug_color_jitter, mixup_alpha, cutmix_alpha,
+        rrc_scale, rrc_ratio, label_smoothing
+    )
+
+    # garde-fou: avertir si hors plages usuelles
+    if not (0.0 <= aug_hflip_p <= 1.0):
+        logger.warning("[AUG] hflip_p hors plage: %.3f", aug_hflip_p)
+    if not (0.0 <= mixup_alpha <= 1.0):
+        logger.warning("[AUG] mixup_alpha suspect: %.3f", mixup_alpha)
+    if not (0.0 <= cutmix_alpha <= 1.0):
+        logger.warning("[AUG] cutmix_alpha suspect: %.3f", cutmix_alpha)
+    if not (0.0 <= label_smoothing < 0.2):
+        logger.warning("[AUG] label_smoothing inhabituel: %.3f", label_smoothing)
+
     featurizer = CNNFeaturizer(
         image_dir=images_cfg["train_dir"],
         arch=str(cnn_cfg.get("arch", "resnet50")),
@@ -309,6 +405,13 @@ def create_cnn_branch_from_cfg(images_cfg: dict, section: str = "cnn", apply_l2:
         hf_feature_dim=cnn_cfg.get("hf_feature_dim", 768),
         hf_use_fast=bool(cnn_cfg.get("use_fast", True)),
         ft_patience=int(cnn_cfg.get("ft_patience", 3)),
+        aug_hflip_p=aug_hflip_p,
+        aug_color_jitter=aug_color_jitter,
+        mixup_alpha=mixup_alpha,
+        cutmix_alpha=cutmix_alpha,
+        random_resized_crop_scale=rrc_scale,
+        random_resized_crop_ratio=rrc_ratio,
+        label_smoothing=label_smoothing,
     )
     steps = [("cnn", featurizer)]
     dr = cnn_cfg.get("dim_reduction", {}) or {}
@@ -510,29 +613,86 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
         if hasattr(clf, "fit"):
             # XGB/LGBM via LabelEncodingClassifier -> eval_set re-encodé en interne
             try:
-                clf.fit(
-                    Z_tr_rs, y_tr_rs,
-                    eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
-                    eval_metric=["mlogloss", "merror"],
-                    early_stopping_rounds=50,
-                    verbose=False,
-                )
+                try:
+                    # XGBoost <= 1.x : OK d’avoir eval_metric + early_stopping_rounds
+                    clf.fit(
+                        Z_tr_rs, y_tr_rs,
+                        eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+                        eval_metric=["mlogloss", "merror"],
+                        early_stopping_rounds=50,
+                        verbose=False,
+                    )
+                except TypeError:
+                    # XGBoost >= 2.0 : eval_metric ne doit PAS être passé à fit()
+                    import xgboost as xgb
+                    cb = [xgb.callback.EarlyStopping(rounds=50, save_best=True, maximize=False)]
+                    clf.fit(
+                        Z_tr_rs, y_tr_rs,
+                        eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+                        callbacks=cb,
+                        verbose=False,
+                    )       
             except TypeError:
                 # modèles sans ES -> fit standard
                 clf.fit(Z_tr_rs, y_tr_rs)
         y_pred_cv[va] = clf.predict(Z_va_rs)
 
+    # OOF
     dt = time.time() - t0
     f1m = f1_score(y_train, y_pred_cv, average="macro")
     f1w = f1_score(y_train, y_pred_cv, average="weighted")
     logger.info("[CV] F1-macro=%.4f | F1-weighted=%.4f (%.1fs)", f1m, f1w, dt)
 
-    # OOF
+    
     out_oof = Path(cfg["outputs"].get("oof_out", f"{outdir}/preds_oof_{kind}.csv"))
     pd.DataFrame({"y_true": y_train.astype(str).values, "y_pred": y_pred_cv.astype(str)}, index=y_train.index).to_csv(out_oof, index=True)
     logger.info("[CV] OOF écrit: %s", out_oof)
-    return f1m, y_pred_cv
+    
+    report_dir = Path("results")
+    report_dir.mkdir(parents=True, exist_ok=True)
 
+    # rapports bruts
+    txt_path = report_dir / f"report_{kind}_cv.txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(f"=== Baseline {kind.upper()} — CV (n_splits={n_splits_used}) ===\n")
+        f.write(f"F1-macro     : {f1m:.4f}\nF1-weighted  : {f1w:.4f}\n")
+        f.write(f"Time (sec)   : {dt:.2f}\n\n")
+        f.write(classification_report(y_train, y_pred_cv))
+
+    # version lisible (si tu as un mapping id->nom, sinon garde le brut)
+    readable_txt = report_dir / f"report_{kind}_cv_readable.txt"
+    with open(readable_txt, "w", encoding="utf-8") as f:
+        f.write(f"=== Baseline {kind.upper()} — CV (n_splits={n_splits_used}) ===\n")
+        f.write(f"F1-macro     : {f1m:.4f}\nF1-weighted  : {f1w:.4f}\n\n")
+        f.write(classification_report(y_train, y_pred_cv))  # remplacer par version “target_names” si tu as le mapping
+
+    # résumé Markdown
+    md_path = report_dir / f"report_{kind}_summary.md"
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(f"# Baseline {kind.upper()} — CV ({n_splits_used} folds) — {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+        f.write(f"- **F1-macro**: {f1m:.4f}\n- **F1-weighted**: {f1w:.4f}\n")
+
+    # per-class CSV (brut)
+    import pandas as pd
+    prec, rec, f1s, sup = precision_recall_fscore_support(y_train, y_pred_cv, labels=np.unique(y_train))
+    df_rep = pd.DataFrame({
+        "class": np.unique(y_train),
+        "precision": prec, "recall": rec, "f1": f1s, "support": sup
+    })
+    csv_path = report_dir / f"report_{kind}_per_class_readable.csv"
+    df_rep.to_csv(csv_path, index=False)
+
+    # résumé CV dans baseline_results_summary.csv
+    try:
+        notes = _make_notes(pipe, cfg, y_train=y_train, y_val=None, best_iter=None)
+        splits_used = n_splits_used
+        _append_summary_row(kind.upper(), splits_used, f1m, f1w, dt, notes,
+                            out_csv=cfg.get("outputs", {}).get("summary_csv", "baseline_results_summary.csv"))
+        logger.info("[CV] Résumé append → baseline_results_summary.csv")
+    except Exception as e:
+        logger.warning("[CV] Append résumé échoué: %s", e)
+
+    return f1m, y_pred_cv
 # -------------------- Courbes & repointage --------------------
 def _save_curve(xs, ys, title, ylabel, out_png):
     plt.figure(figsize=(7.5, 4))
@@ -702,25 +862,77 @@ def train_and_predict_on_test(pipe: ImbPipeline, X_train: pd.DataFrame, y_train:
 
     # 4) fit classifieur avec ES
     clf = pipe.named_steps["model"]
-    clf.fit(
-        Z_tr_rs, y_tr_rs,
-        eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
-        eval_metric=["mlogloss", "merror"],
-        early_stopping_rounds=50,
-        verbose=False,
-    )
+    try:
+        # XGBoost <= 1.x
+        clf.fit(
+            Z_tr_rs, y_tr_rs,
+            eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+            eval_metric=["mlogloss", "merror"],
+            early_stopping_rounds=50,
+            verbose=False,
+        )
+    except TypeError:
+        # XGBoost >= 2.0 : utiliser les callbacks
+        import xgboost as xgb
+        cb = [xgb.callback.EarlyStopping(rounds=50, save_best=True, maximize=False)]
+        clf.fit(
+            Z_tr_rs, y_tr_rs,
+            eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+            callbacks=cb,
+            verbose=False,
+        )
     _plot_training_curves_from_est(clf.est_)
 
-    # 5) re-fit FULL DATA
-    best_iter = getattr(clf.est_, "best_iteration", None) or getattr(clf.est_, "best_iteration_", None)
+    # -- après clf.fit(...) et avant refit full data --
+    best_iter = None
+    best_score = None
+
+    # XGBoost >= 1.3 scikit wrapper expose souvent best_iteration_ / best_score
+    if hasattr(clf, "best_iteration_"):
+        best_iter = clf.best_iteration_
+    if hasattr(clf, "best_score"):
+        best_score = clf.best_score
+
+    # fallback via booster (robuste XGB 1.x / 2.x)
+    try:
+        booster = clf.get_booster()
+        if best_iter is None and hasattr(booster, "best_iteration"):
+            best_iter = booster.best_iteration
+        if best_score is None and hasattr(booster, "best_score"):
+            best_score = booster.best_score
+    except Exception:
+        pass
+
+    logger.info(f"[XGB] best_iter={best_iter} | best_score={best_score}")
+
+    # Refitting au meilleur nombre d’arbres si dispo
     if best_iter is not None:
-        pipe.set_params(**{"model__base_estimator__n_estimators": int(best_iter) + 1})
-        pipe.fit(X_train[need_cols], y_train)
-        logger.info("[INFO] Refit full data avec n_estimators=%d", int(best_iter)+1)
-    else:
-        steps = [("features", pre_feat.named_steps["features"])]
-        if has_scaler: steps.append(("scaler", scaler))
-        pipe = SkPipeline(steps + [("model", clf)], memory=getattr(pipe, "memory", None))
+        n_estimators_refit = int(best_iter) + 1
+        logger.info(f"[XGB] Refit full data at n_estimators={n_estimators_refit}")
+
+
+    # 5) re-fit FULL DATA — toujours SANS under/over
+    t_train = time.time()
+
+    # pipeline minimal: features (+ scaler si présent) + model
+    steps = [("features", pre_feat.named_steps["features"])]
+    if has_scaler:
+        steps.append(("scaler", scaler))
+    final_clf = clf  # on réutilise le classif entraîné (ses hyperparams + best_iter)
+
+    # si best_iter connu, on ajuste n_estimators via le wrapper
+    if best_iter is not None:
+        n_estimators_refit = int(best_iter) + 1
+        logger.info("[XGB] Refit full data avec n_estimators=%d", n_estimators_refit)
+        final_clf = clone(clf).set_params(**{"base_estimator__n_estimators": n_estimators_refit})
+
+    final_pipe = SkPipeline(steps + [("model", final_clf)], memory=getattr(pipe, "memory", None))
+    final_pipe.fit(X_train[need_cols], y_train)
+    train_dt = time.time() - t_train
+
+    # remplace l'ancien pipe par le final pour la suite (exports + préd test)
+    pipe = final_pipe
+  
 
     # 6) repointer images → test
     _repoint_images_to_test(pipe, cfg)
@@ -752,6 +964,8 @@ def main():
     y_train = pd.read_csv(cfg["paths"]["y_train_csv"]).iloc[:, 0]
     X_test  = pd.read_csv(cfg["paths"]["x_test_csv"])
 
+
+
     # --- Sanity checks & auto-fix target / stray columns ---
     TARGET_COL = (cfg.get("data", {}) or {}).get("target", "prdtypecode")
 
@@ -764,13 +978,13 @@ def main():
         # a) Si la cible est dans X_train, on la sort de X -> y
         if TARGET_COL in X_train.columns:
             y_train = X_train.pop(TARGET_COL).astype(int)
-            logger.warning("[data] Cible récupérée depuis X_train['%s'] (l'ancienne y était invalide).", TARGET_COL)
+            logger.warning("[data] Cible récupérée depuis X_train['%s'] .", TARGET_COL)
         else:
             # b) Sinon on relit le CSV y_train en entier et on prend la bonne colonne si elle existe
             y_df = pd.read_csv(cfg["paths"]["y_train_csv"])
             if TARGET_COL in y_df.columns:
                 y_train = y_df[TARGET_COL].astype(int)
-                logger.warning("[data] Cible relue depuis y_train.csv['%s'] (l'ancienne y était invalide).", TARGET_COL)
+                logger.warning("[data] Cible depuis y_train.csv['%s'] .", TARGET_COL)
             else:
                 raise ValueError(f"[data] Target column '{TARGET_COL}' introuvable dans X_train et y_train.csv")
 
@@ -778,14 +992,64 @@ def main():
     drop_unnamed = [c for c in X_train.columns if c.lower().startswith("unnamed")]
     if drop_unnamed:
         X_train = X_train.drop(columns=drop_unnamed)
-        logger.info("[data] Colonnes parasites supprimées dans X_train: %s", drop_unnamed)
+        logger.info("[data]  X_train: %s", drop_unnamed)
+
+    # --- Sanity: colonnes attendues par les baselines ---
+    required_b2 = ["designation","description"]
+    required_b3 = ["productid","imageid"]
+    required_b4 = required_b2 + required_b3
+
+    need = required_b4 if args.baseline=="b4" else (required_b3 if args.baseline=="b3" else required_b2)
+    missing = [c for c in need if c not in X_train.columns]
+    if missing:
+        raise ValueError(f"[data] Colonnes manquantes pour {args.baseline}: {missing}")
+
+    # --- Sanity: répertoires image ---
+    imgs = cfg.get("images", {}) or {}
+    for key in ["train_dir","test_dir"]:
+        if key in imgs:
+            p = Path(imgs[key])
+            if not p.exists():
+                raise FileNotFoundError(f"[images] {key} inexistant: {p}")
 
     # 3) Petit diagnostic pour confirmer
     vc = y_train.value_counts()
     logger.info("[data] Target '%s' → %d classes | min_count=%d | max_count=%d",
                 y_train.name, vc.size, int(vc.min()), int(vc.max()))
+    
+    # --- Limite globale via env: RAKUTEN_MAX_N (APRES réparation de y_train) ---
+    try:
+        max_n_env = int(os.getenv("RAKUTEN_MAX_N", "0") or "0")
+    except ValueError:
+        max_n_env = 0
+
+   
+    if max_n_env > 0 and len(X_train) > max_n_env:
+        n_before = len(X_train)
+        seed = int(cfg.get("random", {}).get("seed", 42))
+        from sklearn.model_selection import StratifiedShuffleSplit
+        try:
+            sss = StratifiedShuffleSplit(n_splits=1, train_size=max_n_env, random_state=seed)
+            tr_idx, _ = next(sss.split(X_train, y_train))
+            reason = "stratified"
+        except ValueError as e:
+            logger.warning("[data] StratifiedShuffleSplit impossible (%s) → fallback non stratifié.", e)
+            rng = np.random.RandomState(seed)
+            tr_idx = rng.choice(len(X_train), size=max_n_env, replace=False)
+            reason = "random"
+
+        X_train = X_train.iloc[tr_idx].reset_index(drop=True)
+        y_train = y_train.iloc[tr_idx].reset_index(drop=True)
+        logger.warning("[data] Sous-échantillonnage global activé (%s): %d → %d via RAKUTEN_MAX_N",
+                    reason, n_before, len(y_train))
+ 
+
     # CV (score + OOF)
-    f1m, _ = run_baseline_and_report(args.baseline, X_train, y_train, cfg, outdir="results")
+    try:
+        f1m, _ = run_baseline_and_report(args.baseline, X_train, y_train, cfg, outdir="results")
+    except Exception as e:
+        logger.exception("[FATAL] run_baseline_and_report(%s) a échoué", args.baseline)
+        raise
 
     seed = int(cfg.get("random", {}).get("seed", 42))
 
@@ -804,6 +1068,19 @@ def main():
         import joblib
         joblib.dump(pipe, cfg["outputs"]["model_out"].replace(".joblib", f"_{args.baseline}.joblib"))
         logger.info("Pipeline %s sauvegardée.", args.baseline.upper())
+
+        try:
+            t0f = time.time()
+            # On mesure le temps de prédiction pour avoir train+infer approximatif si tu veux
+            _ = pipe.predict(X_train[need_cols].iloc[:100])  # petit ping pour éviter coût froid
+            train_infer_dt = time.time() - t0f
+            notes_train = _make_notes(pipe, cfg, y_train=y_train, y_val=None, best_iter=None)
+            _append_summary_row(args.baseline.upper()+"-FINAL", 1, float("nan"), float("nan"),
+                                train_infer_dt, notes_train,
+                                out_csv=cfg.get("outputs", {}).get("summary_csv", "baseline_results_summary.csv"))
+            logger.info("[TrainFinal %s] Résumé append → baseline_results_summary.csv", args.baseline.upper())
+        except Exception as e:
+            logger.warning("[TrainFinal %s] Append résumé échoué: %s", args.baseline.upper(), e)
 
         # Exports analytiques
         try:
