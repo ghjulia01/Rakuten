@@ -673,7 +673,6 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
         f.write(f"- **F1-macro**: {f1m:.4f}\n- **F1-weighted**: {f1w:.4f}\n")
 
     # per-class CSV (brut)
-    import pandas as pd
     prec, rec, f1s, sup = precision_recall_fscore_support(y_train, y_pred_cv, labels=np.unique(y_train))
     df_rep = pd.DataFrame({
         "class": np.unique(y_train),
