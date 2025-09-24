@@ -168,8 +168,10 @@ class CNNFeaturizer(BaseEstimator, TransformerMixin):
         self.aug_color_jitter = float(aug_color_jitter)
         self.mixup_alpha = float(mixup_alpha)
         self.cutmix_alpha = float(cutmix_alpha)
-        self.rrc_scale  = tuple(random_resized_crop_scale)
-        self.rrc_ratio  = tuple(random_resized_crop_ratio)
+        self.rrc_scale = tuple(random_resized_crop_scale) if random_resized_crop_scale is not None else None
+        self.rrc_ratio = tuple(random_resized_crop_ratio) if random_resized_crop_ratio is not None else None
+        self.random_resized_crop_scale = self.rrc_scale
+        self.random_resized_crop_ratio = self.rrc_ratio
         self.label_smoothing = float(label_smoothing)
 
     # -------- Utilitaires -------------------------------------------------------

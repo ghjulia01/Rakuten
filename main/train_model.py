@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple, Union, List, Dict, Any
-
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -76,6 +76,11 @@ def setup_logging(level=logging.INFO,
     logging.basicConfig(level=level, format=fmt, handlers=handlers, force=force)
     logger = logging.getLogger(name)
     logger.setLevel(level)
+    logging.getLogger("features.text_cleaner").setLevel(logging.DEBUG)
+    logging.getLogger("features.text_vectorizer").setLevel(logging.DEBUG)
+    logging.getLogger("models.text_pipeline").setLevel(logging.DEBUG)
+    logging.getLogger("sklearn").setLevel(logging.WARNING)
+    warnings.filterwarnings("ignore", category=FutureWarning, message="This Pipeline instance is not fitted yet.*")
     return logger
 
 logger = setup_logging()
@@ -99,7 +104,9 @@ def get_cache(cfg: dict) -> Optional[Memory]:
         return None
     cache_dir = os.path.join(cfg["outputs"]["log_dir"], "skcache")
     os.makedirs(cache_dir, exist_ok=True)
-    return Memory(cache_dir)
+    cache_verbose = int(cfg.get("compute", {}).get("cache_verbose", 0))
+    logger.info("[CACHE] joblib ON verbose=%d dir=%s", cache_verbose, cache_dir)
+    return Memory(cache_dir, verbose=cache_verbose)
 
 
 
@@ -175,6 +182,64 @@ class ToFloat32:
             return X.astype("float32") if sparse.issparse(X) else X.astype(np.float32)
         except Exception:
             return X
+        
+def fit_xgb_with_early_stopping(clf, X_train, y_train, X_val, y_val, **fit_params):
+    """Fit XGBoost avec early stopping, compatible toutes versions."""
+    import xgboost as xgb
+    
+    # Extraire le vrai estimateur
+    base_est = clf.est_ if hasattr(clf, 'est_') else clf
+    
+    # Méthode 1: XGBoost 2.0+ avec callbacks
+    try:
+        # S'assurer que eval_metric est dans le constructeur pour v2.0+
+        if not hasattr(base_est, 'eval_metric') or base_est.eval_metric is None:
+            if hasattr(base_est, 'set_params'):
+                base_est.set_params(eval_metric="mlogloss")
+        
+        callbacks = [xgb.callback.EarlyStopping(rounds=50, save_best=True, maximize=False)]
+        
+        clf.fit(
+            X_train, y_train,
+            eval_set=[(X_train, y_train), (X_val, y_val)],
+            callbacks=callbacks,
+            verbose=False,
+            **{k: v for k, v in fit_params.items() if k not in ['eval_metric', 'early_stopping_rounds']}
+        )
+        logger.info("[XGB] Fit avec callbacks (v2.0+)")
+        return True
+        
+    except (TypeError, AttributeError) as e1:
+        logger.info(f"[XGB] Callbacks failed ({e1}), trying v1.x method...")
+        
+        # Méthode 2: XGBoost 1.x avec eval_metric
+        try:
+            clf.fit(
+                X_train, y_train,
+                eval_set=[(X_train, y_train), (X_val, y_val)],
+                eval_metric=["mlogloss", "merror"],
+                early_stopping_rounds=50,
+                verbose=False,
+                **{k: v for k, v in fit_params.items() if k not in ['callbacks']}
+            )
+            logger.info("[XGB] Fit avec eval_metric (v1.x)")
+            return True
+            
+        except (TypeError, AttributeError) as e2:
+            logger.warning(f"[XGB] eval_metric failed ({e2}), fallback to simple fit")
+            
+            # Méthode 3: Fit simple sans early stopping
+            try:
+                clf.fit(X_train, y_train, **{k: v for k, v in fit_params.items() 
+                                           if k not in ['eval_set', 'eval_metric', 'early_stopping_rounds', 'callbacks']})
+                logger.warning("[XGB] Fit simple (pas d'early stopping)")
+                return False
+            except Exception as e3:
+                logger.error(f"[XGB] Tous les fits ont échoué: {e3}")
+                raise
+
+
+
 # -------------------- Summary helpers --------------------
 def _append_summary_row(baseline: str, cv_splits: int, f1_macro: float, f1_weighted: float,
                         train_infer_time_sec: float, notes: str, out_csv: str = "baseline_results_summary.csv"):
@@ -590,9 +655,16 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
         X_va, y_va = X_train.iloc[va][need_cols], y_train.iloc[va]
 
         # 1) features-only
-        pre_feat = SkPipeline([("features", pipe.named_steps["features"])])
+        pre_feat = SkPipeline([("features", pipe.named_steps["features"])], memory=get_cache(cfg))
+        logger.info(f"[CV] Fold {fold}: Début fit features - {len(X_tr)} échantillons")
+        logger.info(f"[CV] Fold {fold}: Colonnes utilisées: {need_cols}")
+        logger.info(f"[CV] Fold {fold}: Exemple données: {X_tr.iloc[0][['designation']].values[0][:100]}...")
         pre_feat.fit(X_tr, y_tr)
+        logger.info(f"[CV] Fold {fold}: Features fit terminé")
         Z_tr = pre_feat.transform(X_tr); Z_va = pre_feat.transform(X_va)
+        logger.info(f"[CV] Fold {fold}: Features shape - Train: {Z_tr.shape}, Val: {Z_va.shape}")
+        if hasattr(Z_tr, 'nnz'):  # Si sparse matrix
+            logger.info(f"[CV] Fold {fold}: Features sparsity - Train: {Z_tr.nnz}/{Z_tr.shape[0]*Z_tr.shape[1]} ({100*Z_tr.nnz/(Z_tr.shape[0]*Z_tr.shape[1]):.2f}%)")
 
         # 2) sampling TRAIN only (si présents)
         Z_tr_rs, y_tr_rs = Z_tr, y_tr
@@ -644,7 +716,14 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
     logger.info("[CV] F1-macro=%.4f | F1-weighted=%.4f (%.1fs)", f1m, f1w, dt)
 
     
-    out_oof = Path(cfg["outputs"].get("oof_out", f"{outdir}/preds_oof_{kind}.csv"))
+    tmpl = cfg["outputs"].get("oof_out", "")
+    if tmpl:
+        try:
+            out_oof = Path(tmpl.format(kind=kind))
+        except Exception:
+            out_oof = Path(tmpl)
+    else:
+        out_oof = Path(outdir) / f"preds_oof_{kind}.csv"
     pd.DataFrame({"y_true": y_train.astype(str).values, "y_pred": y_pred_cv.astype(str)}, index=y_train.index).to_csv(out_oof, index=True)
     logger.info("[CV] OOF écrit: %s", out_oof)
     
@@ -774,6 +853,12 @@ def _features_only_transform(pipe_or_model, X, y=None):
     scaler = pipe_or_model.named_steps["scaler"] if has_scaler else None
     if scaler is not None:
         Z = scaler.fit_transform(Z)
+    try:
+        from scipy import sparse as sp
+        if sp.issparse(Z):
+            Z = Z.tocsr()
+    except Exception:
+        pass
     return Z, slices, has_scaler, scaler, clf, pre_feat
 
 def export_blocks_importance(pipe, X, y, outdir="results", tag="bX"):
@@ -789,7 +874,7 @@ def export_blocks_importance(pipe, X, y, outdir="results", tag="bX"):
         try:
             import shap
             base = clf.est_ if hasattr(clf, "est_") else clf
-            expl = shap.TreeExplainer(base, data=Z, feature_perturbation="interventional", model_output="probability")
+            expl = shap.TreeExplainer(base, data=Z, feature_perturbation="tree_path_dependent", model_output="probability")
             SH = expl.shap_values(Z)
             SH_abs = np.mean(np.abs(SH), axis=0) if isinstance(SH, list) else np.mean(np.abs(SH), axis=0)
             for name, (a, b) in slices.items():
@@ -844,7 +929,7 @@ def train_and_predict_on_test(pipe: ImbPipeline, X_train: pd.DataFrame, y_train:
     X_tr, X_va, y_tr, y_va = train_test_split(X_train[need_cols], y_train, test_size=0.10, random_state=42, stratify=y_train)
 
     # 1) features-only
-    pre_feat = SkPipeline([("features", pipe.named_steps["features"])])
+    pre_feat = SkPipeline([("features", pipe.named_steps["features"])], memory=get_cache(cfg))
     pre_feat.fit(X_tr, y_tr)
     Z_tr = pre_feat.transform(X_tr); Z_va = pre_feat.transform(X_va)
 
@@ -861,26 +946,25 @@ def train_and_predict_on_test(pipe: ImbPipeline, X_train: pd.DataFrame, y_train:
 
     # 4) fit classifieur avec ES
     clf = pipe.named_steps["model"]
-    try:
-        # XGBoost <= 1.x
-        clf.fit(
-            Z_tr_rs, y_tr_rs,
-            eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
-            eval_metric=["mlogloss", "merror"],
-            early_stopping_rounds=50,
-            verbose=False,
-        )
-    except TypeError:
-        # XGBoost >= 2.0 : utiliser les callbacks
-        import xgboost as xgb
-        cb = [xgb.callback.EarlyStopping(rounds=50, save_best=True, maximize=False)]
-        clf.fit(
-            Z_tr_rs, y_tr_rs,
-            eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
-            callbacks=cb,
-            verbose=False,
-        )
-    _plot_training_curves_from_est(clf.est_)
+
+    # Déterminer le type de modèle
+    is_xgb = (hasattr(clf, "est_") and clf.est_.__class__.__name__ == "XGBClassifier") or \
+            clf.__class__.__name__ == "XGBClassifier"
+
+    if is_xgb:
+        fit_xgb_with_early_stopping(clf, Z_tr_rs, y_tr_rs, Z_va_rs, y_va)
+    else:
+        # Autres modèles (LightGBM, etc.)
+        try:
+            clf.fit(
+                Z_tr_rs, y_tr_rs,
+                eval_set=[(Z_tr_rs, y_tr_rs), (Z_va_rs, y_va)],
+                early_stopping_rounds=50,
+                verbose=False,
+            )
+        except (TypeError, AttributeError):
+            # Modèles sans early stopping
+            clf.fit(Z_tr_rs, y_tr_rs)
 
     # -- après clf.fit(...) et avant refit full data --
     best_iter = None

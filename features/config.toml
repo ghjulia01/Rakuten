@@ -23,10 +23,12 @@ pred_out    = "results/preds_b4.csv"
 # Fichier CSV des résultats de comparaison LR vs SVC
 compare_out = "models/compare_cv_results.csv"
 export_features = true
-oof_out         = "results/preds_oof_b4.csv"  
+oof_out         = "results/preds_oof_{kind}.csv"  
 svd_preview_b4  = "results/features_b4_svd100_preview.csv" 
 # Dropbox: choisir le repertoire local ou mettre les logs pour ne pas créer de latence avec la synchronisation
 log_dir = "C:/Users/colle/Desktop/rakuten-logs"   # utilisé pour le cache sklearn & le cache HF
+summary_csv = "results/baseline_results_summary.csv"
+
 
 [random]
 # Fixer la reproductibilité (semences aléatoires)
@@ -37,6 +39,17 @@ seed = 42
 # Utiliser plusieurs jobs en production si la machine le permet
 n_jobs = 2      # 1 pour éviter la parallélisation au moment du hstack
 use_cache = true
+cache_verbose = 3
+
+[debug]
+# Active les logs détaillés de processing
+verbose_pipeline = true
+# Sauvegarde les features intermédiaires pour inspection
+save_intermediate_features = true
+# Affiche les statistiques détaillées
+show_feature_stats = true
+# Limite pour les exemples de debug (éviter trop de sortie)
+debug_sample_size = 5
 
 # --- Réglages branche texte
 [text]
@@ -170,7 +183,7 @@ hf_feature_dim = 768        # dimension de sortie des embeddings ViT-base (stand
 hf_revision   = "main"
 batch_size = 12
 device = "cpu"                  # "auto" | "cpu" | "cuda" | "dml" si sur amd
-finetune_epochs = 2             # commencer par 1 (rapide), puis 2-3 si utile
+finetune_epochs = 8             # commencer par 1 (rapide), puis 2-3 si utile
 trainable_last_n = 2            # interrupteur FT nb de paramètres à "défiger" (ex: 5000 à 20000) # ignoré par la branche HFignoré si ResNet est activé
 trainable_last_layers = 2       # ← nb de blocs Transformer à unfreeze (peut tester 2)
 finetune_lr = 0.0001            # learning rate du fine-tuning
