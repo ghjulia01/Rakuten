@@ -49,7 +49,7 @@ from features.image_stats import ImageStatsCombinedFeaturizer
 from models.text_pipeline import create_text_pipeline_from_cfg
 from models.image_pipeline import create_image_pipeline_from_cfg
 from models.cnn_features import CNNFeaturizer  # gère ResNet/ViT selon cfg
-
+from tools.grad_cam import main_grad_cam
 
 DEFAULT_CFG = Path(__file__).resolve().parents[1] / "features" / "config.toml"
 
@@ -85,6 +85,17 @@ def setup_logging(level=logging.INFO,
 
 logger = setup_logging()
 
+# -------------------- Path formatting --------------------
+def _format_out_path(tmpl: str, *, kind: str, phase: str) -> Path:
+    """
+    Retourne un Path en tentant tmpl.format(kind=..., phase=...).
+    Si le format échoue (tmpl sans placeholders), on suffixe proprement.
+    """
+    try:
+        return Path(tmpl.format(kind=kind, phase=phase))
+    except Exception:
+        base, ext = os.path.splitext(tmpl)
+        return Path(f"{base}_{kind}_{phase}{ext}")
 
 # -------------------- Config & Seed --------------------
 def load_config(config_path: str | Path | None = None) -> dict:
@@ -709,6 +720,84 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
                 clf.fit(Z_tr_rs, y_tr_rs)
         y_pred_cv[va] = clf.predict(Z_va_rs)
 
+    # --- Détection robuste des branches images dans le pipeline fitted ---
+    def _get_transformers_dict_from_pre_feat(pre_feat):
+        try:
+            features_step = pre_feat.named_steps["features"]
+            # Si features_step est un Pipeline et contient "union", on la prend, sinon on garde tel quel
+            if hasattr(features_step, "named_steps") and "union" in features_step.named_steps:
+                union = features_step.named_steps["union"]
+            else:
+                union = features_step
+            return dict(getattr(union, "transformer_list", []))
+        except Exception as e:
+            logger.info("[Images] Aucune branche image détectée dans cette baseline (%s).", e)
+            return {}
+
+    tdict = _get_transformers_dict_from_pre_feat(pre_feat)
+
+    # --- Enregistrement du modèle côté ResNet (si et seulement si la branche existe) ---
+    if "image_cnn" in tdict:
+        try:
+            sub = tdict["image_cnn"]
+            if hasattr(sub, "named_steps") and "cnn" in sub.named_steps:
+                resnet_model = sub.named_steps["cnn"]
+                model_path = os.path.join(outdir, f"model_resnet_{kind}_fold_{fold}.pth")
+                if hasattr(resnet_model, "save_model"):
+                    resnet_model.save_model(model_path)
+                    logger.info("[ResNet] Modèle sauvegardé: %s", model_path)
+                # Grad-CAM optionnel
+                try:
+                    panel = min(12, len(X_va))
+                    samples = X_va[["imageid", "productid"]].head(panel).copy()
+                    labels  = y_va.iloc[:panel].values
+                    backbone = getattr(resnet_model, "model", None) or getattr(resnet_model, "backbone", None)
+                    main_grad_cam(
+                        backbone=backbone,
+                        image_dir=getattr(resnet_model, "image_dir", None),
+                        samples=samples,
+                        labels=labels,
+                        outdir=os.path.join("results", f"gradcam_fold_{fold}"),
+                        device=getattr(resnet_model, "device", "cpu"),
+                        mode="resnet"
+                    )
+                except Exception as e:
+                    logger.warning("[GradCAM-ResNet] Skip (%s)", e)
+        except Exception as e:
+            logger.warning("[ResNet] Enregistrement ignoré (%s)", e)
+
+    # --- Enregistrement côté ViT (HF) (si et seulement si la branche existe) ---
+    if "image_cnn_vit" in tdict:
+        try:
+            sub = tdict["image_cnn_vit"]
+            if hasattr(sub, "named_steps") and "cnn" in sub.named_steps:
+                vit_featurizer = sub.named_steps["cnn"]
+                vit_model_path = os.path.join(outdir, f"model_vit_{kind}_fold_{fold}.pth")
+                if hasattr(vit_featurizer, "save_model"):
+                    vit_featurizer.save_model(vit_model_path)
+                    logger.info("[ViT] 'Modèle' sauvegardé: %s", vit_model_path)
+                # Attention rollout optionnel
+                try:
+                    panel = min(12, len(X_va))
+                    samples = X_va[["imageid", "productid"]].head(panel).copy()
+                    labels  = y_va.iloc[:panel].values
+                    backbone = getattr(vit_featurizer, "model", None) or getattr(vit_featurizer, "backbone", None)
+                    main_grad_cam(
+                        backbone=backbone,
+                        image_dir=getattr(vit_featurizer, "image_dir", None),
+                        samples=samples,
+                        labels=labels,
+                        outdir=os.path.join("results", f"vit_rollout_fold_{fold}"),
+                        device=getattr(vit_featurizer, "device", "cpu"),
+                        mode="vit"
+                    )
+                except Exception as e:
+                    logger.warning("[ViT-Rollout] Skip (%s)", e)
+        except Exception as e:
+            logger.warning("[ViT] Enregistrement ignoré (%s)", e)
+
+
+
     # OOF
     dt = time.time() - t0
     f1m = f1_score(y_train, y_pred_cv, average="macro")
@@ -771,6 +860,9 @@ def run_baseline_and_report(kind: str, X_train: pd.DataFrame, y_train: pd.Series
         logger.warning("[CV] Append résumé échoué: %s", e)
 
     return f1m, y_pred_cv
+
+
+
 # -------------------- Courbes & repointage --------------------
 def _save_curve(xs, ys, title, ylabel, out_png):
     plt.figure(figsize=(7.5, 4))
@@ -822,6 +914,8 @@ def _repoint_images_to_test(pipe: Union[SkPipeline, ImbPipeline], cfg: dict):
                 else: cnn.image_dir = image_test_dir
         new_list.append((name, sub))
     feat_union.transformer_list = new_list
+
+
 
 # -------------------- Exports analytiques (ACP / SHAP / BLOCKs) --------------------
 def _features_only_transform(pipe_or_model, X, y=None):
@@ -891,12 +985,33 @@ def export_blocks_importance(pipe, X, y, outdir="results", tag="bX"):
 
 def export_pca_preview(pipe, X, y, outdir="results", tag="bX", n_comp=100):
     Z, _, _, _, _, _ = _features_only_transform(pipe, X, y)
-    svd = TruncatedSVD(n_components=min(n_comp, Z.shape[1]-1), random_state=42)
-    Zs = svd.fit_transform(Z)
+    n_features = Z.shape[1]
     Path(outdir).mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(Zs[:, :10]).to_csv(f"{outdir}/features_{tag}_svd10_preview.csv", index=False)
-    pd.DataFrame({"component": np.arange(len(svd.explained_variance_ratio_)),
-                  "var_ratio": svd.explained_variance_ratio_}).to_csv(f"{outdir}/pca_{tag}_explained_variance.csv", index=False)
+
+    # garde-fous
+    if n_features < 2:
+        logger.warning("[PCA] Skip (%s): n_features=%d < 2 → pas de SVD possible", tag, n_features)
+        pd.DataFrame({"note": [f"skip: n_features={n_features}"]}).to_csv(
+            f"{outdir}/pca_{tag}_explained_variance.csv", index=False
+        )
+        return
+
+    k = min(n_comp, n_features - 1)
+    try:
+        svd = TruncatedSVD(n_components=k, random_state=42)
+        Zs = svd.fit_transform(Z)
+        pd.DataFrame(Zs[:, :min(10, Zs.shape[1])]).to_csv(
+            f"{outdir}/features_{tag}_svd10_preview.csv", index=False
+        )
+        pd.DataFrame({
+            "component": np.arange(len(svd.explained_variance_ratio_)),
+            "var_ratio": svd.explained_variance_ratio_,
+        }).to_csv(f"{outdir}/pca_{tag}_explained_variance.csv", index=False)
+    except Exception as e:
+        logger.warning("[PCA] Skip (%s): %s", tag, e)
+        pd.DataFrame({"error": [str(e)]}).to_csv(
+            f"{outdir}/pca_{tag}_explained_variance.csv", index=False
+        )
 
 def export_shap(pipe, X, y, outdir="results", tag="bX", max_samples=3000):
     Z, _, _, _, clf, _ = _features_only_transform(pipe, X, y)
@@ -1016,11 +1131,7 @@ def train_and_predict_on_test(pipe: ImbPipeline, X_train: pd.DataFrame, y_train:
     # remplace l'ancien pipe par le final pour la suite (exports + préd test)
     pipe = final_pipe
   
-
-    # 6) repointer images → test
-    _repoint_images_to_test(pipe, cfg)
-
-    # 7) exports analytiques b4 (optionnels)
+    # === 6) exports analytiques b4 (AVANT repoint) ===
     try:
         export_blocks_importance(pipe, X_train[need_cols], y_train, outdir="results", tag="b4")
         export_pca_preview(pipe, X_train[need_cols], y_train, outdir="results", tag="b4")
@@ -1028,8 +1139,14 @@ def train_and_predict_on_test(pipe: ImbPipeline, X_train: pd.DataFrame, y_train:
     except Exception as e:
         print(f"[WARN] Exports analytiques b4 échoués: {e}")
 
-    # 8) prédire test
-    y_pred = pipe.predict(X_test[need_cols])
+    # === 7) repointer images → test (SUR UNE COPIE) ===
+    from copy import deepcopy
+    pipe_for_pred = deepcopy(pipe)
+    _repoint_images_to_test(pipe_for_pred, cfg)  # <— now only the copy is mutated
+
+    # === 8) prédire test avec la copie repointée ===
+    y_pred = pipe_for_pred.predict(X_test[need_cols])
+
     return pipe, y_pred
 
 # -------------------- Main --------------------
@@ -1037,6 +1154,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=str(DEFAULT_CFG), help="Chemin du fichier TOML.")
     parser.add_argument("--baseline", type=str, default="b4", choices=["b0","b1","b2","b3","b4"])
+    parser.add_argument("--fast", action="store_true",
+                    help="Mode rapide: pour b2/b3, saute le full-train + préd test (ne garde que CV/OOF).")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -1137,54 +1256,66 @@ def main():
     seed = int(cfg.get("random", {}).get("seed", 42))
 
     # Entraînement final + sauvegardes selon baseline
-    if args.baseline in {"b2","b3"}:
-        pipe, need_cols = build_baseline_pipeline(args.baseline, cfg, seed)
-        pipe.fit(X_train[need_cols], y_train)
+    if args.baseline in {"b2", "b3"}:
+        if args.fast:
+            logger.info("[FAST] %s: CV/OOF uniquement — full-train + préd test sautés.",
+                        args.baseline.upper())
+            # on ne fait rien d'autre ici
+        else:
+            pipe, need_cols = build_baseline_pipeline(args.baseline, cfg, seed)
+            pipe.fit(X_train[need_cols], y_train)
 
-        # Préd test & joblib
-        Path(cfg["outputs"]["pred_out"]).parent.mkdir(parents=True, exist_ok=True)
-        y_pred = pipe.predict(X_test[need_cols])
-        pd.DataFrame({"id": X_test.index, "y_pred": y_pred}).to_csv(
-            cfg["outputs"]["pred_out"].replace(".csv", f"_{args.baseline}.csv"), index=False)
+            # Préd test & joblib (chemins suffixés par baseline/phase)
+            pred_path  = _format_out_path(cfg["outputs"]["pred_out"],  kind=args.baseline, phase="test")
+            model_path = _format_out_path(cfg["outputs"]["model_out"], kind=args.baseline, phase="final")
 
-        Path(cfg["outputs"]["model_out"]).parent.mkdir(parents=True, exist_ok=True)
-        import joblib
-        joblib.dump(pipe, cfg["outputs"]["model_out"].replace(".joblib", f"_{args.baseline}.joblib"))
-        logger.info("Pipeline %s sauvegardée.", args.baseline.upper())
+            Path(pred_path).parent.mkdir(parents=True, exist_ok=True)
+            y_pred = pipe.predict(X_test[need_cols])
+            pd.DataFrame({"id": X_test.index, "y_pred": y_pred}).to_csv(pred_path, index=False)
 
-        try:
-            t0f = time.time()
-            # On mesure le temps de prédiction pour avoir train+infer approximatif si tu veux
-            _ = pipe.predict(X_train[need_cols].iloc[:100])  # petit ping pour éviter coût froid
-            train_infer_dt = time.time() - t0f
-            notes_train = _make_notes(pipe, cfg, y_train=y_train, y_val=None, best_iter=None)
-            _append_summary_row(args.baseline.upper()+"-FINAL", 1, float("nan"), float("nan"),
+            # Sauvegarde du pipeline entraîné
+            Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+            import joblib  # ou mets l'import en tête de fichier
+            joblib.dump(pipe, model_path)
+            logger.info("Pipeline %s sauvegardée: %s", args.baseline.upper(), model_path)
+
+            # (optionnel) résumé + exports analytiques si tu les veux hors FAST
+            try:
+                t0f = time.time()
+                _ = pipe.predict(X_train[need_cols].iloc[:100])
+                train_infer_dt = time.time() - t0f
+                notes_train = _make_notes(pipe, cfg, y_train=y_train, y_val=None, best_iter=None)
+                _append_summary_row(args.baseline.upper()+"-FINAL", 1, float("nan"), float("nan"),
                                 train_infer_dt, notes_train,
                                 out_csv=cfg.get("outputs", {}).get("summary_csv", "baseline_results_summary.csv"))
-            logger.info("[TrainFinal %s] Résumé append → baseline_results_summary.csv", args.baseline.upper())
-        except Exception as e:
-            logger.warning("[TrainFinal %s] Append résumé échoué: %s", args.baseline.upper(), e)
+                logger.info("[TrainFinal %s] Résumé append → baseline_results_summary.csv", args.baseline.upper())
+            except Exception as e:
+                logger.warning("[TrainFinal %s] Append résumé échoué: %s", args.baseline.upper(), e)
 
-        # Exports analytiques
-        try:
-            export_blocks_importance(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
-            export_pca_preview(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
-            export_shap(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
-        except Exception as e:
-            print(f"[WARN] Exports analytiques {args.baseline} échoués: {e}")
+            try:
+                export_blocks_importance(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
+                export_pca_preview(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
+                export_shap(pipe, X_train[need_cols], y_train, outdir="results", tag=args.baseline)
+            except Exception as e:
+                print(f"[WARN] Exports analytiques {args.baseline} échoués: {e}")
 
     elif args.baseline == "b4":
         under, over = make_sampling_strategies(y_train, cfg["sampling"]["major_class"], cfg["sampling"]["major_cap"], cfg["sampling"]["tail_min"])
         pipe = create_combined_pipeline(cfg, under, over, seed)
         pipe, y_pred = train_and_predict_on_test(pipe, X_train, y_train, X_test, cfg)
 
-        # Sauvegardes
-        Path(cfg["outputs"]["pred_out"]).parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame({"id": X_test.index, "y_pred": y_pred}).to_csv(cfg["outputs"]["pred_out"], index=False)
+        # Sauvegardes b4 avec noms explicites
+        pred_path  = _format_out_path(cfg["outputs"]["pred_out"],  kind="b4", phase="test")
+        model_path = _format_out_path(cfg["outputs"]["model_out"], kind="b4", phase="final")
+
+        Path(pred_path).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"id": X_test.index, "y_pred": y_pred}).to_csv(pred_path, index=False)
+
         import joblib
-        Path(cfg["outputs"]["model_out"]).parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(pipe, cfg["outputs"]["model_out"])
-        logger.info("Pipeline b4 sauvegardée: %s", cfg["outputs"]["model_out"])
+        Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(pipe, model_path)
+        logger.info("Pipeline b4 sauvegardée: %s", model_path)
 
 if __name__ == "__main__":
     main()
+

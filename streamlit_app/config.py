@@ -480,6 +480,7 @@ def show_b2_walkthrough():
     import plotly.express as px
     # Architexture
 
+    # Architecture
     st.subheader("Architecture du pipeline (Mermaid)")
     merm = r"""
     flowchart TB
@@ -489,7 +490,7 @@ def show_b2_walkthrough():
         C --> TCC[TextCleaner no stem] --> TCW[TF-IDF char_wb]
         C --> TS[TextStats/Pro]
         C --> TL[Language]
-        C --> TX[Lexicon chi^2]
+        C --> TX[Lexicon chi2]
         TWW --> TU[Union texte]
         TCW --> TU
         TS  --> TU
@@ -499,89 +500,105 @@ def show_b2_walkthrough():
     end
 
     subgraph I[Images]
-        R50[ResNet embeddings] --> R50S[SVD + L2]
-        VIT[ViT embeddings]   --> VITS[SVD + L2]
+        VIT[ViT embeddings] --> VITS[SVD + L2]
         ISTATS[ImageStatsCombined]
         PIX[Pixels -> PCA/SVD]
     end
 
-    FUSION[FeatureUnion multimodale text + image_cnn + pixels + stats]
-    US[Under-sampling] --> OS[Over-sampling] --> CLF[Classifier (LR/SVC/LGBM)]
-    X1[Diagnostics poids/confusions]:::xp
-    X2[ACP 2D]:::xp
-    X3[Grad-CAM]:::xp
+    FUSION[FeatureUnion multimodale]
+    US[Under-sampling] 
+    OS[Over-sampling] 
+    CLF[Classifier XGBoost]
+    X1[Diagnostics poids/confusions]
+    X2[ACP 2D]
+    X3[Attention Rollout]
 
     TSV --> FUSION
-    R50S --> FUSION
     VITS --> FUSION
     ISTATS --> FUSION
     PIX --> FUSION
-    FUSION --> US --> OS --> CLF --> OUT[Scores/Joblib/OOF]
+    FUSION --> US
+    US --> OS 
+    OS --> CLF 
+    CLF --> OUT[Scores/Joblib/OOF]
 
     CLF -.-> X1
     CLF -.-> X2
-    R50 -.-> X3
+    VIT -.-> X3
 
-    classDef xp fill:#ffebee,stroke:#d32f2f;
+    classDef xp fill:#ffebee,stroke:#d32f2f
+    class X1,X2,X3 xp
     """
     render_mermaid(merm, height=900, theme="neutral")
+
     # st.code(merm, language="mermaid")  # pour voir la string brute si besoin
 
-    # 1) Définition des étapes (tu peux ajuster les bullets)
+    # 1) Définition des étapes
     steps = [
         {
-            "title": "Création du pipeline textuel",
+            "title": "Fusion des colonnes textuelles",
             "bullets": [
-                "Structure scikit-learn mémoire/cache",
-                "Entrées brutes : designation + description"
+                "Entrée : designation + description des produits",
+                "Sortie : Texte combiné pour analyse unifiée",
+                "Implémentation : Concaténation simple avec gestion des valeurs nulles"
             ],
         },
         {
-            "title": "Nettoyage & normalisation (TextCleaner)",
+            "title": "Nettoyage et normalisation (TextCleaner)",
             "bullets": [
-                "Minuscules, accents/HTML, emojis",
-                "Traductions via dictionnaire (FR/EN/DE)",
-                "Stopwords + stemming léger"
+                "HTML/Balises : Suppression des tags <br>, <p>, entités HTML",
+                "Normalisation Unicode : Gestion des accents, caractères spéciaux",
+                "Emojis : Conversion en format textuel :emoji_name:",
+                "Robustesse : Gestion des termes techniques multi-langues"
             ],
         },
         {
-            "title": "Vectorisation TF-IDF (mots)",
+            "title": "Tokenisation et filtrage",
             "bullets": [
-                "n-grammes (1–2), sublinear_tf",
-                "min_df / max_df réglés pour le bruit"
+                "Stopwords : Suppression multilingue (français, anglais, allemand)",
+                "Mots vagues : Filtrage de 500+ termes peu discriminants",
+                "Stemming : Réduction des mots à leur racine (Porter Stemmer)",
+
             ],
         },
         {
-            "title": "Pipeline caractères (option)",
+            "title": "Vectorisation TF-IDF (branche mots)",
             "bullets": [
-                "TF-IDF char (2–6) pour fautes/variantes",
-                "Robuste aux typos et concaténations"
+                "N-grammes : Unigrammes (1) + Bigrammes (2)",
+                "Paramètres : max_features=100k, min_df=5, max_df=0.95",
+                "Sublinéarité : TF-IDF pour pondérer l'importance des termes"
             ],
         },
         {
-            "title": "Petites features texte",
+            "title": "Vectorisation caractères (branche char)",
             "bullets": [
-                "has_desc, title_len, text_stats, language",
-                "Signal complémentaire simple"
+                "Analyseur : char_wb (caractères au niveau des mots)",
+                "N-grammes : 2 à 5 caractères consécutifs",
+                "Robustesse : Gestion des fautes de frappe et variantes"
             ],
         },
         {
-            "title": "Fusion & pondérations",
+            "title": "Features additionnelles",
             "bullets": [
-                "FeatureUnion: word + char + feats",
-                "Poids ex: word=1.0, char=0.4, feats=0.2"
+                "Présence description : Flag binaire has_description",
+                "Longueur titre : designation_length (nombre de caractères)",
+                "Statistiques supplémentaires : 25 features (ratios, patterns, domaines métier)",
+                "Lexiques Chi2 : Top-80 mots par classe (auto-générés)"
             ],
         },
         {
-            "title": "Standardisation & classifieur",
+            "title": "Fusion pondérée (FeatureUnion)",
             "bullets": [
-                "StandardScaler(with_mean=False)",
-                "LogisticRegression(saga) ou LinearSVC (OvR)"
+                "Branches combinées : word(2.2) + char(0.8) + features(0.2-0.4)",
+                "Réduction SVD : 700 composantes + normalisation L2",
+                "Final : vecteur texte 700D prêt pour classification"
             ],
         },
         {
-            "title": "Évaluation",
+            "title": "Classifiation & Évaluation",
             "bullets": [
+                "Sous-échantillonnage (SMOTEENN) + Sur-échantillonnage (RandomOverSampler)",
+                "Classifieurs testés : LogisticRegression, SVC, XG Boost LightGBM",
                 "Score cible : F1 pondéré",
                 "Matrice de confusion pour les erreurs"
             ],
