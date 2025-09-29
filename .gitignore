@@ -72,5 +72,4 @@ models/*.joblib
 *.pt
 *.h5
 *.pkl
-streamlit_app/demo_images/
 
