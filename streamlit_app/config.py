@@ -1521,8 +1521,8 @@ DATA_DIR = (REPO_ROOT / "data"); DATA_DIR.mkdir(parents=True, exist_ok=True)
 # NB: tu peux aussi les mettre dans .streamlit/secrets.toml (voir plus bas)
 DOWNLOADS = {
     # artifacts
-    ART_DIR / "text_preproc.joblib": os.getenv("TEXT_PREPROC_URL"),
-    ART_DIR / "final_estimator.joblib": os.getenv("FINAL_ESTIMATOR_URL"),
+    ART_DIR / "text_preproc.joblib": "https://www.dropbox.com/scl/fi/zpftggop63g87uiev9nzt/text_preproc.joblib?rlkey=ogzkino3681ttoa26fc04a282&dl=1",
+    ART_DIR / "final_estimator.joblib": "https://www.dropbox.com/scl/fi/kdmd7njht3anvctd2zjbv/final_estimator.joblib?rlkey=vks5rl4cxrnvlbsojkmvcezwm&dl=1",
 }
 
 def _download(url, dest: Path, min_bytes=1024):
@@ -1565,8 +1565,8 @@ def _s(key, default=""):
         return os.getenv(key, default)
 
 DOWNLOADS = {
-        ART_DIR / "text_preproc.joblib": _s("TEXT_PREPROC_URL",""),
-        ART_DIR / "final_estimator.joblib": _s("FINAL_ESTIMATOR_URL",""),
+        ART_DIR / "text_preproc.joblib": _s("https://www.dropbox.com/scl/fi/zpftggop63g87uiev9nzt/text_preproc.joblib?rlkey=ogzkino3681ttoa26fc04a282&dl=1",""),
+        ART_DIR / "final_estimator.joblib": _s("https://www.dropbox.com/scl/fi/kdmd7njht3anvctd2zjbv/final_estimator.joblib?rlkey=vks5rl4cxrnvlbsojkmvcezwm&dl=1",""),
 }
 
 @st.cache_resource
