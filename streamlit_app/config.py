@@ -1504,7 +1504,70 @@ with diag_tab:
 # Tab 3 – Prédiction (modèle hébergé)
 # ----------------------------
 # --- Modèle démo (XGB image-only) ---
-DEFAULT_MODEL_URL = "artifacts/b4_inference_lite.joblib"
+# DEFAULT_MODEL_URL = "artifacts/b4_inference_lite.joblib"
+
+# ==== Lazy downloader pour artifacts & data (à coller en haut de config.py) ====
+from pathlib import Path
+import os, hashlib
+import streamlit as st
+
+APP_DIR = Path(__file__).resolve().parent
+REPO_ROOT = APP_DIR.parents[1] if len(APP_DIR.parents) > 1 else APP_DIR
+
+ART_DIR = (REPO_ROOT / "artifacts"); ART_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR = (REPO_ROOT / "data"); DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Renseigne ici tes liens (GitHub Release / HF / Dropbox ?dl=1)
+# NB: tu peux aussi les mettre dans .streamlit/secrets.toml (voir plus bas)
+DOWNLOADS = {
+    # artifacts
+    ART_DIR / "text_preproc.joblib": os.getenv("TEXT_PREPROC_URL"),
+    ART_DIR / "final_estimator.joblib": os.getenv("FINAL_ESTIMATOR_URL"),
+}
+
+def _download(url, dest: Path, min_bytes=1024):
+    import requests
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1<<20):
+                if chunk:
+                    f.write(chunk)
+        size = tmp.stat().st_size
+        if size < min_bytes:
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(f"Téléchargement trop petit ({size}o) pour {dest.name}")
+        tmp.replace(dest)
+
+def ensure_files():
+    missing = []
+    for dest, url in DOWNLOADS.items():
+        if dest.exists():
+            continue
+        if not url or url.startswith("PUT_URL_HERE"):
+            missing.append(dest.name)
+            continue
+        try:
+            with st.spinner(f"Téléchargement de {dest.name}…"):
+                _download(url, dest)
+        except Exception as e:
+            st.warning(f"Échec download {dest.name}: {e}")
+            missing.append(dest.name)
+    if missing:
+        st.error("Fichiers manquants : " + ", ".join(missing))
+    return len(missing) == 0
+def _s(key, default=""):
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key, default)
+
+DOWNLOADS = {
+        ART_DIR / "text_preproc.joblib": _s("TEXT_PREPROC_URL",""),
+        ART_DIR / "final_estimator.joblib": _s("FINAL_ESTIMATOR_URL",""),
+}
 
 @st.cache_resource
 def load_demo_xgb_image_only():
