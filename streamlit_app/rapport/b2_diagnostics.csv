@@ -1,0 +1,7 @@
+classe_id,classe_nom,precision,rappel,f1,support,top_confusions
+10,Livres et ouvrages culturels,0.49224952741020794,0.4178433889602054,0.4520048602673147,3116,"Livres, mangas & partitions: 15.2% (n=473); Essais & livres d’histoire: 15.1% (n=469); Magazines & journaux anciens: 9.0% (n=279)"
+1281,Jeux et loisirs enfants,0.6751080914144534,0.5280193236714976,0.5925725128761182,2070,Jouets enfants & bébés: 22.3% (n=462); Cartes à collectionner: 2.9% (n=61); Figurines Pop & licences geek: 2.7% (n=56)
+1180,Jeux de figurines & wargames,0.7393715341959335,0.5235602094240838,0.6130268199233716,764,Livres et ouvrages culturels: 8.0% (n=61); Figurines Pop & licences geek: 6.9% (n=53); Jeux et loisirs enfants: 5.4% (n=41)
+40,Jeux vidéo et accessoires,0.6595744680851063,0.6180223285486444,0.6381226842321943,2508,Livres et ouvrages culturels: 6.7% (n=167); Accessoires gaming: 6.3% (n=157); Lots jeux vidéo et consoles: 4.4% (n=110)
+1280,Jouets enfants & bébés,0.6871444823663254,0.6201232032854209,0.6519158121964382,4870,Drones et modèles réduits: 15.7% (n=764); Figurines Pop & licences geek: 5.5% (n=268); Jeux et loisirs enfants: 3.4% (n=165)
+2705,Essais & livres d’histoire,0.6925555913631969,0.778341180731619,0.7329467939972715,2761,"Livres et ouvrages culturels: 7.5% (n=208); Livres, mangas & partitions: 7.5% (n=207); Jeux vidéo et accessoires: 2.1% (n=57)"

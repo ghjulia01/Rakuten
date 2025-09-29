@@ -1,0 +1,31 @@
+classe_vraie_id,classe_vraie_nom,classe_pred_id,classe_pred_nom,taux,comptes
+1281,Jeux et loisirs enfants,1280,Jouets enfants & bébés,0.23381642512077294,484
+1281,Jeux et loisirs enfants,1302,Jouets divers & loisirs créatifs,0.033816425120772944,70
+1281,Jeux et loisirs enfants,1160,Cartes à collectionner,0.02995169082125604,62
+1180,Jeux de figurines & wargames,1140,Figurines Pop & licences geek,0.08638743455497382,66
+1180,Jeux de figurines & wargames,1281,Jeux et loisirs enfants,0.06806282722513089,52
+1180,Jeux de figurines & wargames,1280,Jouets enfants & bébés,0.04450261780104712,34
+1280,Jouets enfants & bébés,1300,Drones et modèles réduits,0.1784394250513347,869
+1280,Jouets enfants & bébés,1140,Figurines Pop & licences geek,0.057700205338809034,281
+1280,Jouets enfants & bébés,1302,Jouets divers & loisirs créatifs,0.05051334702258727,246
+10,Livres et ouvrages culturels,2280,Magazines & journaux anciens,0.08729139922978177,272
+10,Livres et ouvrages culturels,2403,"Livres, mangas & partitions",0.07734274711168164,241
+10,Livres et ouvrages culturels,2705,Essais & livres d’histoire,0.07445442875481387,232
+40,Jeux vidéo et accessoires,50,Accessoires gaming,0.0733652312599681,184
+40,Jeux vidéo et accessoires,10,Livres et ouvrages culturels,0.05940988835725678,149
+40,Jeux vidéo et accessoires,2462,Lots jeux vidéo et consoles,0.03269537480063796,82
+2582,Mobilier et accessoires de jardin,1560,Mobilier & articles de maison,0.10699111626110468,277
+2582,Mobilier et accessoires de jardin,2060,Décoration & accessoires saisonniers,0.07879490150637311,204
+2582,Mobilier et accessoires de jardin,2585,Outils et équipements de jardinage,0.05639242950946311,146
+2585,Outils et équipements de jardinage,2060,Décoration & accessoires saisonniers,0.06049679487179487,151
+2585,Outils et équipements de jardinage,1560,Mobilier & articles de maison,0.049679487179487176,124
+2585,Outils et équipements de jardinage,2582,Mobilier et accessoires de jardin,0.049679487179487176,124
+2060,Décoration & accessoires saisonniers,1560,Mobilier & articles de maison,0.07931103544962947,396
+2060,Décoration & accessoires saisonniers,1920,Linge de maison & décoration textile,0.04786701381934708,239
+2060,Décoration & accessoires saisonniers,2585,Outils et équipements de jardinage,0.022431403965551773,112
+1302,Jouets divers & loisirs créatifs,1280,Jouets enfants & bébés,0.0835006021678041,208
+1302,Jouets divers & loisirs créatifs,1320,Puériculture & équipement bébé,0.02729827378562826,68
+1302,Jouets divers & loisirs créatifs,2583,Accessoires pour piscines et spas,0.02288237655560016,57
+1320,Puériculture & équipement bébé,2060,Décoration & accessoires saisonniers,0.06294353594569577,204
+1320,Puériculture & équipement bébé,1280,Jouets enfants & bébés,0.061400802221536564,199
+1320,Puériculture & équipement bébé,1560,Mobilier & articles de maison,0.04319654427645788,140

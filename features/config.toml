@@ -176,7 +176,7 @@ random_state = 42
 
 # --- Branche 2 : ViT-B/16 (HF) avec par exemple FT 2 epochs, dernier bloc défigé ---
 [images.cnn_vit]
-enabled = false
+enabled = true
 # HuggingFace (optionnel, alternative à arch=...)
 hf_model_name = "google/vit-base-patch16-224"
 hf_feature_dim = 768        # dimension de sortie des embeddings ViT-base (standard Hugging Face pour vit-base-patch16)
@@ -215,7 +215,7 @@ n_components = 256
 text  = 1
 image_pixels = 0                        # mettre 0 si image_cnn
 image_cnn = 0
-image_cnn_vit = 0           # ViT
+image_cnn_vit = 1.3           # ViT
 image_stats_combined = 0             # branche stats images
 
 # --- Statistiques des images ---

@@ -1,0 +1,19 @@
+classe_vraie_id,classe_vraie_nom,classe_pred_id,classe_pred_nom,taux,comptes
+10,Livres et ouvrages culturels,2403,"Livres, mangas & partitions",0.15179717586649552,473
+10,Livres et ouvrages culturels,2705,Essais & livres d’histoire,0.1505134788189987,469
+10,Livres et ouvrages culturels,2280,Magazines & journaux anciens,0.08953786906290115,279
+1281,Jeux et loisirs enfants,1280,Jouets enfants & bébés,0.22318840579710145,462
+1281,Jeux et loisirs enfants,1160,Cartes à collectionner,0.029468599033816423,61
+1281,Jeux et loisirs enfants,1140,Figurines Pop & licences geek,0.02705314009661836,56
+1180,Jeux de figurines & wargames,10,Livres et ouvrages culturels,0.07984293193717278,61
+1180,Jeux de figurines & wargames,1140,Figurines Pop & licences geek,0.0693717277486911,53
+1180,Jeux de figurines & wargames,1281,Jeux et loisirs enfants,0.05366492146596859,41
+40,Jeux vidéo et accessoires,10,Livres et ouvrages culturels,0.06658692185007975,167
+40,Jeux vidéo et accessoires,50,Accessoires gaming,0.06259968102073366,157
+40,Jeux vidéo et accessoires,2462,Lots jeux vidéo et consoles,0.043859649122807015,110
+1280,Jouets enfants & bébés,1300,Drones et modèles réduits,0.15687885010266941,764
+1280,Jouets enfants & bébés,1140,Figurines Pop & licences geek,0.05503080082135524,268
+1280,Jouets enfants & bébés,1281,Jeux et loisirs enfants,0.033880903490759756,165
+2705,Essais & livres d’histoire,10,Livres et ouvrages culturels,0.07533502354219486,208
+2705,Essais & livres d’histoire,2403,"Livres, mangas & partitions",0.07497283592901123,207
+2705,Essais & livres d’histoire,40,Jeux vidéo et accessoires,0.02064469395146686,57

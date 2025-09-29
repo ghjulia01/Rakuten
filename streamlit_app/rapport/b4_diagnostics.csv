@@ -1,0 +1,11 @@
+classe_id,classe_nom,precision,rappel,f1,support,top_confusions
+1281,Jeux et loisirs enfants,0.5742060920285159,0.4280193236714976,0.49045114862994743,2070,Jouets enfants & bébés: 23.4% (n=484); Jouets divers & loisirs créatifs: 3.4% (n=70); Cartes à collectionner: 3.0% (n=62)
+1180,Jeux de figurines & wargames,0.6033434650455927,0.5196335078534031,0.5583684950773559,764,Figurines Pop & licences geek: 8.6% (n=66); Jeux et loisirs enfants: 6.8% (n=52); Jouets enfants & bébés: 4.5% (n=34)
+1280,Jouets enfants & bébés,0.6120996441281139,0.5297741273100616,0.5679691799669785,4870,Drones et modèles réduits: 17.8% (n=869); Figurines Pop & licences geek: 5.8% (n=281); Jouets divers & loisirs créatifs: 5.1% (n=246)
+10,Livres et ouvrages culturels,0.6360065466448446,0.6235558408215661,0.6297196564576244,3116,"Magazines & journaux anciens: 8.7% (n=272); Livres, mangas & partitions: 7.7% (n=241); Essais & livres d’histoire: 7.4% (n=232)"
+40,Jeux vidéo et accessoires,0.6885474860335196,0.5897129186602871,0.6353092783505154,2508,Accessoires gaming: 7.3% (n=184); Livres et ouvrages culturels: 5.9% (n=149); Lots jeux vidéo et consoles: 3.3% (n=82)
+2582,Mobilier et accessoires de jardin,0.7030988274706867,0.6485129393588258,0.6747036367289532,2589,Mobilier & articles de maison: 10.7% (n=277); Décoration & accessoires saisonniers: 7.9% (n=204); Outils et équipements de jardinage: 5.6% (n=146)
+2585,Outils et équipements de jardinage,0.6833067092651757,0.6854967948717948,0.6844,2496,Décoration & accessoires saisonniers: 6.0% (n=151); Mobilier & articles de maison: 5.0% (n=124); Mobilier et accessoires de jardin: 5.0% (n=124)
+2060,Décoration & accessoires saisonniers,0.6608631228005186,0.7146004406168636,0.6866820631254812,4993,Mobilier & articles de maison: 7.9% (n=396); Linge de maison & décoration textile: 4.8% (n=239); Outils et équipements de jardinage: 2.2% (n=112)
+1302,Jouets divers & loisirs créatifs,0.6775306748466258,0.709353673223605,0.6930770739360659,2491,Jouets enfants & bébés: 8.4% (n=208); Puériculture & équipement bébé: 2.7% (n=68); Accessoires pour piscines et spas: 2.3% (n=57)
+1320,Puériculture & équipement bébé,0.7546907574704657,0.6701635297747609,0.7099199215558097,3241,Décoration & accessoires saisonniers: 6.3% (n=204); Jouets enfants & bébés: 6.1% (n=199); Mobilier & articles de maison: 4.3% (n=140)
