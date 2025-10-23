@@ -801,11 +801,19 @@ def show_b2_walkthrough():
     # 1) Définition des étapes TEXTE
     steps_text = [
         {
-            "title": "Fusion des colonnes textuelles",
+            "title": "Fusion des colonnes textuelles"
+            ,
             "bullets": [
                 "Entrée : designation + description des produits",
                 "Sortie : Texte combiné pour analyse unifiée",
-                "Implémentation : Concaténation simple avec gestion des valeurs nulles"
+                "Implémentation : Concaténation simple avec gestion des valeurs nulles",
+                "****Exemple**** :",
+                "***avant*** :", 
+                "**designation** : 'Powerbank <br> externe 10 000 mAh – câble INCLUS & \\garantie\\ 12mois USB-C fast charge!!!'\n",
+                "**description** : 'USB-C, 18W. Câble inclus. Compat. iPhone/Android.'",
+                "***après*** :", 
+                "***texte_fusionné*** : 'Powerbank <br> externe 10 000 mAh – câble INCLUS & \\garantie\\ 12mois USB-C fast charge!!! USB-C 18W, câble inclus, compatible iPhone et Android.",
+                "****Impact****: Meilleure couverture des cooccurrences (ex. 'USB-C')."
             ],
         },
         {
@@ -814,7 +822,13 @@ def show_b2_walkthrough():
                 "HTML/Balises : Suppression des tags <br>, <p>, entités HTML",
                 "Traduction multilingue : Dictionnaire FR/EN/DE (500+ termes)",
                 "Normalisation Unicode : Gestion des accents, caractères spéciaux",
-                "Tokenisation et stemming : Snowball stemmer multilingue"
+                "Tokenisation et stemming : Snowball stemmer multilingue",
+                "****Exemple**** :",
+                "'Powerbank <br> externe 10 000 mAh – câble INCLUS & \\garantie\\ 12mois USB-C fast charge!!!'\n",
+                "**nettoyé+normalisé** : 'powerbank externe 10 000 mah  fast charge cable inclus garantie 12 mois fast charge usb c'\n",
+                "***lexique FR/EN/DE*** :'batterie externe 10 000 mah  charge rapide cable inclus garantie 12 mois charge rapide usb c'", 
+                "***stemming*** : 'batteri extern 10000 mah charg rapid cabl inclu garanti 12 moi charg rapid usb c'",
+                "****Impact****: Vocabulaire plus court et cohérent, meilleure généralisation inter-vendeurs/langues"
             ],
         },
         {
@@ -823,7 +837,12 @@ def show_b2_walkthrough():
                 "N-grammes : Unigrammes (1) + Bigrammes (2)",
                 "Paramètres : max_features=100k, min_df=5, max_df=0.95",
                 "Sublinéarité : log(1 + tf) pour atténuer les termes très fréquents",
-                "Normalisation L2 : Vecteurs unitaires pour la stabilité"
+                "Normalisation L2 : Vecteurs unitaires pour la stabilité",
+                "****Exemple**** :",
+                "**Top n-grammes ** : 'charg rapid', 'usb c', 'batteri extern'\n",
+                "***Poids *** : charg rapid=0.42, usb c=0.38, batterie externe=0.31\n", 
+                "****Impact****: Capture des termes porteurs de sens pour séparer des catégories proches"
+
             ],
         },
         {
@@ -833,6 +852,9 @@ def show_b2_walkthrough():
                 "N-grammes : 2 à 5 caractères consécutifs",
                 "Robustesse : Gestion des fautes de frappe et variantes",
                 "Complémentarité : Capture les patterns non captés par les mots"
+                "****Exemple**** :",
+                "**Top n-grammes ** : ch, ar, arg, rg, ge, er, re, es, se, ur, ra, at, te, ec, ca, ab, bl, le\n",
+                "****Impact****: Amélioration de la robustesse aux erreurs typographiques et variantes orthographiques"
             ],
         },
         {
@@ -841,14 +863,20 @@ def show_b2_walkthrough():
                 "Présence description : Flag binaire has_description",
                 "Longueur titre : designation_length (nombre de caractères)", 
                 "Statistiques Pro : 25 features (ratios, patterns, domaines métier)",
-                "Lexiques Chi2 : Top-80 mots discriminants par classe"
+                "Lexiques Chi2 : Top-80 mots discriminants par classe",
+                "****Exemple**** :",
+                " 'has_description=1, designation_length=34, ratio_digits=0.18,'\n",
+                " 'lexicon_power_accessories=1, , gaming_flag=0, , baby_flag=0, , garden_flag=0, has_isbn=0 ...'\n",
+                "****Impact****: Signaux différents des TF-IDF (chiffres, unités, motifs, thématiques) pour désambiguïser"
+
+
             ],
         },
         {
             "title": "Fusion pondérée texte (FeatureUnion)",
             "bullets": [
-                "Branches combinées : word(2.2) + char(0.8) + features(0.2-0.4)",
-                "Réduction SVD : 700 composantes + normalisation L2",
+                "Branches combinées : tfidf_word=1.0 + tfidf_char=0.8 + has_desc=0.2+ title_len=0.2+ stats_pro=0.6 + lexicons=0.4",
+                "Réduction SVD : 700 composantes + normalisation L2 afin que les textes, qu’ils soient courts ou longs, contribuent de manière équitable à la classification.",
                 "Matrice sparse optimisée : ~700D pour classification efficace"
             ],
         },
@@ -857,7 +885,7 @@ def show_b2_walkthrough():
     # 2) Définition des étapes VISION
     steps_vision = [
         {
-            "title": "Chargement intelligent des images",
+            "title": "Chargement intelligent des images: Les images sont ouvertes avec PIL, converties en RGB, puis redimensionnées selon le modèle choisi (224x224 pour ViT).",
             "bullets": [
                 "Reconstruction chemins : image_{imageid}_product_{productid}.jpg",
                 "Preprocessing HuggingFace : Auto-resize selon le modèle ViT",
@@ -904,7 +932,7 @@ def show_b2_walkthrough():
             "title": "Rééquilibrage des classes",
             "bullets": [
                 "UnderSampling adaptatif : Classe 2583 limitée à 2500 échantillons", 
-                "OverSampling ciblé : Classes <500 échantillons remontées à 500",
+                "OverSampling ciblé : Classes <800 échantillons remontées à 900",
                 "Conservation des patterns : Préservation de la distribution naturelle"
             ],
         },
@@ -913,7 +941,7 @@ def show_b2_walkthrough():
             "bullets": [
                 "Hyperparamètres : 2000 arbres, lr=0.05, early stopping",
                 "Objectif : Maximisation F1-weighted (métrique cible Rakuten)",
-                "Performance : F1-weighted = 0.83 (validation 3-fold)"
+                "Performance : F1-weighted = 0.84 (validation 3-fold)"
             ],
         },
     ]
@@ -936,13 +964,99 @@ def show_b2_walkthrough():
                     st.markdown(f"• {bullet}")
 
     with tab_fusion:
-        st.markdown("### Fusion Finale - Pipeline Multimodal (b4) - 3 Étapes")
+        st.markdown("### Fusion Finale - Pipeline Multimodal Texte et Images - 3 Étapes")
         for i, step in enumerate(steps_fusion, 1):
             with st.expander(f"Étape {i}: {step['title']}", expanded=(i==1)):
                 for bullet in step["bullets"]:
                     st.markdown(f"• {bullet}")
 
     st.divider()
+
+    # ====== Méthode · Section "F1-weighted par baseline" ======
+    def render_f1_weighted_overview():
+        st.subheader("Comparatif F1-weighted par baseline (B0 → B4)")
+        st.caption("F1-weighted = moyenne pondérée des F1 par classe, pondérée par le support (nombre d’instances).")
+
+        # --- Helpers ---
+        def _read_preds(path: Path):
+            if not path or not path.exists():
+                return None
+            dfp = pd.read_csv(path)
+            cols = {c.lower(): c for c in dfp.columns}
+            y_true = next((cols[k] for k in cols if k in ("y_true","y","label","target","prdtypecode_true")), None)
+            y_pred = next((cols[k] for k in cols if k in ("y_pred","pred","prediction","prdtypecode_pred")), None)
+            if not (y_true and y_pred):
+                st.warning(f"Colonnes y_true / y_pred absentes dans {path.name}.")
+                return None
+            return dfp[y_true].astype(str), dfp[y_pred].astype(str)
+
+        # --- B0 & B1 : valeurs fournies ---
+        rows = [
+            {"Code": "B0", "Baseline": "Naïf (majoritaire)",
+            "Idée principale": "Toujours prédire la classe la plus fréquente.",
+            "F1-weighted (%)": 2.6},
+            {"Code": "B1", "Baseline": "Naïf (stratifié)",
+            "Idée principale": "Tirage aléatoire respectant la distribution des classes.",
+            "F1-weighted (%)": 5.2},
+        ]
+
+        # --- B2/B3/B4 : calcul à partir des prédictions ---
+        P_B2 = Path("results/preds_b2.csv")
+        P_B3 = Path("results/preds_b3.csv")
+        P_B4 = next((p for p in [Path("results/preds_oof_b4.csv"), Path("results/preds_b4.csv")] if p.exists()), None)
+
+        for code, base, idea, path in [
+            ("B2", "Pipeline Texte seule", "Texte uniquement", P_B2),
+            ("B3", "Pipeline Image seule", "Image (ViT)", P_B3),
+            ("B4", "Pipeline Multimodale", "Texte + Image", P_B4),
+        ]:
+            data = _read_preds(path) if path else None
+            if data:
+                y_true, y_pred = data
+                f1w = f1_score(y_true, y_pred, average="weighted") * 100.0
+                rows.append({"Code": code, "Baseline": base, "Idée principale": idea,
+                         "F1-weighted (%)": round(f1w, 2)})
+            else:
+                # Affiche quand même la ligne (valeur manquante) pour transparence
+                rows.append({"Code": code, "Baseline": base, "Idée principale": idea,
+                            "F1-weighted (%)": None})
+
+        df = pd.DataFrame(rows)
+        order = ["B0","B1","B2","B3","B4"]
+        df["Code"] = pd.Categorical(df["Code"], categories=order, ordered=True)
+        df = df.sort_values("Code")
+
+        # --- Tableau récapitulatif ---
+        st.dataframe(df, use_container_width=True)
+
+        # --- Bar chart ---
+        df_plot = df.dropna(subset=["F1-weighted (%)"])
+        if len(df_plot) == 0:
+            st.info("Aucune valeur disponible pour tracer le graphique (vérifie les fichiers preds_b2/b3/b4).")
+            return
+        # --- Ticks personnalisés sur l'axe X : Code — Baseline (ou juste Baseline) ---
+        df_plot["CodeBaseline"] = df_plot["Code"].astype(str) + " — " + df_plot["Baseline"]
+
+        fig = px.bar(
+            df_plot,
+            x="CodeBaseline",
+            y="F1-weighted (%)",
+            hover_data=["Baseline", "Idée principale"],
+            text=df_plot["F1-weighted (%)"].map(lambda v: f"{v:.1f}%"),
+            title="F1-weighted (%) par baseline",
+        )
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        ymax = max(10.0, float(df_plot["F1-weighted (%)"].max()) * 1.15)
+        fig.update_yaxes(range=[0, ymax], title_text="F1-weighted (%)")
+        fig.update_xaxes(title_text="Baseline")
+        fig.update_layout(margin=dict(t=60,b=20,l=0,r=0), height=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Petit rappel méthodo sous le graphe
+        st.caption("Interprétation : plus le F1-weighted est élevé, meilleure est la performance globale en tenant compte des classes fréquentes.")
+    # --- Afficher la section F1 B0→B4 ---
+    st.divider()
+    render_f1_weighted_overview()
 
     # 4) Résultats (F1 + matrice de confusion si dispo)
     preds_path = Path("results/preds_oof_b4.csv")  # Changé pour b4
@@ -981,7 +1095,7 @@ def show_b2_walkthrough():
                     aspect="auto",
                     color_continuous_scale="Blues",
                     zmin=0, zmax=100,
-                    title=f"Matrice de confusion — Pipeline B4 Multimodal (top {len(sel_classes)} classes)",
+                    title=f"Matrice de confusion — Pipeline Multimodale (top {len(sel_classes)} classes)",
                 )
 
                 # Axes avec libellés lisibles + rotation des X
@@ -1008,7 +1122,124 @@ def show_b2_walkthrough():
     else:
         st.caption("Dépose `results/preds_oof_b4.csv` pour calculer F1 et tracer la matrice de confusion automatiquement.")
 
+    # ============================
+    # Gains par classe (Δ rappel diagonale) : B3−B2 et B4−B2
+    # ============================
+    st.divider()
+    st.header("Gains par classe : apport de B3 (vision) et B4 (multimodal) vs B2 (texte)")
 
+
+    # Fichiers de prédictions attendus
+    P_B2 = Path("results/preds_b2.csv")
+    P_B3 = Path("results/preds_b3.csv")
+    # B4 : on tente d'abord OOF (cross-val), sinon preds_b4.csv
+    P_B4_CANDS = [Path("results/preds_oof_b4.csv"), Path("results/preds_b4.csv")]
+    P_B4 = next((p for p in P_B4_CANDS if p.exists()), None)
+
+    def _read_preds(path: Path) -> tuple[pd.Series, pd.Series] | None:
+        if not path or not path.exists():
+            return None
+        dfp = pd.read_csv(path)
+        # nommage tolérant
+        cols = {c.lower(): c for c in dfp.columns}
+        y_true = next((cols[k] for k in cols if k in ("y_true","y","label","target","prdtypecode_true")), None)
+        y_pred = next((cols[k] for k in cols if k in ("y_pred","pred","prediction","prdtypecode_pred")), None)
+        if not (y_true and y_pred):
+            st.warning(f"Colonnes y_true / y_pred introuvables dans {path.name}.")
+            return None
+        return dfp[y_true], dfp[y_pred]
+
+    def _per_class_recall(y_true: pd.Series, y_pred: pd.Series, labels: list) -> pd.Series:
+        """
+        Rappel (sens ligne) en %, pour chaque classe de `labels`.
+        """
+        lab_to_idx = {l:i for i,l in enumerate(labels)}
+        cm = np.zeros((len(labels), len(labels)), dtype=int)
+        for t, p in zip(y_true, y_pred):
+            t = str(t); p = str(p)
+            if t in lab_to_idx and p in lab_to_idx:
+                cm[lab_to_idx[t], lab_to_idx[p]] += 1
+        row_sum = cm.sum(axis=1, keepdims=True)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rec = np.where(row_sum>0, cm.diagonal().reshape(-1,1)/row_sum, 0.0).ravel() * 100.0
+        return pd.Series(rec, index=labels, dtype=float)
+
+    def _nice(lab):
+        return LABEL_MAP.get(str(lab), LABEL_MAP.get(int(lab) if str(lab).isdigit() else lab, str(lab)))
+
+    # Lecture des trois jeux (on continue même si B3 ou B4 manquent)
+    b2 = _read_preds(P_B2)
+    b3 = _read_preds(P_B3)
+    b4 = _read_preds(P_B4) if P_B4 else None
+
+    if not b2:
+        st.error("Preds B2 introuvables (results/preds_b2.csv). Dépose le fichier pour activer cette section.")
+    else:
+        y2, p2 = b2
+        # Ensemble des classes = union de celles observées dans les 3 prédictions
+        labs = set(map(str, pd.unique(y2)))
+        if b3: labs |= set(map(str, pd.unique(b3[0])))
+        if b4: labs |= set(map(str, pd.unique(b4[0])))
+        labels = sorted(labs, key=lambda x: (x.isdigit(), int(x) if str(x).isdigit() else x))
+
+        rec2 = _per_class_recall(y2.astype(str), p2.astype(str), labels)
+
+        rec3 = None
+        if b3:
+            y3, p3 = b3
+            rec3 = _per_class_recall(y3.astype(str), p3.astype(str), labels)
+
+        rec4 = None
+        if b4:
+            y4, p4 = b4
+            rec4 = _per_class_recall(y4.astype(str), p4.astype(str), labels)
+
+        # Tableau récapitulatif
+        df_gain = pd.DataFrame({
+            "classe": labels,
+            "libellé": [ _nice(l) for l in labels ],
+            "rappel_B2_%": rec2.round(2)
+        })
+        if rec3 is not None:
+            df_gain["rappel_B3_%"] = rec3.round(2)
+        if rec4 is not None:
+            df_gain["rappel_B4_%"] = rec4.round(2)
+            df_gain["Δ(B4−B2) pts"] = (rec4 - rec2).round(2)
+
+        # Tri par gain multimodal si dispo, sinon par gain vision
+        sort_col = "Δ(B4−B2) pts" if "Δ(B4−B2) pts" in df_gain.columns else "Δ(B3−B2) pts"
+        df_gain = df_gain.sort_values(sort_col, ascending=False, ignore_index=True)
+
+        # Sélection top-K
+        kmax = min(27, len(df_gain))
+        topk = st.slider("Top améliorations à afficher", 5, kmax, min(12, kmax), key="gain_topk")
+        st.markdown("**Tableau des gains par classe (en points de rappel)**")
+        st.dataframe(df_gain.head(topk), use_container_width=True)
+
+        # Barplot des gains (multimodal en priorité)
+        if "Δ(B4−B2) pts" in df_gain.columns:
+            sub = df_gain.head(topk)[["libellé","Δ(B4−B2) pts"]]
+            figg = px.bar(sub, x="Δ(B4−B2) pts", y="libellé", orientation="h",
+                        title="Top gains — Multimodal B4 vs Texte B2 (points de rappel)")
+            figg.update_layout(height=520, margin=dict(t=60,b=20,l=0,r=0))
+            st.plotly_chart(figg, use_container_width=True)
+
+        if "Δ(B3−B2) pts" in df_gain.columns:
+            with st.expander("Voir aussi : gains Vision B3 vs Texte B2"):
+                sub = df_gain.sort_values("Δ(B3−B2) pts", ascending=False).head(topk)[["libellé","Δ(B3−B2) pts"]]
+                figg2 = px.bar(sub, x="Δ(B3−B2) pts", y="libellé", orientation="h",
+                            title="Top gains — Vision B3 vs Texte B2 (points de rappel)")
+                figg2.update_layout(height=520, margin=dict(t=60,b=20,l=0,r=0))
+                st.plotly_chart(figg2, use_container_width=True)
+
+        # Option : classes en baisse
+        with st.expander("Classes en baisse (Δ négatif)"):
+            cols_neg = [c for c in ("Δ(B4−B2) pts","Δ(B3−B2) pts") if c in df_gain.columns]
+            if cols_neg:
+                out = df_gain.sort_values(cols_neg[0], ascending=True).head(topk)
+                st.dataframe(out, use_container_width=True)
+            else:
+                st.caption("B3/B4 non disponibles → pas de Δ négatifs à afficher.")
 
     # 4) Résultats (F1 + matrice de confusion si dispo)
     preds_path = Path("results/preds_b2.csv")
@@ -1042,14 +1273,13 @@ def show_b2_walkthrough():
                 tick_labels = [_nice(c) for c in sel_classes]
 
                 # 4) Plot Plotly avec annotations
-                import plotly.express as px
                 figcm = px.imshow(
                     cm_pct,
                     text_auto=".2f",               # affiche 2 décimales
                     aspect="auto",
                     color_continuous_scale="Blues",
                     zmin=0, zmax=100,
-                    title=f"Matrice de confusion — Baseline B2 (top {len(sel_classes)} classes)",
+                    title=f"Matrice de confusion — Pipeline Texte (top {len(sel_classes)} classes)",
                 )
 
                 # Axes avec libellés lisibles + rotation des X
@@ -1108,7 +1338,7 @@ def show_b3_walkthrough():
                 figcm = px.imshow(
                     cm_pct, text_auto=".2f", aspect="auto",
                     color_continuous_scale="Blues", zmin=0, zmax=100,
-                    title=f"Matrice de confusion — Baseline B3 (top {len(sel)} classes)",
+                    title=f"Matrice de confusion — Pipeline Images (top {len(sel)} classes)",
                 )
                 figcm.update_xaxes(
                     title_text="Predicted label",
@@ -1132,6 +1362,7 @@ with meth_tab:
     st.divider()
     st.subheader("Diagramme du pipeline B4 (texte + image)")
     show_b2_walkthrough()
+    show_b3_walkthrough()
     st.markdown(
         """
         - **Texte** : TF‑IDF → SVD/PCA → classif (LogReg / LinearSVC).
@@ -1140,19 +1371,7 @@ with meth_tab:
         - **CV** : K-fold stratifié, export des embeddings et diagnostics.
         """
     )
-    st.divider()
-    st.subheader("Parcours B3 (animé)")
-    show_b3_walkthrough()
-    # Schéma (optionnel)
-    dot = """
-    digraph G {
-      rankdir=LR; node [shape=box];
-      TXT [label="Texte\nTF-IDF,  → SVD"]; IMG [label="Image\nViT (embeddings)"];
-      FUS [label="Fusion\nConcat features"]; CLS [label="Classifier"];
-      TXT -> FUS; IMG -> FUS; FUS -> CLS;
-    }
-    """
-    st.graphviz_chart(dot, use_container_width=True)
+
 
 # ----------------------------
 # Tab – Diagnostics modèle
@@ -1213,57 +1432,96 @@ with diag_tab:
         return out
 
     # ----------------------------
-    # B2 — Par classe (magnitude signée) → affichage en %
+    # B2 — Par classe (magnitude signée) → graphe unique empilé (sans tableaux)
     # ----------------------------
     st.divider()
-    st.markdown("### B2 — Par classe (magnitude signée)")
+    st.markdown("""
+    **Comment lire ce graphique ?**  
+    Pour chaque **classe** et chaque **bloc de variables** (TF-IDF mots, chars, etc.), on trace la
+    **contribution moyenne signée** au **score linéaire** (magnitude de |x·w| avec le signe).
+    - **> 0** : le bloc **pousse** vers la classe ; **< 0** : il **éloigne** de la classe.  
+    L’échelle est en **unités de score** (sans dimension).  
+    """)
 
-    # Priorité au dossier rapport/, sinon fallback results/
-    fig_b2 = (RAPPORT_DIR / "block_importance_b2_per_class_signed_mag.png")
-    if not fig_b2.exists():
-        fig_b2 = FIG_DIR_DEFAULT / "block_importance_b2_per_class_signed_mag.png"
 
-    pos_b2 = (RAPPORT_DIR / "block_importance_b2_per_class_pos_mag.csv")
-    neg_b2 = (RAPPORT_DIR / "block_importance_b2_per_class_neg_mag.csv")
-    if not pos_b2.exists():
-        pos_b2 = REP_DIR_DEFAULT / "block_importance_b2_per_class_pos_mag.csv"
-    if not neg_b2.exists():
-        neg_b2 = REP_DIR_DEFAULT / "block_importance_b2_per_class_neg_mag.csv"
+    # 1) Chemins FIXES vers tes CSV
+    POS_B2 = Path(r"C:\Users\colle\Dropbox\10 Learning\01 LES MINES DATASCIENTEST\Rakuten\rakuten-main\results\reports\block_importance_b2_per_class_pos_mag.csv")
+    NEG_B2 = Path(r"C:\Users\colle\Dropbox\10 Learning\01 LES MINES DATASCIENTEST\Rakuten\rakuten-main\results\reports\block_importance_b2_per_class_neg_mag.csv")
 
-    cols_b2 = st.columns([1, 1])
-    with cols_b2[0]:
-        if pos_b2.exists():
-            try:
-                st.markdown("**Contributions positives (+)**")
-                _df_pos_raw = pd.read_csv(pos_b2)
-                _df_pos_pct = _percentify_dataframe(_df_pos_raw)
-                st.dataframe(_df_to_percent_str(_df_pos_pct), use_container_width=True)
-                st.download_button("Télécharger CSV (+) %", _df_pos_pct.to_csv(index=False).encode("utf-8"),
-                                   file_name=pos_b2.with_name(pos_b2.stem + "_percent.csv").name,
-                                   key="dl_pos_b2_percent")
-            except Exception as e:
-                st.warning(f"Lecture CSV (+) impossible: {e}")
+    if not POS_B2.exists() or not NEG_B2.exists():
+        st.error("CSV introuvables : vérifie les chemins POS_B2 / NEG_B2.")
+    else:
+        # 2) Lecture
+        df_pos = pd.read_csv(POS_B2)
+        df_neg = pd.read_csv(NEG_B2)
 
-        if neg_b2.exists():
-            try:
-                st.markdown("**Contributions négatives (−)**")
-                _df_neg_raw = pd.read_csv(neg_b2)
-                _df_neg_pct = _percentify_dataframe(_df_neg_raw)
-                st.dataframe(_df_to_percent_str(_df_neg_pct), use_container_width=True)
-                st.download_button("Télécharger CSV (−) %", _df_neg_pct.to_csv(index=False).encode("utf-8"),
-                                   file_name=neg_b2.with_name(neg_b2.stem + "_percent.csv").name,
-                                   key="dl_neg_b2_percent")
-            except Exception as e:
-                st.warning(f"Lecture CSV (−) impossible: {e}")
+        # 3) Colonnes : première = id de classe ; le reste = blocs
+        id_col = df_pos.columns[0]
+        block_cols = df_pos.columns[1:].tolist()
 
-    with cols_b2[1]:
-        if fig_b2.exists():
-            try:
-                st.image(str(fig_b2), width="stretch")
-            except TypeError:
-                st.image(str(fig_b2), use_container_width=True)
-        else:
-            st.info("Figure non trouvée : results/figures/block_importance_b2_per_class_signed_mag.png")
+        # 4) Passage en long + signe
+        dfp = df_pos.melt(id_vars=[id_col], value_vars=block_cols,
+                        var_name="bloc", value_name="val")
+        dfn = df_neg.melt(id_vars=[id_col], value_vars=block_cols,
+                        var_name="bloc", value_name="val")
+        dfn["val"] = -dfn["val"]
+
+        dfall = pd.concat([dfp, dfn], ignore_index=True)
+
+        # 5) Libellés lisibles via LABEL_MAP
+        def _nice_lab(v):
+            s = str(v)
+            return LABEL_MAP.get(s, LABEL_MAP.get(int(s), s)) if s.isdigit() or s in LABEL_MAP else s
+        dfall["classe"] = dfall[id_col].apply(_nice_lab)
+
+        # 6) Tri des classes par somme de |impact|
+        order = (dfall.groupby("classe")["val"]
+                        .apply(lambda x: x.abs().sum())
+                        .sort_values(ascending=True)  # du plus faible au plus fort (axe Y ascendant)
+                        .index.tolist())
+        dfall["classe"] = pd.Categorical(dfall["classe"], categories=order, ordered=True)
+
+        # 7) Graphe empilé signé (style "stacked bars")
+        import plotly.graph_objects as go
+
+
+        # Matrice "signée" en large : +pos  −neg  pour chaque bloc
+        signed = df_pos.copy()
+        for b in block_cols:
+            signed[b] = df_pos[b] - df_neg[b]    # le CSV "neg" contient la magnitude; on la rend négative
+
+        # Libellés lisibles + tri des classes par impact total |.| (ascendant pour une lecture naturelle)
+        signed["classe"] = df_pos[id_col].apply(_nice_lab)
+        signed["_abs_total"] = signed[block_cols].abs().sum(axis=1)
+        signed = signed.sort_values("_abs_total", ascending=True)
+
+        # Traces empilées : une par bloc, orientation horizontale
+        fig = go.Figure()
+        for b in block_cols:
+            fig.add_trace(go.Bar(
+                y=signed["classe"],
+                x=signed[b],
+                name=b,
+                orientation="h"
+            ))
+
+        fig.update_layout(
+            title="Importance par bloc — B2 (par classe, impact signé, magnitude)",
+            height=900,
+            margin=dict(t=60, b=20, l=0, r=0),
+            legend_title_text="Bloc de variables",
+            barmode="relative",       # ← empilement avec signes (droite = +, gauche = −)
+            bargap=0.15,
+            bargroupgap=0
+        )
+        fig.update_xaxes(
+            title_text="Contribution moyenne au score linéaire (|x·w|)",
+            zeroline=True,
+            zerolinewidth=1
+        )
+        fig.update_yaxes(title_text="Classe")
+
+        st.plotly_chart(fig, use_container_width=True)
 
     # ----------------------------
     # Matrices de confusion — B2 & B4 (depuis *top_confusions* FR)
@@ -1452,10 +1710,14 @@ with diag_tab:
   4) **Biais de fréquence** (classes majoritaires mieux apprises).
 
 - **Pistes d’amélioration**  
-  • Normaliser les titres (lexique vendeurs), enrichir descriptions (règles/LLM).  
-  • Ajouter des **métadonnées** (âge conseillé, nb de pièces, matériau).  
-  • **Règles métier** pour 1280/1281 (puzzle/jeu société → 1281 ; doudou/chien à tirer → 1280).  
-  • **Active learning** sur les paires les plus confondues + **revue humaine** ciblée.
+  1) Enrichir descriptions (règles/LLM).  
+  2) Ajouter des **métadonnées** (âge conseillé, nb de pièces, matériau).  
+  3) **Règles métier** pour 1280/1281 (puzzle/jeu société → 1281 ; doudou/chien à tirer → 1280). 
+        Nous avons créé une dizaine de règles de métier comme celles-ci où notre modèle définit si pour chaque produit il répond à une règle métier.
+        
+        BABY  = ("bebe","doudou","peluche","poupee","siegeauto","biberon","poussette","couches", "tetine")
+        BOOK  = ("tome","volume","broche","poche","edition","edition","manga","isbn") 
+  4) **Active learning** sur les paires les plus confondues + **revue humaine** ciblée.
 """)
 
     # ----------------------------

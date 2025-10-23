@@ -257,7 +257,7 @@ major_class = 2583
 # Limite maximale d'échantillons pour la classe majoritaire après undersampling
 major_cap   = 2500
 # Seuil minimum d'échantillons pour les petites classes après oversampling
-tail_min    = 500
+tail_min    = 1500
 
 # --- Paramètres du modèle ---
 # Choisir le modèle final (dev: LR avec saga) ; 
