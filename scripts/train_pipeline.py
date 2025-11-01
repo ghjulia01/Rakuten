@@ -20,8 +20,6 @@ Utilisation:
     # Mode verbeux
     python scripts/train_pipeline.py --verbose
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 import argparse
 import logging

@@ -19,8 +19,6 @@ Utilisation:
         X_train, y_train, X_test
     )
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 from __future__ import annotations
 

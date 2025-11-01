@@ -22,8 +22,6 @@ Utilisation typique :
     logger = get_logger(__name__)
     logger.info("Mon message")
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 import logging
 import sys

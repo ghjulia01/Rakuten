@@ -22,8 +22,6 @@ Utilisation :
         # Code qui sera chronométré
         pass
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 from __future__ import annotations
 

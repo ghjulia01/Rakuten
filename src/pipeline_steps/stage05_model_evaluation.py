@@ -18,8 +18,6 @@ Utilisation:
     pipeline = ModelEvaluationPipeline(config)
     results = pipeline.run(model, X_test_transformed, y_test)
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 from __future__ import annotations
 

@@ -14,8 +14,7 @@ Utilisation:
     model = trainer.train(X_train, y_train)
     trainer.save_model(model, "models/best_model.joblib")
 
-Auteur: Projet Rakuten
-Date: 2024
+
 """
 from __future__ import annotations
 

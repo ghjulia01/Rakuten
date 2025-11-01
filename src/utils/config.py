@@ -10,9 +10,7 @@ Utilisation simple :
     
     config = load_config()
     max_features = config.get("text.max_features")
-    
-Auteur: Projet Rakuten
-Date: 2024
+
 """
 from __future__ import annotations
 

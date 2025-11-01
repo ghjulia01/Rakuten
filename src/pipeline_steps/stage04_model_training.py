@@ -16,8 +16,6 @@ Utilisation:
     pipeline = ModelTrainingPipeline(config)
     model = pipeline.run(X_train_transformed, y_train_resampled)
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 from __future__ import annotations
 

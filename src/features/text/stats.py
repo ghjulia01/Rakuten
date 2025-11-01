@@ -153,6 +153,7 @@ class TextStatisticsPro(BaseEstimator, TransformerMixin):
     GAMING= ("gamer", "gaming", "gamers", "ps","xbox", "switch",   "nintendo", 
              "nintendo switch", "xbox", "xbox one", "xbox series", "ps4", "ps5", "playstation", "playstation 4", "playstation 5") 
     STREAMING = ("streaming", "stream", "digital", "code", "origin", "uplay", "steam", "epic", "gog", "battle.net", "clé" )
+    PUZZLE = ("puzzle", "casse-tête", "casse tete", "énigme", "enigme")
 
     def fit(self, X, y=None):
         self._UNITS_F = {_fold(t) for t in self.UNITS}
@@ -166,6 +167,7 @@ class TextStatisticsPro(BaseEstimator, TransformerMixin):
         self._LOT_F   = {_fold(t) for t in self.LOT}
         self._GAMING_F = {_fold(t) for t in self.GAMING}
         self._STREAMING_F = {_fold(t) for t in self.STREAMING}
+        self._PUZZLE_F = {_fold(t) for t in self.PUZZLE}
         return self
 
     def transform(self, X) -> np.ndarray:
@@ -211,6 +213,7 @@ class TextStatisticsPro(BaseEstimator, TransformerMixin):
             LOT_F   = getattr(self, "_LOT_F",   {_fold(z) for z in self.LOT})
             GAMING_F = getattr(self, "_GAMING_F", {_fold(z) for z in self.GAMING})
             STREAMING_F = getattr(self, "_STREAMING_F", {_fold(z) for z in self.STREAMING})
+            PUZZLE_F = getattr(self, "_PUZZLE_F", {_fold(z) for z in self.PUZZLE})
 
             u_units    = any_in_folded(UNITS_F)
             u_sizes    = any_in_folded(SIZES_F)
@@ -223,13 +226,14 @@ class TextStatisticsPro(BaseEstimator, TransformerMixin):
             f_lot      = any_in_folded(LOT_F)
             f_gaming   = any_in_folded(GAMING_F)
             f_streaming= any_in_folded(STREAMING_F)
+            f_puzzle   = any_in_folded(PUZZLE_F)
 
             out.append([
                 n_words, avg_wlen, lex_div, caps_ratio,
                 digit_ratio, punct_ratio, upper_tok_ratio, non_ascii_ratio,
                 has_year, has_dim, has_isbn, has_euro, has_percent, age_flag,
                 u_units, u_sizes, f_plat, f_book, f_baby, f_toy, f_gard, f_food,
-                f_lot, f_gaming, f_streaming
+                f_lot, f_gaming, f_streaming, f_puzzle
             ])
         return np.asarray(out, dtype=np.float32)
     
@@ -240,7 +244,7 @@ class TextStatisticsPro(BaseEstimator, TransformerMixin):
             "digit_ratio","punct_ratio","upper_tok_ratio","non_ascii_ratio",
             "has_year","has_dim","has_isbn","has_euro","has_percent","age_flag",
             "has_units","has_sizes","plat_flag","book_flag","baby_flag","toy_flag","garden_flag","food_flag",
-            "lot_flag","gaming_flag","streaming_flag"
+            "lot_flag","gaming_flag","streaming_flag","puzzle_flag"
         ], dtype=object)
     
 # --- Lexiques par classe (chi2) ----------------------------------------------

@@ -1,6 +1,7 @@
 """
 Étape 1 : Ingestion des données (Data Ingestion).
 =================================================
+python 
 
 Cette étape gère le chargement des fichiers CSV d'entraînement et de test.
 Elle correspond à la stage01 du projet wine_quality.
@@ -16,9 +17,6 @@ Utilisation:
     
     pipeline = DataIngestionPipeline(config)
     X_train, y_train, X_test = pipeline.run()
-
-Auteur: Projet Rakuten
-Date: 2024
 """
 from __future__ import annotations
 
