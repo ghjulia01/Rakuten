@@ -189,20 +189,20 @@ def main():
         # Résumé final
         # ========================================
         logger.info("\n" + "=" * 70)
-        logger.info("🎉 PIPELINE TERMINÉ AVEC SUCCÈS !")
+        logger.info(" PIPELINE TERMINÉ AVEC SUCCÈS !")
         logger.info("=" * 70)
-        logger.info(f"\n📊 Résultats:")
+        logger.info(f"\n Résultats:")
         logger.info(f"  • Modèle entraîné: {config.model['name'].upper()}")
         logger.info(f"  • Données d'entraînement: {X_train_t.shape}")
         logger.info(f"  • Données de test: {X_test_t.shape}")
         
         if args.evaluate_on_train and 'train_results' in locals():
-            logger.info(f"\n📈 Performance sur train:")
+            logger.info(f"\n Performance sur train:")
             logger.info(f"  • Accuracy: {train_results['accuracy']:.4f}")
             logger.info(f"  • F1 (weighted): {train_results['f1_weighted']:.4f}")
             logger.info(f"  • F1 (macro): {train_results['f1_macro']:.4f}")
         
-        logger.info(f"\n💾 Fichiers générés:")
+        logger.info(f"\n Fichiers générés:")
         logger.info(f"  • Modèle: models/")
         logger.info(f"  • Prédictions: {pred_output_path}")
         logger.info(f"  • Métriques: results/metrics/")
