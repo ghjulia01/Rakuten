@@ -15,7 +15,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from main.profiling_tools import profile_func
+from src.utils.profiling import profile_func
 
 StopWords = Optional[Union[str, List[str]]]
 

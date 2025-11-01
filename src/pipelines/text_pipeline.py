@@ -19,11 +19,11 @@ from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 from sklearn.pipeline import make_pipeline, FeatureUnion
 
-from features.text_cleaner import TextCleaner, HasDescriptionFlag, DesignationLength
-from features.text_vectorizer import TextTfidfVectorizer
-from features.text_features import ( TextStatistics, TextStatisticsPro, LanguageDetector, Chi2LexiconFeatures
+from src.features.text.cleaner import TextCleaner, HasDescriptionFlag, DesignationLength
+from src.features.text.vectorizer import TextTfidfVectorizer
+from src.features.text.stats import ( TextStatistics, TextStatisticsPro, LanguageDetector, Chi2LexiconFeatures
 )
-from main.profiling_tools import profile_func
+from src.utils.profiling import profile_func
 
 # Configuration du logging
 logger = logging.getLogger(__name__)

@@ -17,7 +17,7 @@ import unicodedata
 from langdetect import DetectorFactory
 DetectorFactory.seed = 0
 
-from main.profiling_tools import profile_func
+from src.utils.profiling import profile_func
 
 logger = logging.getLogger(__name__)
 

@@ -29,7 +29,7 @@ from nltk.corpus import stopwords
 from nltk.stem.snowball import SnowballStemmer
 from typing import Dict, List, Optional, Set, Tuple
 
-from main.profiling_tools import profile_func, list_debug_add
+from src.utils.profiling import profile_func, list_debug_add
 
 # === Configuration =======================================================
 logging.basicConfig(level=logging.INFO)

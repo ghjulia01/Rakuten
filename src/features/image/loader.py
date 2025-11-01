@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from main.profiling_tools import profile_func, list_debug_add
+from src.utils.profiling import profile_func, list_debug_add
 
 class ImageLoader(BaseEstimator, TransformerMixin):
     """

@@ -12,9 +12,9 @@ import logging
 from sklearn.pipeline import Pipeline as SkPipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler, Normalizer
 from sklearn.decomposition import PCA, TruncatedSVD
-from features.image_loader import ImageLoader
+from src.features.image.loader import ImageLoader
 
-from main.profiling_tools import profile_func
+from src.utils.profiling import profile_func
 
 logger = logging.getLogger(__name__)
 
