@@ -20,8 +20,6 @@ Utilisation:
     # Mode verbeux
     python scripts/train_pipeline.py --verbose
 
-Auteur: Projet Rakuten
-Date: 2024
 """
 import argparse
 import logging
@@ -171,7 +169,6 @@ def main():
                 model, X_test_t, y_true=None,
                 dataset_name="test",
                 trainer=stage4.trainer,
-                dataset_name="test"
             )
                 
             

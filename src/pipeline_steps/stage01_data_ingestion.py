@@ -150,6 +150,6 @@ if __name__ == "__main__":
         
     except FileNotFoundError as e:
         print(f"\n✗ Erreur: {e}")
-        print("Assurez-vous que les fichiers CSV existent dans data/raw/")
+        print("S'assurer que les fichiers CSV existent dans data/raw/")
     except Exception as e:
         print(f"\n✗ Erreur inattendue: {e}")
