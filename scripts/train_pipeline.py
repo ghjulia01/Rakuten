@@ -11,8 +11,11 @@ Ce script orchestre les 5 étapes du pipeline d'entraînement :
 5. Model Evaluation   - Évaluation
 
 Utilisation:
-    # Pipeline complet
+    # Pipeline complet rapide
     python scripts/train_pipeline.py
+
+    # Avec validation des données avec StatifiedKFold ou activation du mode CV dans le tomlib
+    python scripts/train_pipeline.py --cv
     
     # Avec configuration personnalisée
     python scripts/train_pipeline.py --config config/config.toml
@@ -97,14 +100,14 @@ def main():
     # ========================================
     try:
         config = load_config(args.config)
-        logger.info(f"✓ Configuration chargée depuis: {args.config}")
+        logger.info(f" Configuration chargée depuis: {args.config}")
         logger.info(f"  Modèle: {config.model['name'].upper()}")
         logger.info(f"  Random seed: {config.random_seed}")
     except FileNotFoundError as e:
-        logger.error(f"✗ Fichier de configuration non trouvé: {e}")
+        logger.error(f" Fichier de configuration non trouvé: {e}")
         return 1
     except Exception as e:
-        logger.error(f"✗ Erreur lors du chargement de la configuration: {e}")
+        logger.error(f"Erreur lors du chargement de la configuration: {e}")
         return 1
     
     try:
@@ -113,7 +116,7 @@ def main():
             # ========================================
             # ÉTAPE 1 : Data Ingestion
             # ========================================
-            logger.info("\n" + "🔹" * 35)
+            logger.info("\n" + "*" * 35)
             stage1 = DataIngestionPipeline(config)
             X_train, y_train, X_test = stage1.run()
             
@@ -121,21 +124,21 @@ def main():
             # ÉTAPE 2 : Data Validation
             # ========================================
             if not args.skip_validation:
-                logger.info("\n" + "🔹" * 35)
+                logger.info("\n" + "*" * 35)
                 stage2 = DataValidationPipeline(config)
                 validation_ok = stage2.run(X_train, y_train, X_test)
                 
                 if not validation_ok:
-                    logger.error("\n✗ Validation échouée - Arrêt du pipeline")
+                    logger.error("\n Validation échouée - Arrêt du pipeline")
                     logger.error("Corrigez les erreurs de données avant de continuer")
                     return 1
             else:
-                logger.warning("\n⚠ Validation ignorée (--skip-validation)")
+                logger.warning("\n Validation ignorée (--skip-validation)")
             
             # ========================================
             # ÉTAPE 3 : Data Transformation
             # ========================================
-            logger.info("\n" + "🔹" * 35)
+            logger.info("\n" + "*" * 35)
             stage3 = DataTransformationPipeline(config)
             X_train_t, y_train_t, X_test_t, feature_pipeline = stage3.run(
                 X_train, y_train, X_test
@@ -144,14 +147,14 @@ def main():
             # ========================================
             # ÉTAPE 4 : Model Training
             # ========================================
-            logger.info("\n" + "🔹" * 35)
+            logger.info("\n" + "*" * 35)
             stage4 = ModelTrainingPipeline(config)
             model = stage4.run(X_train_t, y_train_t, feature_pipeline)
             
             # ========================================
             # ÉTAPE 5 : Model Evaluation
             # ========================================
-            logger.info("\n" + "🔹" * 35)
+            logger.info("\n" + "*" * 35)
             stage5 = ModelEvaluationPipeline(config)
             
             # Évaluation sur train (optionnel)
@@ -186,7 +189,7 @@ def main():
             pred_output_path.parent.mkdir(parents=True, exist_ok=True)
             predictions_df.to_csv(pred_output_path)
             
-            logger.info(f"✓ Prédictions test sauvegardées: {pred_output_path}")
+            logger.info(f" Prédictions test sauvegardées: {pred_output_path}")
         
         # ========================================
         # Résumé final
@@ -215,12 +218,12 @@ def main():
         return 0
     
     except FileNotFoundError as e:
-        logger.error(f"\n✗ Fichier non trouvé: {e}")
+        logger.error(f"\n Fichier non trouvé: {e}")
         logger.error("Vérifiez que tous les fichiers de données existent")
         return 1
     
     except Exception as e:
-        logger.error(f"\n✗ Erreur durant le pipeline: {e}")
+        logger.error(f"\n Erreur durant le pipeline: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return 1

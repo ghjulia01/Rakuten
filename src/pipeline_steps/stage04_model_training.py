@@ -4,6 +4,7 @@
 
 Cette étape entraîne le modèle sur les données transformées.
 
+
 Responsabilités :
 - Créer le modèle selon la configuration
 - Entraîner sur les données transformées
@@ -27,6 +28,8 @@ import joblib
 
 from src.models.model_trainer import ModelTrainer
 from src.utils.profiling import Timer
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.metrics import make_scorer, f1_score
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +103,80 @@ class ModelTrainingPipeline:
         else:
             logger.info("Matrice dense")
         
-        # Entraîner
+        # ========================================
+        # VALIDATION CROISÉE (si activée)
+        # ========================================
+        if self.config.get("cv.enabled", False):
+            logger.info("\n--- Validation croisée ---")
+            cv_scores = self.perform_cross_validation(X_train, y_train)
+            
+            logger.info(f"CV F1 (weighted) - Moyenne: {cv_scores['mean']:.4f} (+/- {cv_scores['std']:.4f})")
+            logger.info(f"CV F1 (weighted) - Scores: {cv_scores['scores']}")
+        
+        # ========================================
+        # ENTRAÎNEMENT FINAL
+        # ========================================
         with Timer(f"Entraînement {self.config.model['name'].upper()}"):
             self.model = self.trainer.train(X_train, y_train)
         
-        logger.info("✓ Entraînement terminé")
+        logger.info(" Entraînement terminé")
         
         return self.model
+    
+    def perform_cross_validation(
+        self,
+        X: np.ndarray,
+        y: np.ndarray
+    ) -> dict:
+        """
+        Effectue une validation croisée stratifiée.
+        
+        Args:
+            X: Features
+            y: Labels
+            
+        Returns:
+            Dict avec scores, mean, std
+        """
+        # Paramètres CV depuis config
+        n_splits = self.config.get("cv.splits", 3)
+        shuffle = self.config.get("cv.shuffle", True)
+        cv_random_state = self.config.get("cv.random_state", self.config.random_seed)
+        
+        logger.info(f"Paramètres CV: {n_splits} folds, shuffle={shuffle}, random_state={cv_random_state}")
+        
+        # Créer le StratifiedKFold
+        skf = StratifiedKFold(
+            n_splits=n_splits,
+            shuffle=shuffle,
+            random_state=cv_random_state
+        )
+        
+        # Créer un modèle temporaire (non entraîné)
+        temp_model = self.trainer.create_model()
+        
+        # Scorer F1 weighted
+        f1_scorer = make_scorer(f1_score, average='weighted')
+        
+        # Effectuer la CV
+        # Utiliser y encodés pour XGBoost
+        y_encoded = self.trainer.label_encoder.fit_transform(y)
+        
+        with Timer("Validation croisée"):
+            cv_scores = cross_val_score(
+                temp_model,
+                X,
+                y_encoded,  
+                cv=skf,
+                scoring=f1_scorer,
+                n_jobs=-1  
+            )
+        
+        return {
+            'scores': [float(s) for s in cv_scores],
+            'mean': float(cv_scores.mean()),
+            'std': float(cv_scores.std())
+        }
     
     def save_model(
         self,
@@ -167,7 +237,7 @@ class ModelTrainingPipeline:
         joblib.dump(full_pipeline, output_path)
         
         size_mb = output_path.stat().st_size / (1024 * 1024)
-        logger.info(f"✓ Pipeline complet sauvegardé: {output_path}")
+        logger.info(f" Pipeline complet sauvegardé: {output_path}")
         logger.info(f"  Taille: {size_mb:.2f} MB")
     
     def run(
@@ -223,11 +293,11 @@ class ModelTrainingPipeline:
             logger.info("\n" + "=" * 70)
             logger.info("RÉSUMÉ DE L'ENTRAÎNEMENT")
             logger.info("=" * 70)
-            logger.info(f"✓ Modèle: {self.config.model['name'].upper()}")
-            logger.info(f"✓ Données: {X_train.shape}")
-            logger.info(f"✓ Sauvegardé: {model_path}")
+            logger.info(f" Modèle: {self.config.model['name'].upper()}")
+            logger.info(f" Données: {X_train.shape}")
+            logger.info(f" Sauvegardé: {model_path}")
             if feature_pipeline is not None:
-                logger.info(f"✓ Pipeline complet: {full_pipeline_path}")
+                logger.info(f" Pipeline complet: {full_pipeline_path}")
             logger.info("=" * 70 + "\n")
             
             return self.model
@@ -263,7 +333,7 @@ if __name__ == "__main__":
         validation_ok = stage2.run(X_train, y_train, X_test)
         
         if not validation_ok:
-            print("\n✗ Validation échouée - arrêt du pipeline")
+            print("\n Validation échouée - arrêt du pipeline")
         else:
             # Stage 3: Transformation
             stage3 = DataTransformationPipeline(config)
@@ -275,14 +345,14 @@ if __name__ == "__main__":
             stage4 = ModelTrainingPipeline(config)
             model = stage4.run(X_train_t, y_train_t, feature_pipeline)
             
-            print("\n✓ Entraînement terminé avec succès!")
+            print("\n Entraînement terminé avec succès!")
             print(f"  Modèle: {type(model).__name__}")
             print(f"  Sauvegardé dans: models/")
         
     except FileNotFoundError as e:
-        print(f"\n✗ Erreur: {e}")
-        print("S'assurer que les fichiers CSV existent dans data/raw/")
+        print(f"\n Erreur: {e}")
+        print("Assurez-vous que les fichiers CSV existent dans data/raw/")
     except Exception as e:
-        print(f"\n✗ Erreur inattendue: {e}")
+        print(f"\n Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()

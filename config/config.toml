@@ -354,8 +354,9 @@ max_new = 800              # ← nb max de “placeholders” auto ajoutés (EN/
 
 # --- Paramètres de la validation croisée ---
 [cv]
-# Nombre de folds pour la comparaison LR vs SVC si --compare est activé
+
 # Définir la cross-validation (peu de folds pour aller vite)
+enabled = false  # Mettre true pour activer
 splits = 3  # ou 5 par exemple
 shuffle = true
 random_state = 42
