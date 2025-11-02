@@ -9,8 +9,8 @@ en lançant le pipeline complet sur un petit échantillon de données.
 
 Utilisation:
     python tools/test_pipeline_sample.py --sample-size 2000  # Taille de l'échantillon
-    python scripts/test_pipeline_sample.py # Utilise la taille par défaut (1000)
-    python scripts/test_pipeline_sample.py --with-cv  # Active la validation croisée
+    python tools/test_pipeline_sample.py # Utilise la taille par défaut (1000)
+    python tools/test_pipeline_sample.py --with-cv  # Active la validation croisée
 
 """
 import sys
