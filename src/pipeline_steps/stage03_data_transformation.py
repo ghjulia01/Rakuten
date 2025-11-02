@@ -109,7 +109,7 @@ class DataTransformationPipeline:
             random_state=random_state
         )
         
-        logger.info(f"✓ Rééchantillonnage terminé: {X_resampled.shape}")
+        logger.info(f" Rééchantillonnage terminé: {X_resampled.shape}")
         
         return X_resampled, y_resampled
     
@@ -175,7 +175,7 @@ class DataTransformationPipeline:
             transformer_weights=weights if weights else None
         )
         
-        logger.info(f"✓ Pipeline créé avec {len(transformers)} branche(s)")
+        logger.info(f" Pipeline créé avec {len(transformers)} branche(s)")
         
         return feature_pipeline
     
@@ -191,6 +191,7 @@ class DataTransformationPipeline:
         
         Args:
             X_train: Features d'entraînement (brutes)
+            y_train: Labels d'entraînement  
             X_test: Features de test (brutes)
             feature_pipeline: Pipeline sklearn à appliquer
             
@@ -198,15 +199,19 @@ class DataTransformationPipeline:
             Tuple (X_train_transformed, X_test_transformed)
         """
         logger.info("\n--- Transformation des données ---")
+        logger.info(f" Train: {len(X_train)} échantillons à transformer")
+        logger.info(f" Test: {len(X_test)} échantillons à transformer")
         
         # ========================================
         # Fit + Transform sur train
         # ========================================
+        logger.info("\n Étape 1/2 : Fit + Transform sur TRAIN...")
         with Timer("Fit + Transform sur train"):
             X_train_transformed = feature_pipeline.fit_transform(X_train, y_train)
         
-        logger.info(f"✓ Train transformé: {X_train_transformed.shape}")
+        logger.info(f" Train transformé: {X_train_transformed.shape}")
         logger.info(f"  Type: {type(X_train_transformed)}")
+        logger.info(f"  Progression: {len(X_train)}/{len(X_train)} échantillons traités ✓")
         
         # Afficher les stats si c'est sparse
         if hasattr(X_train_transformed, 'nnz'):
@@ -216,10 +221,12 @@ class DataTransformationPipeline:
         # ========================================
         # Transform sur test
         # ========================================
+        logger.info("\n Étape 2/2 : Transform sur TEST...")
         with Timer("Transform sur test"):
             X_test_transformed = feature_pipeline.transform(X_test)
         
-        logger.info(f"✓ Test transformé: {X_test_transformed.shape}")
+        logger.info(f" Test transformé: {X_test_transformed.shape}")
+        logger.info(f"  Progression: {len(X_test)}/{len(X_test)} échantillons traités ✓")
         
         return X_train_transformed, X_test_transformed
     
@@ -260,7 +267,6 @@ class DataTransformationPipeline:
             # ========================================
             X_train_transformed, X_test_transformed = self.transform_data(
                 X_train_resampled,
-                y_train_resampled,
                 X_test,
                 self.feature_pipeline
             )
@@ -271,10 +277,10 @@ class DataTransformationPipeline:
             logger.info("\n" + "=" * 70)
             logger.info("RÉSUMÉ DE LA TRANSFORMATION")
             logger.info("=" * 70)
-            logger.info(f"✓ X_train : {X_train.shape} → {X_train_transformed.shape}")
-            logger.info(f"✓ y_train : {y_train.shape} → {y_train_resampled.shape}")
-            logger.info(f"✓ X_test  : {X_test.shape} → {X_test_transformed.shape}")
-            logger.info(f"✓ Pipeline sauvegardé : {self.feature_pipeline is not None}")
+            logger.info(f" X_train : {X_train.shape} → {X_train_transformed.shape}")
+            logger.info(f" y_train : {y_train.shape} → {y_train_resampled.shape}")
+            logger.info(f" X_test  : {X_test.shape} → {X_test_transformed.shape}")
+            logger.info(f" Pipeline sauvegardé : {self.feature_pipeline is not None}")
             logger.info("=" * 70 + "\n")
             
             return (
@@ -314,7 +320,7 @@ if __name__ == "__main__":
         validation_ok = stage2.run(X_train, y_train, X_test)
         
         if not validation_ok:
-            print("\n✗ Validation échouée - arrêt du pipeline")
+            print("\n Validation échouée - arrêt du pipeline")
         else:
             # Stage 3: Transformation
             stage3 = DataTransformationPipeline(config)
@@ -322,15 +328,15 @@ if __name__ == "__main__":
                 X_train, y_train, X_test
             )
             
-            print("\n✓ Transformation terminée avec succès!")
+            print("\n Transformation terminée avec succès!")
             print(f"  X_train transformé: {X_train_t.shape}")
             print(f"  y_train rééchantillonné: {y_train_t.shape}")
             print(f"  X_test transformé: {X_test_t.shape}")
         
     except FileNotFoundError as e:
-        print(f"\n✗ Erreur: {e}")
-        print("S'assurer que les fichiers CSV existent dans data/raw/")
+        print(f"\n Erreur: {e}")
+        print("Vérification que les fichiers CSV existent dans data/raw/")
     except Exception as e:
-        print(f"\n✗ Erreur inattendue: {e}")
+        print(f"\n Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()

@@ -76,6 +76,12 @@ def parse_args():
         help="Évalue également sur le jeu d'entraînement"
     )
     
+    parser.add_argument(
+        "--cv",
+        action="store_true",
+        help="Active la validation croisée (override config)"
+    )
+    
     return parser.parse_args()
 
 
@@ -103,7 +109,7 @@ def main():
         logger.info(f" Configuration chargée depuis: {args.config}")
         logger.info(f"  Modèle: {config.model['name'].upper()}")
         logger.info(f"  Random seed: {config.random_seed}")
-
+        
         # Override CV si demandé
         if args.cv:
             config.cv['enabled'] = True
@@ -112,12 +118,12 @@ def main():
         else:
             cv_status = "ACTIVÉE" if config.get("cv.enabled", False) else "DÉSACTIVÉE"
             logger.info(f"  Validation croisée: {cv_status}")
-
+            
     except FileNotFoundError as e:
         logger.error(f" Fichier de configuration non trouvé: {e}")
         return 1
     except Exception as e:
-        logger.error(f"Erreur lors du chargement de la configuration: {e}")
+        logger.error(f" Erreur lors du chargement de la configuration: {e}")
         return 1
     
     try:
@@ -127,20 +133,23 @@ def main():
             # ÉTAPE 1 : Data Ingestion
             # ========================================
             logger.info("\n" + "*" * 35)
+            logger.info(" ÉTAPE 1/5 : INGESTION DES DONNÉES")
             stage1 = DataIngestionPipeline(config)
             X_train, y_train, X_test = stage1.run()
+            logger.info(f" Chargé : {len(X_train)} train + {len(X_test)} test")
             
             # ========================================
             # ÉTAPE 2 : Data Validation
             # ========================================
             if not args.skip_validation:
                 logger.info("\n" + "*" * 35)
+                logger.info(" ÉTAPE 2/5 : VALIDATION DES DONNÉES")
                 stage2 = DataValidationPipeline(config)
                 validation_ok = stage2.run(X_train, y_train, X_test)
                 
                 if not validation_ok:
                     logger.error("\n Validation échouée - Arrêt du pipeline")
-                    logger.error("Corrigez les erreurs de données avant de continuer")
+                    logger.error(" erreurs présentes")
                     return 1
             else:
                 logger.warning("\n Validation ignorée (--skip-validation)")
@@ -148,42 +157,50 @@ def main():
             # ========================================
             # ÉTAPE 3 : Data Transformation
             # ========================================
-            logger.info("\n" + "*" * 35)
+            logger.info("\n" + " * " * 35)
+            logger.info(" ÉTAPE 3/5 : TRANSFORMATION DES DONNÉES")
+            logger.info(f"   → Rééchantillonnage + Construction features")
             stage3 = DataTransformationPipeline(config)
             X_train_t, y_train_t, X_test_t, feature_pipeline = stage3.run(
                 X_train, y_train, X_test
             )
+            logger.info(f" Transformé : {X_train_t.shape[0]} train → {X_train_t.shape[1]} features")
             
             # ========================================
             # ÉTAPE 4 : Model Training
             # ========================================
             logger.info("\n" + "*" * 35)
+            logger.info("ÉTAPE 4/5 : ENTRAÎNEMENT DU MODÈLE")
+            logger.info(f"   → Modèle: {config.model['name'].upper()}")
             stage4 = ModelTrainingPipeline(config)
             model = stage4.run(X_train_t, y_train_t, feature_pipeline)
+            logger.info(f" Modèle entraîné et sauvegardé")
             
             # ========================================
             # ÉTAPE 5 : Model Evaluation
             # ========================================
             logger.info("\n" + "*" * 35)
+            logger.info("ÉTAPE 5/5 : ÉVALUATION DU MODÈLE")
             stage5 = ModelEvaluationPipeline(config)
             
             # Évaluation sur train (optionnel)
             if args.evaluate_on_train:
-                logger.info("\nÉvaluation sur le jeu d'entraînement:")
+                logger.info(f"\nÉvaluation sur le jeu d'entraînement ({len(X_train_t)} échantillons)...")
                 train_results = stage5.run(
                     model, X_train_t, y_train_t, 
                     dataset_name="train",
-                    trainer=stage4.trainer  
+                    trainer=stage4.trainer  # IMPORTANT : pour décodage
                 )
             
             # Prédictions sur test (pas de labels)
-            logger.info("\nGénération des prédictions sur le jeu de test:")
+            logger.info(f"\nGénération des prédictions sur le jeu de test ({len(X_test_t)} échantillons)...")
             test_results = stage5.run(
                 model, X_test_t, y_true=None,
                 dataset_name="test",
-                trainer=stage4.trainer,
+                trainer=stage4.trainer  # pour décodage
             )
-                
+            logger.info(f" Prédictions générées: {len(test_results['predictions'])} échantillons")
+        
             
             # Sauvegarder les prédictions test
             pred_output = config.paths.get("pred_out", "results/predictions/test_predictions.csv")
@@ -199,13 +216,13 @@ def main():
             pred_output_path.parent.mkdir(parents=True, exist_ok=True)
             predictions_df.to_csv(pred_output_path)
             
-            logger.info(f" Prédictions test sauvegardées: {pred_output_path}")
+            logger.info(f"Prédictions test sauvegardées: {pred_output_path}")
         
         # ========================================
         # Résumé final
         # ========================================
         logger.info("\n" + "=" * 70)
-        logger.info("PIPELINE TERMINÉ AVEC SUCCÈS !")
+        logger.info("PIPELINE TERMINÉ")
         logger.info("=" * 70)
         logger.info(f"\nRésultats:")
         logger.info(f"  • Modèle entraîné: {config.model['name'].upper()}")
@@ -229,7 +246,7 @@ def main():
     
     except FileNotFoundError as e:
         logger.error(f"\n Fichier non trouvé: {e}")
-        logger.error("Vérifiez que tous les fichiers de données existent")
+        logger.error("Vérification que tous les fichiers de données existent")
         return 1
     
     except Exception as e:
