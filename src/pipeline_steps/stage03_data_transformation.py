@@ -3,7 +3,6 @@
 ==========================================================
 
 Cette étape applique le rééchantillonnage et construit les features.
-Elle correspond à la stage03 du projet wine_quality.
 
 Responsabilités :
 - Rééchantillonnage (under/over sampling)
@@ -183,6 +182,7 @@ class DataTransformationPipeline:
     def transform_data(
         self,
         X_train: pd.DataFrame,
+        y_train: pd.Series,
         X_test: pd.DataFrame,
         feature_pipeline: FeatureUnion
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -203,7 +203,7 @@ class DataTransformationPipeline:
         # Fit + Transform sur train
         # ========================================
         with Timer("Fit + Transform sur train"):
-            X_train_transformed = feature_pipeline.fit_transform(X_train)
+            X_train_transformed = feature_pipeline.fit_transform(X_train, y_train)
         
         logger.info(f"✓ Train transformé: {X_train_transformed.shape}")
         logger.info(f"  Type: {type(X_train_transformed)}")
@@ -260,6 +260,7 @@ class DataTransformationPipeline:
             # ========================================
             X_train_transformed, X_test_transformed = self.transform_data(
                 X_train_resampled,
+                y_train_resampled,
                 X_test,
                 self.feature_pipeline
             )

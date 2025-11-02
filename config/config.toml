@@ -8,11 +8,11 @@
 # --- Chemins des fichiers CSV d'entrée ---
 [paths]
 # Jeu d'entraînement (variables explicatives)
-x_train_csv = "data/X_train_update.csv"
+x_train_csv = "data/raw/X_train_update.csv"
 # Étiquettes de classes associées à X_train
-y_train_csv = "data/Y_train_CVw08PX.csv"
+y_train_csv = "data/raw/Y_train_CVw08PX.csv"
 # Jeu de test (variables explicatives, sans labels)
-x_test_csv  = "data/X_test_update.csv"
+x_test_csv  = "data/raw/X_test_update.csv"
 
 # --- Chemins de sortie ---
 [outputs]
@@ -62,7 +62,7 @@ sublinear_tf = true
 norm = "l2"
 strip_accents = "unicode"
 # si fichier de traduction :
-translate_map_path = "features/translate_map_starter_from_cleaned.json"
+translate_map_path = "config/translate_map_starter_from_cleaned.json"
 
 use_stem = true
 clean_special = true

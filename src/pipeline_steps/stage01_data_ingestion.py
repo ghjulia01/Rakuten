@@ -4,7 +4,6 @@
 python 
 
 Cette étape gère le chargement des fichiers CSV d'entraînement et de test.
-Elle correspond à la stage01 du projet wine_quality.
 
 Responsabilités :
 - Charger X_train et y_train depuis les CSV

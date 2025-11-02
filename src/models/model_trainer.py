@@ -5,15 +5,12 @@ Module d'entraînement des modèles - Classe ModelTrainer.
 Ce module implémente la classe ModelTrainer qui gère l'entraînement
 des différents modèles (LR, SVC, XGB, LGBM) avec leurs hyperparamètres.
 
-Inspiré de la structure du projet wine_quality.
-
 Utilisation:
     from src.models.model_trainer import ModelTrainer
     
     trainer = ModelTrainer(config)
     model = trainer.train(X_train, y_train)
     trainer.save_model(model, "models/best_model.joblib")
-
 
 """
 from __future__ import annotations
@@ -26,6 +23,7 @@ import joblib
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
+from sklearn.preprocessing import LabelEncoder
 
 from src.utils.profiling import Timer
 
@@ -67,6 +65,7 @@ class ModelTrainer:
         self.config = model_config
         self.random_state = random_state
         self.model = None
+        self.label_encoder = LabelEncoder()  # Pour gérer les classes non-séquentielles
         
         logger.info(f"ModelTrainer initialisé avec modèle: {self.config['name']}")
     
@@ -192,10 +191,21 @@ class ModelTrainer:
             
             # Informations sur les données
             logger.info(f"Dimensions d'entraînement: X={X_train.shape}, y={y_train.shape}")
-            logger.info(f"Nombre de classes: {len(np.unique(y_train))}")
             
-            # Entraîner
-            self.model.fit(X_train, y_train, **fit_params)
+            # ========================================
+            # ENCODER LES LABELS (10, 40, 50... → 0, 1, 2...)
+            # ========================================
+            unique_classes = np.unique(y_train)
+            logger.info(f"Classes originales: {sorted(unique_classes)}")
+            
+            # Fit + transform des labels
+            y_train_encoded = self.label_encoder.fit_transform(y_train)
+            
+            logger.info(f"Classes après encodage: {np.unique(y_train_encoded)}")
+            logger.info(f"Nombre de classes: {len(unique_classes)}")
+            
+            # Entraîner avec les labels encodés
+            self.model.fit(X_train, y_train_encoded, **fit_params)
             
             logger.info("✓ Entraînement terminé")
         
@@ -220,11 +230,45 @@ class ModelTrainer:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Sauvegarde du modèle dans: {output_path}")
-        joblib.dump(model, output_path)
+        
+        # Sauvegarder le modèle ET le label_encoder ensemble
+        model_bundle = {
+            'model': model,
+            'label_encoder': self.label_encoder
+        }
+        joblib.dump(model_bundle, output_path)
         
         # Vérifier la taille du fichier
         size_mb = output_path.stat().st_size / (1024 * 1024)
         logger.info(f"✓ Modèle sauvegardé ({size_mb:.2f} MB)")
+    
+    def predict(
+        self,
+        X: np.ndarray
+    ) -> np.ndarray:
+        """
+        Fait des prédictions et les décode automatiquement.
+        
+        Args:
+            X: Features (n_samples, n_features)
+            
+        Returns:
+            Prédictions dans les classes originales (10, 40, 50, etc.)
+            
+        Exemple:
+            >>> predictions = trainer.predict(X_test)
+            >>> # Retourne [10, 40, 2583, ...] et non [0, 1, 2, ...]
+        """
+        if self.model is None:
+            raise ValueError("Le modèle n'est pas entraîné. Appelez train() d'abord.")
+        
+        # Prédire avec labels encodés (0, 1, 2, ...)
+        y_pred_encoded = self.model.predict(X)
+        
+        # Décoder vers les classes originales (10, 40, 50, ...)
+        y_pred = self.label_encoder.inverse_transform(y_pred_encoded)
+        
+        return y_pred
     
     @staticmethod
     def load_model(model_path: str) -> Any:
@@ -235,11 +279,15 @@ class ModelTrainer:
             model_path: Chemin vers le fichier .joblib
             
         Returns:
-            Modèle chargé
+            Tuple (model, label_encoder) ou juste model si ancien format
             
         Exemple:
-            >>> model = ModelTrainer.load_model("models/best_model.joblib")
-            >>> predictions = model.predict(X_test)
+            >>> model_bundle = ModelTrainer.load_model("models/best_model.joblib")
+            >>> if isinstance(model_bundle, dict):
+            >>>     model = model_bundle['model']
+            >>>     label_encoder = model_bundle['label_encoder']
+            >>> else:
+            >>>     model = model_bundle  # Ancien format
         """
         model_path = Path(model_path)
         
@@ -247,10 +295,16 @@ class ModelTrainer:
             raise FileNotFoundError(f"Modèle non trouvé: {model_path}")
         
         logger.info(f"Chargement du modèle depuis: {model_path}")
-        model = joblib.load(model_path)
-        logger.info("✓ Modèle chargé")
+        loaded = joblib.load(model_path)
         
-        return model
+        # Nouveau format : dict avec model + label_encoder
+        if isinstance(loaded, dict) and 'model' in loaded:
+            logger.info("✓ Modèle + LabelEncoder chargés")
+            return loaded
+        else:
+            # Ancien format : juste le modèle
+            logger.warning("⚠ Ancien format détecté (sans LabelEncoder)")
+            return loaded
 
 
 # ============================================================================

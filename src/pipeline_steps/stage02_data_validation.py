@@ -3,7 +3,6 @@
 ===================================================
 
 Cette étape valide la qualité et la cohérence des données chargées.
-Elle correspond à la stage02 du projet wine_quality.
 
 Responsabilités :
 - Vérifier les types de données

@@ -3,7 +3,6 @@
 ==================================================
 
 Cette étape évalue les performances du modèle entraîné.
-Elle correspond à la stage05 du projet wine_quality.
 
 Responsabilités :
 - Générer des prédictions
@@ -77,7 +76,8 @@ class ModelEvaluationPipeline:
         self,
         model: Any,
         X: np.ndarray,
-        dataset_name: str = "validation"
+        dataset_name: str = "validation",
+        trainer: Any = None
     ) -> np.ndarray:
         """
         Génère les prédictions du modèle.
@@ -86,6 +86,7 @@ class ModelEvaluationPipeline:
             model: Modèle entraîné
             X: Features (n_samples, n_features)
             dataset_name: Nom du dataset (pour les logs)
+            trainer: ModelTrainer (optionnel, pour décodage automatique)
             
         Returns:
             Prédictions (n_samples,)
@@ -93,7 +94,14 @@ class ModelEvaluationPipeline:
         logger.info(f"\n--- Prédictions sur {dataset_name} ---")
         
         with Timer(f"Prédiction ({X.shape[0]} échantillons)"):
-            y_pred = model.predict(X)
+            # Si on a le trainer, utiliser sa méthode predict (avec décodage)
+            if trainer is not None:
+                y_pred = trainer.predict(X)
+                logger.info("✓ Prédictions décodées vers classes originales")
+            else:
+                # Sinon, prédiction directe (attention : labels encodés!)
+                y_pred = model.predict(X)
+                logger.warning("⚠ Prédictions en labels encodés (0,1,2...) - pas de trainer fourni")
         
         logger.info(f"✓ {len(y_pred)} prédictions générées")
         
@@ -256,7 +264,8 @@ class ModelEvaluationPipeline:
         model: Any,
         X: np.ndarray,
         y_true: Optional[np.ndarray] = None,
-        dataset_name: str = "validation"
+        dataset_name: str = "validation",
+        trainer: Any = None
     ) -> Dict[str, Any]:
         """
         Exécute le pipeline d'évaluation complet.
@@ -266,6 +275,7 @@ class ModelEvaluationPipeline:
             X: Features transformées
             y_true: Labels réels (optionnel pour test)
             dataset_name: Nom du dataset
+            trainer: ModelTrainer (optionnel, pour décodage des prédictions)
             
         Returns:
             Dictionnaire des résultats
@@ -275,7 +285,7 @@ class ModelEvaluationPipeline:
             # ========================================
             # 1. Générer les prédictions
             # ========================================
-            y_pred = self.generate_predictions(model, X, dataset_name)
+            y_pred = self.generate_predictions(model, X, dataset_name, trainer)
             
             self.results["predictions"] = y_pred
             self.results["dataset_name"] = dataset_name

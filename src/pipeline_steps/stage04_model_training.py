@@ -3,7 +3,6 @@
 ==================================================
 
 Cette étape entraîne le modèle sur les données transformées.
-Elle correspond à la stage04 du projet wine_quality.
 
 Responsabilités :
 - Créer le modèle selon la configuration
@@ -157,6 +156,7 @@ class ModelTrainingPipeline:
         full_pipeline = {
             "feature_pipeline": feature_pipeline,
             "model": model,
+            "label_encoder": self.trainer.label_encoder,
             "config": {
                 "model_name": self.config.model["name"],
                 "random_seed": self.config.random_seed,
