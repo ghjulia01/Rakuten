@@ -1,317 +1,276 @@
 # ============================
-# CONFIGURATION POUR train_model.py
+# CONFIGURATION RAKUTEN 
 # ============================
-# Ce fichier centralise tous les paramètres nécessaires pour entraîner et tester
-# le pipeline texte+image Rakuten avec rééquilibrage et choix du modèle.
-# Avantage : aucun besoin de modifier le code Python pour changer un réglage.
 
-# --- Chemins des fichiers CSV d'entrée ---
+# ========================================
+# CHEMINS
+# ========================================
 [paths]
-# Jeu d'entraînement (variables explicatives)
+# Données CSV
 x_train_csv = "data/raw/X_train_update.csv"
-# Étiquettes de classes associées à X_train
 y_train_csv = "data/raw/Y_train_CVw08PX.csv"
-# Jeu de test (variables explicatives, sans labels)
 x_test_csv  = "data/raw/X_test_update.csv"
 
-# --- Chemins de sortie ---
+# Images (renommé pour clarté)
+image_train_dir = "data/images/images/image_train"
+image_test_dir  = "data/images/images/image_test"
+
+# ========================================
+# SORTIES
+# ========================================
 [outputs]
-# Fichier .joblib pour sauvegarder le pipeline entraîné
 model_out = "artifacts/model_{kind}_{phase}.joblib"
-# Fichier CSV contenant les prédictions sur X_test
 pred_out  = "results/preds_{kind}_{phase}.csv"
-# Fichier CSV des résultats de comparaison LR vs SVC
 compare_out = "models/compare_cv_results.csv"
-export_features = true
 oof_out   = "results/preds_oof_{kind}.csv"
-svd_preview_b4  = "results/features_b4_svd100_preview.csv" 
-# Dropbox: choisir le repertoire local ou mettre les logs pour ne pas créer de latence avec la synchronisation
-log_dir = "C:/Users/colle/Desktop/rakuten-logs"   # utilisé pour le cache sklearn & le cache HF
+svd_preview_b4  = "results/features_b4_svd100_preview.csv"
 summary_csv = "results/baseline_results_summary.csv"
 
+# Logs et cache
+log_dir = "C:/Users/colle/Desktop/rakuten-logs"
 
+# Export features intermédiaires
+export_features = true
+
+# ========================================
+# REPRODUCTIBILITÉ
+# ========================================
 [random]
-# Fixer la reproductibilité (semences aléatoires)
 seed = 42
 
+# ========================================
+# COMPUTE
+# ========================================
 [compute]
-# Fixer le parallélisme (mettre 1 pour un debug plus lisible)
-# Utiliser plusieurs jobs en production si la machine le permet
-n_jobs = 2      # 1 pour éviter la parallélisation au moment du hstack
+n_jobs = 2  # Parallélisme
 use_cache = true
 cache_verbose = 3
 
+# ========================================
+# DEBUG
+# ========================================
 [debug]
-# Active les logs détaillés de processing
 verbose_pipeline = true
-# Sauvegarde les features intermédiaires pour inspection
 save_intermediate_features = true
-# Affiche les statistiques détaillées
 show_feature_stats = true
-# Limite pour les exemples de debug (éviter trop de sortie)
 debug_sample_size = 5
 
-# --- Réglages branche texte
-[text]
-max_features = 60000  # monter à 100000 si l'ordi le permet
+# ========================================
+# SHAP
+# ========================================
+[explainability]
+enable_shap = true
+samples = 10000       # max
+use_svd_features = false  # IMPORTANT: shap sur les tfidf bruts
+save_dir = "results/shap"
+
+# ========================================
+# FEATURES TEXTE
+# ========================================
+[features.text]
+max_features = 40000
 ngram_min = 1
 ngram_max = 2
-min_df = 5      # valeurs “prod” 2, valeurs “test” 0,
-max_df = 0.95   # valeurs “prod” 0.95, valeurs “test” 1.0,
+min_df = 5
+max_df = 0.95
 sublinear_tf = true
 norm = "l2"
 strip_accents = "unicode"
-# si fichier de traduction :
-translate_map_path = "config/translate_map_starter_from_cleaned.json"
 
+# Nettoyage
+translate_map_path = "config/translate_map_starter_from_cleaned.json"
 use_stem = true
 clean_special = true
 handle_emojis = true
 remove_numbers = false
 use_lemmatization = false
 
-# Active/désactive les features additionnelles
+# Features additionnelles
 use_text_stats = true
-use_text_stats_pro   = true    
-use_language_detection = false      #couteux en calcul
+use_text_stats_pro = true
+use_language_detection = false  # Coûteux
 
-[text.lexicon]       # bloc chi2
+# --- Lexiques (chi2) ---
+[features.text.lexicon]
 enabled = true
-top_k   = 80
-min_df  = 3
-max_df  = 0.98
+top_k = 80
+min_df = 3
+max_df = 0.98
 
-# -->  "char"
-[text.char]
-enabled   = true
-analyzer  = "char_wb"   # "char" ou "char_wb" (char_wb = au niveau des mots, plus robuste au bruit)
+# --- TF-IDF Char ---
+[features.text.char]
+enabled = true
+analyzer = "char_wb"
 ngram_min = 2
-ngram_max = 5
-min_df    = 5
-max_df    = 0.95
-sublinear_tf = true
-# strip_accents = null     # inutile pour char, laisser null
+ngram_max = 3
+min_df = 5
+max_df = 0.95
+sublinear_tf = True
 
-# Pondération des branches (optionnel mais utile pour stabiliser)
-[text.weights]
+# --- Pondération branches texte ---
+[features.text.weights]
 tfidf_word = 1.0
-tfidf_char = 0.8
-has_desc   = 0.2
-title_len  = 0.2
-text_stats = 0.25    # pris en compte si use_text_stats=true
-text_stats_pro = 0.35  # pris en compte si use_text_stats_pro=true
-lexicon = 0.4         # pris en compte si [text.lexicon] enabled=true
-language   = 0         # pris en compte si use_language_detection=true SUPPRIMER / COMMENTER si la détection de langue est désactivée
+tfidf_char = 0.6
+has_desc = 0.2
+title_len = 0.1
+text_stats = 0.25
+text_stats_pro = 0.35
+lexicon = 0.6
+language = 0.0  # 0 si use_language_detection = false
 
-# [text.cleaner]
-# clean_special = true
-# handle_emojis = true
-# use_stem = true
-[text.cleaner]
-remove_numbers = true
-clean_special = true
-handle_emojis = true
-
-[text.svd]
+# --- SVD post-texte ---
+[features.text.svd]
 enabled = true
-n_components = 500      # 400–600 : 600 si on a aussi la CNN ; 400 si RAM serrée
+n_components = 500
 random_state = 42
 l2norm = true
 
-# --- Paramètres liés aux images ---
-[images]
-# Dossier contenant les images associées à X_train
-train_dir = "data/images/images/image_train"
-# Dossier contenant les images associées à X_test
-test_dir  = "data/images/images/image_test"
-# Taille cible des images avant vectorisation (hauteur, largeur)
-size = [224, 224]  # Taille des images
-batch_size = 32    # Réduire sipython -m main.train_model --compare-all OOM
-cache_enabled = true
-ext = ".jpg"
+# --- Vocab build (pour translate_map) ---
+[features.text.vocab_build]
+top_k = 20000
+max_new = 800
 
-[images.dim_reduction]
-# Activer une PCA légère pour accélérer
-# Garder une PCA (80–120) pour compresser les pixels
-enabled = false         # Si CNN activé mettre false
-method = "pca"          # "svd" ou "pca" (recommandé) ou "truncated_svd"
-n_components = 300     # 90% de variance pour PCA, ou nombre fixe pour SVD
+# ========================================
+# FEATURES IMAGES
+# ========================================
+
+# --- Pixels bruts (optionnel, désactiver si CNN) ---
+[features.image.pixels]
+enabled = false  # Mettre false si CNN activé
+size = [64, 64]  # Taille réduite
+flatten = true
+
+[features.image.pixels.pca]
+enabled = false
+n_components = 100
 random_state = 42
 
-# ---- SECTION CNN ---- Mettre true pour activer CNN et false pour le désactiver
-[images.cnn]
-enabled = false
-arch = "resnet50"               # "resnet18" | "resnet50" | "resnet101"
-batch_size = 12                 # pour Resnet 16 , je teste avec12 pour Vit
-device = "cpu"                  # "auto" | "cpu" | "cuda" | "dml" si sur amd
-use_imagenet_norm = true        # applique la normalisation standard des poids ImageNet si on mets False Si tu mets false, alors c’est un prétraitement plus basique (resize + crop + ToTensor), avec des valeurs directement dans [images] size=[224,224].
-fallback_zero = true            # si une image est manquante, on renvoie un vecteur nul plutôt qu’une erreur.
+# --- CNN ResNet/ViT ---
+[features.image.cnn]
+# IMPORTANT : Activer CNN ici
+enabled = true  # true pour utiliser CNN, false pour désactiver
+
+# Architecture
+arch = "resnet50"  # Options: "resnet18", "resnet50", "resnet101"
+
+# Chargement
+batch_size = 16  # 16-32 recommandé, réduire si OOM
+device = "auto"  # "auto", "cpu", "cuda"
+use_imagenet_norm = true
+fallback_zero = true  # Vecteur zéro si image manquante
 dtype = "float32"
-num_workers = 4                 # parallélisme pour charger les images plus vite (multi-threads en lecture disque).
-# Ajouts pour la tête et la Grad-CAM Mais attention il faut désactiver images.cnn_vit et enlever son poid
-finetune_epochs = 4             # ≥1 pour apprendre/enregistrer la tête,  nombre d’époques utilisées pour faire un mini fine-tuning supervisé (sur un sous-échantillon, limité par finetune_max_n).         
-trainable_last_n = 2            # déclenche l’unfreeze; pour ResNet on unfreeze layer4
-save_head_path = "artifacts/head_ft.pt"
-save_head_normalize = true
-ft_patience = 3                
-foreach= true                  # foreach=True mais ne fonctionne pas en dml pour ordi amd  
-# Paramètres Fine-Tuning 
-finetune_lr           = 0.0005
+num_workers = 0
+
+# Fine-tuning (optionnel)
+finetune_epochs = 5  # 0 = pas de FT, 3-5 pour FT léger
+finetune_lr = 0.0003
 finetune_weight_decay = 0.01
-finetune_max_n        = 10000
+finetune_max_n = 8000
+trainable_last_n = 0  # Défiger dernières couches
+ft_patience = 3
+label_smoothing = 0.0
 
-use_lr_finder = false  
-# Data augmentation (uniquement pendant le FT)
-aug_hflip_p       = 0.2        # flip horizontal
-aug_color_jitter  = 0.05       # léger jitter (0 = off)
-mixup_alpha       = 0.2        # 0 = off (conseil: 0.2 pour ResNet)
-cutmix_alpha      = 0.0        # 0.0 ou 0.2 (à tester)
-
-[images.cnn.dim_reduction]
-enabled = true   
-method = "truncated_svd"
-n_components = 256
-random_state = 42
-
-
-# --- Branche 2 : ViT-B/16 (HF) avec par exemple FT 2 epochs, dernier bloc défigé ---
-[images.cnn_vit]
-enabled = false
-# HuggingFace (optionnel, alternative à arch=...)
-hf_model_name = "google/vit-base-patch16-224"
-hf_feature_dim = 768        # dimension de sortie des embeddings ViT-base (standard Hugging Face pour vit-base-patch16)
-hf_revision   = "main"
-batch_size = 12
-device = "cpu"                  # "auto" | "cpu" | "cuda" | "dml" si sur amd
-finetune_epochs = 8             # commencer par 1 (rapide), puis 2-3 si utile
-trainable_last_n = 2            # interrupteur FT nb de paramètres à "défiger" (ex: 5000 à 20000) # ignoré par la branche HFignoré si ResNet est activé
-trainable_last_layers = 2       # ← nb de blocs Transformer à unfreeze (peut tester 2)
-finetune_lr = 0.0001            # learning rate du fine-tuning
-finetune_weight_decay = 0.01    # régularisation L2 appliquée aux poids
-finetune_max_n = 12000          # on limite l’échantillon utilisé pour le fine-tuning (utile pour garder un temps de calcul raisonnable)
-foreach= true                   #   
-use_lr_finder = false  
-use_fast        = true  
-ft_patience = 3        
-label_smoothing = 0.05
-
-[images.cnn_vit.aug]
-hflip_p = 0.2
-color_jitter = 0.05
-mixup_alpha = 0.1
+# Augmentation (actif pendant FT uniquement)
+aug_hflip_p = 0.2
+aug_color_jitter = 0.0
+random_resized_crop_scale = [0.9, 1.0]
+random_resized_crop_ratio = [0.95, 1.05]
+mixup_alpha = 0.0
 cutmix_alpha = 0.0
 
-[images.cnn_vit.aug.random_resized_crop]
-scale = [0.9, 1.0]
-ratio = [0.95, 1.05]
+# Grad-CAM (explicabilité)
+save_head_path = "artifacts/head_ft.pt"
+save_head_normalize = true
 
-[images.cnn_vit.dim_reduction]
-enabled = false
-n_components = 256
+# Optimisation
+foreach = true
 
+# SVD post-CNN (optionnel)
+[features.image.cnn.svd]
+enabled = false  # true pour réduire dimension après CNN
+n_components = 300
+random_state = 42
 
-# Peser la contribution texte vs image(s) sans toucher au code
-[fusion.weights]
-text  = 1
-image_pixels = 0                        # mettre 0 si image_cnn
-image_cnn = 0
-image_cnn_vit = 0           # ViT
-image_stats_combined = 0             # branche stats images
+# --- ViT (Vision Transformer, optionnel) ---
+[features.image.vit]
+enabled = false  # true pour utiliser ViT en plus/à la place de ResNet
+hf_model_name = "google/vit-base-patch16-224"
+hf_revision = "main"
+hf_feature_dim = 768
+hf_use_fast = true
+trainable_last_layers = 1
 
-# --- Statistiques des images ---
-# Features width/height/occupancy (hors blanc/noir)
-# Activer les features de stats (5 colonnes)
-
-[images.stats_combined]
-
-enabled = false
-# downscale systématique pour vitesse + robustesse
+# --- Statistiques images (optionnel) ---
+[features.image.stats]
+enabled = false  # true pour ajouter des stats basiques
 fast = true
 fast_size = 128
-entropy_bins = 128          # true = on ajoute la branche de features automatiques
-white_threshold = 230       # pixels >= 230 -> fond (blanc)
-black_threshold = 25        # pixels <= 25  -> fond (noir)
-min_area = 16               # surface min pour éviter le bruit
-out_prefix = "auto"         # préfixe des noms de features (traçabilité) avant "img_w230_b25_"
-prefix_basic = "img_"
-prefix_pro   = "pro_"
-drop_size_features = true   # supprime img_width/img_height (parasites)
-keep_bpp = false            # évite le signal compression bruité
-# seuil d'arêtes adaptatif (relatif à la plage dynamique)
+entropy_bins = 128
+white_threshold = 230
+black_threshold = 25
+min_area = 16
+drop_size_features = true
+keep_bpp = false
 adaptive_edge_thr = true
 edge_thr_min = 8.0
 edge_thr_rel = 0.12
-# décentrage : clip + puissance pour pénaliser gros offsets
 offset_power = 2.0
-offset_clip  = 1.0
-# parallélisation interne (threads)
+offset_clip = 1.0
 n_jobs = 4
 
+# ========================================
+# FUSION MULTIMODALE
+# ========================================
+[fusion.weights]
+# RÈGLE : Si features.image.cnn.enabled = true → image_cnn > 0
+text = 1.0
+image_pixels = 0.0     # 0 si CNN activé, 1.0 si pixels seuls
+image_cnn = 0.0        # 1.0 si CNN activé, 0 sinon
+image_cnn_vit = 0.0    # 1.0 si ViT activé
+image_stats = 0.0      # 0.5-1.0 si stats activées
 
-# --- Stratégies de rééchantillonnage ---
-# Paramétrer le rééchantillonnage (under adaptatif + over tail )
-# ajuster au besoin après EDA
+# ========================================
+# SAMPLING (rééquilibrage classes)
+# ========================================
 [sampling]
-# Identifiant de la classe la plus fréquente
 major_class = 2583
-# Limite maximale d'échantillons pour la classe majoritaire après undersampling
-major_cap   = 2000
-# Seuil minimum d'échantillons pour les petites classes après oversampling
-tail_min    = 1500
+major_cap = 2000
+tail_min = 1500
 
-# --- Paramètres du modèle ---
-# Choisir le modèle final (dev: LR avec saga) ; 
-# Choisir LR (saga) ou LinearSVC selon les meilleurs scores CV
-# NE PAS combiner class_weight et samplers
+# ========================================
+# MODÈLE
+# ========================================
 [data]
 n_classes = 27
 
 [model]
-name = "xgb"           # "lr" (LogisticRegression) ,"svc" (LinearSVC),"xgb" , "lgbm"
-use_class_weight = false  # si true, class_weight="balanced"
-# Pondération auto des classes
-# true  = appliquer class_weight="balanced"
-# false = class_weight=None (pas de pondération automatique des classes)
-# Option enveloppe One-vs-Rest (plutôt pour liblinear)
-ovr = false     # n’envelopper que LR/SVC
-# si ovr = true il faut garder use_class_weight = false et 
-# Continuer à rééchantillonner (under/over)
+name = "xgb"  # Options: "lr", "svc", "xgb", "lgbm"
+use_class_weight = false
+ovr = false
 
-
+# --- Logistic Regression ---
 [model.lr]
-# Hyperparamètres LR
-# "saga","lbfgs","liblinear","newton-cg","sag"
-# lbfgs, penalité: l2 / none, Multiclasse: oui (multinomial), Dense/Sparse plutôt dense et Quand l’utiliser: Rapide/stable sur features denses (ex: PCA images).
-# newton-cg, l2 / none, oui (multinomial), dense, Alternative à lbfgs sur dense; robuste.
-# sag,	l2 / none,	oui (multinomial),	plutôt sparse,	Grand jeu de données, seulement l2.
-# saga, l1, l2, elasticnet,  oui (multinomial), plutôt sparse, Le plus flexible (L1/EN, class_weight), très adapté au TF-IDF; peut nécessiter plus d’itérations.
-# liblinear, l1, l2, ovr uniquement,  sparse, Rapide sur petits/moyens problèmes; pas de multinomial “vrai”, pas d’elasticnet.
 solver = "saga"
-# la régularisation (contrôle la complexité du modèle) :
-# l2 (ridge) : rétrécir tous les coefficients → stable, quasi toujours un bon choix.
-# l1 (lasso) : pousse beaucoup de coefficients à 0 → sélection de variables (sparse), 
-# peut aider avec TF-IDF très haute dimension mais plus lent.
-# elasticnet : mélange l1 et l2 (il faut aussi l1_ratio entre 0 et 1).
 penalty = "l2"
-C = 1.0             #0.1 avant pour LR avec lbfgs
+C = 1.0
 max_iter = 4000
-tol      = 0.001
-verbose  = 0                     # 1..3 pour plus de logs
-#0 = silencieux (recommandé pour les runs normaux), 1 (ou plus) = affiche des messages d’entraînement (utile pour débugger une convergence lente).
-# Garder verbose=0 et passer à 1 seulement quand on veut diagnostiquer.
-multi_class = "auto"             # "auto","ovr","multinomial"
+tol = 0.001
+verbose = 0
+multi_class = "auto"
 fit_intercept = true
-l1_ratio = 0.0                   # utilisé si penalty="elasticnet"
+l1_ratio = 0.0
 
+# --- Linear SVC ---
 [model.svc]
 C = 1.0
 loss = "squared_hinge"
 dual = false
 penalty = "l2"
 max_iter = 4000
-tol      = 0.0005
-verbose  = 1   
+tol = 0.0005
+verbose = 1
 
+# --- XGBoost ---
 [model.xgb]
 n_estimators = 2000
 learning_rate = 0.05
@@ -320,46 +279,69 @@ subsample = 0.8
 colsample_bytree = 0.8
 reg_alpha = 0.0
 reg_lambda = 1.0
-tree_method = "hist"        # "hist" (CPU rapide), "gpu_hist" si GPU
+tree_method = "hist"
 
+# --- LightGBM ---
 [model.lgbm]
-# capacité / vitesse
 n_estimators = 1200
 learning_rate = 0.05
 num_leaves = 255
 max_depth = -1
-
-# échantillonnage par arbre (noms LightGBM)
 feature_fraction = 0.8
 bagging_fraction = 0.8
 bagging_freq = 1
-
-# régularisation & splits
 min_child_samples = 40
-reg_alpha  = 0.0
+reg_alpha = 0.0
 reg_lambda = 1.0
 min_split_gain = 0.0
 min_sum_hessian_in_leaf = 0.001
 max_bin = 511
-
-# pratique pour CSR + logs
 force_row_wise = true
 verbosity = -1
 
-
-# Paramètres pour la génération de fréquences et translate_map
-[text.vocab_build]
-top_k   = 20000            # ← nombre de tokens candidats triés par fréquence
-max_new = 800              # ← nb max de “placeholders” auto ajoutés (EN/DE)
-
-# --- Paramètres de la validation croisée ---
+# ========================================
+# VALIDATION CROISÉE
+# ========================================
 [cv]
-
-# Définir la cross-validation (peu de folds pour aller vite)
-enabled = false  # Mettre true pour activer
-splits = 3  # ou 5 par exemple
+enabled = true
+splits = 3
 shuffle = true
 random_state = 42
 
-
-
+# ========================================
+# NOTES ET RECOMMANDATIONS
+# ========================================
+# 
+# Configuration rapide (test sans FT) :
+# [features.image.cnn]
+# enabled = true
+# finetune_epochs = 0
+# [fusion.weights]
+# image_cnn = 1.0
+#
+# Configuration optimale (avec FT) :
+# [features.image.cnn]
+# enabled = true
+# finetune_epochs = 3
+# trainable_last_n = 1
+# aug_hflip_p = 0.2
+# [fusion.weights]
+# image_cnn = 1.0
+#
+# Configuration économe (ResNet18) :
+# [features.image.cnn]
+# enabled = true
+# arch = "resnet18"  # 512-d au lieu de 2048-d
+# batch_size = 16
+# [features.image.cnn.svd]
+# enabled = true
+# n_components = 100
+#
+# Configuration hybride (ResNet + ViT) :
+# [features.image.cnn]
+# enabled = true
+# [features.image.vit]
+# enabled = true
+# [fusion.weights]
+# image_cnn = 1.0
+# image_cnn_vit = 1.0

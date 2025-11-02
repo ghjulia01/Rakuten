@@ -31,6 +31,7 @@ from sklearn.pipeline import FeatureUnion
 from src.data.sampling import apply_sampling
 from src.pipelines.text_pipeline import create_text_pipeline_from_cfg
 from src.pipelines.image_pipeline import create_image_pipeline_from_cfg
+from src.features.cnn_features import CNNFeaturizer
 from src.utils.profiling import Timer
 
 logger = logging.getLogger(__name__)
