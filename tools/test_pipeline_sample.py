@@ -257,7 +257,7 @@ def main():
             logger.info(" ÉTAPE 3/5 : TRANSFORMATION")
             
             stage3 = DataTransformationPipeline(config)
-            X_train_t, y_train_t, X_test_t, feature_pipeline = stage3.run(
+            X_train_t, y_train_t, X_test_t, feature_pipeline, feature_mapping = stage3.run(
                 X_train, y_train, X_test
             )
             
@@ -346,10 +346,6 @@ def main():
         import traceback
         traceback.print_exc()
         return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 
 
 if __name__ == "__main__":
