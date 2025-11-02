@@ -103,6 +103,16 @@ def main():
         logger.info(f" Configuration chargée depuis: {args.config}")
         logger.info(f"  Modèle: {config.model['name'].upper()}")
         logger.info(f"  Random seed: {config.random_seed}")
+
+        # Override CV si demandé
+        if args.cv:
+            config.cv['enabled'] = True
+            logger.info(f"  Validation croisée: ACTIVÉE (--cv)")
+            logger.info(f"    Folds: {config.cv.get('splits', 3)}")
+        else:
+            cv_status = "ACTIVÉE" if config.get("cv.enabled", False) else "DÉSACTIVÉE"
+            logger.info(f"  Validation croisée: {cv_status}")
+
     except FileNotFoundError as e:
         logger.error(f" Fichier de configuration non trouvé: {e}")
         return 1
