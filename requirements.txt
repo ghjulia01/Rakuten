@@ -11,6 +11,7 @@ numpy==2.3.2
 pandas==2.3.1
 pillow==11.3.0
 pytest==8.4.1
+shap==0.48.0
 scikit-learn==1.6.1
 scipy==1.16.1
 squarify==0.4.3

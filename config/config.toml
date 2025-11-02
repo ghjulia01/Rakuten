@@ -123,7 +123,7 @@ language = 0.0  # 0 si use_language_detection = false
 # --- SVD post-texte ---
 [features.text.svd]
 enabled = true
-n_components = 500
+n_components = 600
 random_state = 42
 l2norm = true
 
@@ -237,7 +237,7 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 [sampling]
 major_class = 2583
 major_cap = 2000
-tail_min = 0        
+tail_min = 1500        
 
 # ========================================
 # MODÈLE
@@ -247,7 +247,7 @@ n_classes = 27
 
 [model]
 name = "xgb"  # Options: "lr", "svc", "xgb", "lgbm"
-use_class_weight = false
+use_class_weight = false    # si XGB c'est preferable de mettre false
 ovr = false
 
 # --- Logistic Regression ---
@@ -282,6 +282,7 @@ colsample_bytree = 0.8
 reg_alpha = 0.0
 reg_lambda = 1.0
 tree_method = "hist"
+verbosity = 2            #0=silent, 1=warning, 2=info, 3=debug
 
 # --- LightGBM ---
 [model.lgbm]
