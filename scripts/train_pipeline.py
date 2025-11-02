@@ -161,7 +161,7 @@ def main():
             logger.info(" ÉTAPE 3/5 : TRANSFORMATION DES DONNÉES")
             logger.info(f"   → Rééchantillonnage + Construction features")
             stage3 = DataTransformationPipeline(config)
-            X_train_t, y_train_t, X_test_t, feature_pipeline = stage3.run(
+            X_train_t, y_train_t, X_test_t, feature_pipeline, feature_mapping = stage3.run(
                 X_train, y_train, X_test
             )
             logger.info(f" Transformé : {X_train_t.shape[0]} train → {X_train_t.shape[1]} features")
@@ -189,7 +189,9 @@ def main():
                 train_results = stage5.run(
                     model, X_train_t, y_train_t, 
                     dataset_name="train",
-                    trainer=stage4.trainer  # IMPORTANT : pour décodage
+                    trainer=stage4.trainer,  # IMPORTANT : pour décodage
+                    feature_mapping=feature_mapping, # passe le mapping
+                    feature_pipeline=feature_pipeline  # pour SHAP
                 )
             
             # Prédictions sur test (pas de labels)
@@ -197,7 +199,9 @@ def main():
             test_results = stage5.run(
                 model, X_test_t, y_true=None,
                 dataset_name="test",
-                trainer=stage4.trainer  # pour décodage
+                trainer=stage4.trainer,  # pour décodage
+                feature_mapping=feature_mapping, # passe le mapping
+                feature_pipeline=feature_pipeline  # pour SHAP
             )
             logger.info(f" Prédictions générées: {len(test_results['predictions'])} échantillons")
         
