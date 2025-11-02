@@ -5,7 +5,8 @@ Ce module gère l'ensemble du traitement textuel :
 1. Nettoyage et normalisation du texte
 2. Vectorisation TF-IDF (mots et caractères)
 3. Features additionnelles (statistiques, langue, etc.)
-4. Combinaison pondérée des différentes features
+4. Réduction dimensionnelle SVD (optionnelle)
+5. Combinaison pondérée des différentes features
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ from typing import Optional, Dict, Any, List, Tuple
 
 
 import numpy as np
-from sklearn.pipeline import make_pipeline, FeatureUnion
+from sklearn.pipeline import make_pipeline, FeatureUnion, Pipeline
+from sklearn.decomposition import TruncatedSVD
+from sklearn.preprocessing import Normalizer
 
 from src.features.text.cleaner import TextCleaner, HasDescriptionFlag, DesignationLength
 from src.features.text.vectorizer import TextTfidfVectorizer
@@ -191,8 +194,15 @@ def create_text_pipeline(
         ))
 
     return FeatureUnion(transformers)
+
+
 @profile_func
-def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
+def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Pipeline:
+    """
+    Construit le pipeline texte depuis la config avec SVD optionnelle.
+    
+    Ajoute automatiquement la réduction SVD si activée dans config.
+    """
     tmap_path = cfg_text.get("translate_map_path", None)
     n_map = len(_load_translate_map(tmap_path)) if tmap_path else 0
     logger.info(
@@ -281,4 +291,32 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> FeatureUnion:
         word_branch.set_params(transformer_weights=inner_weights)
 
     # Construire le FeatureUnion top-level avec les poids filtrés
-    return FeatureUnion(transformers, transformer_weights=(top_weights or None))
+    feature_union = FeatureUnion(transformers, transformer_weights=(top_weights or None))
+    
+    # ========================================
+    # 4) Appliquer SVD si activée
+    # ========================================
+    svd_cfg = cfg_text.get("svd", {})
+    svd_enabled = bool(svd_cfg.get("enabled", False))
+    
+    if svd_enabled:
+        n_components = int(svd_cfg.get("n_components", 500))
+        random_state = int(svd_cfg.get("random_state", 42))
+        l2norm = bool(svd_cfg.get("l2norm", True))
+        
+        logger.info(f" Ajout de la réduction SVD (n_components={n_components})")
+        
+        # Créer le pipeline avec SVD
+        steps = [
+            ("features", feature_union),
+            ("svd", TruncatedSVD(n_components=n_components, random_state=random_state))
+        ]
+        
+        if l2norm:
+            steps.append(("l2norm", Normalizer(copy=False)))
+            logger.info(f"   + Normalisation L2")
+        
+        return Pipeline(steps)
+    else:
+        # Pas de SVD, retourner juste le FeatureUnion dans un Pipeline
+        return Pipeline([("features", feature_union)])
