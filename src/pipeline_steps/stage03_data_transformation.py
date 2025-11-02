@@ -267,6 +267,7 @@ class DataTransformationPipeline:
             # ========================================
             X_train_transformed, X_test_transformed = self.transform_data(
                 X_train_resampled,
+                y_train_resampled,
                 X_test,
                 self.feature_pipeline
             )
