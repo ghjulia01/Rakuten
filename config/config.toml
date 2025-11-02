@@ -105,7 +105,7 @@ ngram_min = 2
 ngram_max = 3
 min_df = 5
 max_df = 0.95
-sublinear_tf = True
+sublinear_tf = true
 
 # --- Pondération branches texte ---
 [features.text.weights]
