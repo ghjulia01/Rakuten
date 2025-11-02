@@ -297,13 +297,13 @@ class ModelTrainer:
         logger.info(f"Chargement du modèle depuis: {model_path}")
         loaded = joblib.load(model_path)
         
-        # Nouveau format : dict avec model + label_encoder
+        # dict avec model + label_encoder
         if isinstance(loaded, dict) and 'model' in loaded:
-            logger.info("✓ Modèle + LabelEncoder chargés")
+            logger.info("Modèle + LabelEncoder chargés")
             return loaded
         else:
-            # Ancien format : juste le modèle
-            logger.warning("⚠ Ancien format détecté (sans LabelEncoder)")
+            # Juste le modèle
+            logger.warning("Ancien format détecté (sans LabelEncoder)")
             return loaded
 
 
@@ -350,5 +350,5 @@ if __name__ == "__main__":
     # Recharger
     loaded_model = ModelTrainer.load_model("/tmp/test_model.joblib")
     
-    print("\n✓ Démonstration terminée")
+    print("\n Démonstration terminée")
     print("="*70 + "\n")
