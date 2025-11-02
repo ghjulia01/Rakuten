@@ -1,14 +1,14 @@
 """
-Étape 4 : Entraînement du modèle (Model Training).
+Etape 4 : Entrainement du modele (Model Training).
 ==================================================
 
-Cette étape entraîne le modèle sur les données transformées.
+Cette etape entraine le modele sur les donnees transformees.
 
-
-Responsabilités :
-- Créer le modèle selon la configuration
-- Entraîner sur les données transformées
-- Sauvegarder le modèle et le pipeline de features
+Responsabilites :
+- Creer le modele selon la configuration
+- Entrainer sur les donnees transformees avec barre de progression
+- Validation croisee avec affichage des folds
+- Sauvegarder le modele et le pipeline de features
 
 Utilisation:
     from src.pipeline_steps.stage04_model_training import ModelTrainingPipeline
@@ -25,25 +25,26 @@ from typing import Any
 
 import numpy as np
 import joblib
+from tqdm import tqdm
 
 from src.models.model_trainer import ModelTrainer
 from src.utils.profiling import Timer
-from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.metrics import make_scorer, f1_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import f1_score
 
 logger = logging.getLogger(__name__)
 
 
 class ModelTrainingPipeline:
     """
-    Pipeline d'entraînement du modèle.
+    Pipeline d'entrainement du modele.
     
-    Entraîne le modèle final sur les données transformées.
+    Entraine le modele final sur les donnees transformees avec progression.
     
     Attributes:
-        config: Configuration complète du projet
+        config: Configuration complete du projet
         trainer: Instance de ModelTrainer
-        model: Modèle entraîné (après run)
+        model: Modele entraine (apres run)
         
     Exemple:
         >>> from src.utils.config import load_config
@@ -54,17 +55,17 @@ class ModelTrainingPipeline:
     
     def __init__(self, config):
         """
-        Initialise le pipeline d'entraînement.
+        Initialise le pipeline d'entrainement.
         
         Args:
-            config: Objet Config contenant tous les paramètres
+            config: Objet Config contenant tous les parametres
         """
         self.config = config
         self.trainer = None
         self.model = None
         
         logger.info("=" * 70)
-        logger.info("ÉTAPE 4 : ENTRAÎNEMENT DU MODÈLE")
+        logger.info("ETAPE 4 : ENTRAINEMENT DU MODELE")
         logger.info("=" * 70)
     
     def train_model(
@@ -73,25 +74,25 @@ class ModelTrainingPipeline:
         y_train: np.ndarray
     ) -> Any:
         """
-        Entraîne le modèle sur les données.
+        Entraine le modele sur les donnees.
         
         Args:
-            X_train: Features transformées (n_samples, n_features)
+            X_train: Features transformees (n_samples, n_features)
             y_train: Labels (n_samples,)
             
         Returns:
-            Modèle entraîné
+            Modele entraine
         """
-        logger.info("\n--- Entraînement du modèle ---")
+        logger.info("\n--- Entrainement du modele ---")
         
-        # Créer le trainer
+        # Creer le trainer
         self.trainer = ModelTrainer(
             model_config=self.config.model,
             random_state=self.config.random_seed
         )
         
-        # Informations sur les données
-        logger.info(f"Données d'entraînement: {X_train.shape}")
+        # Informations sur les donnees
+        logger.info(f"Donnees d'entrainement: {X_train.shape}")
         logger.info(f"Labels: {y_train.shape}")
         logger.info(f"Nombre de classes: {len(np.unique(y_train))}")
         
@@ -99,27 +100,28 @@ class ModelTrainingPipeline:
         if hasattr(X_train, 'nnz'):
             logger.info(f"Matrice sparse - nnz: {X_train.nnz}")
             density = X_train.nnz / np.prod(X_train.shape)
-            logger.info(f"Densité: {density:.4f} ({density*100:.2f}%)")
+            logger.info(f"Densite: {density:.4f} ({density*100:.2f}%)")
         else:
             logger.info("Matrice dense")
         
         # ========================================
-        # VALIDATION CROISÉE (si activée)
+        # VALIDATION CROISEE (si activee)
         # ========================================
         if self.config.get("cv.enabled", False):
-            logger.info("\n--- Validation croisée ---")
+            logger.info("\n--- Validation croisee ---")
             cv_scores = self.perform_cross_validation(X_train, y_train)
             
-            logger.info(f"CV F1 (weighted) - Moyenne: {cv_scores['mean']:.4f} (+/- {cv_scores['std']:.4f})")
+            logger.info(f"\nCV F1 (weighted) - Moyenne: {cv_scores['mean']:.4f} (+/- {cv_scores['std']:.4f})")
             logger.info(f"CV F1 (weighted) - Scores: {cv_scores['scores']}")
         
         # ========================================
-        # ENTRAÎNEMENT FINAL
+        # ENTRAINEMENT FINAL
         # ========================================
-        with Timer(f"Entraînement {self.config.model['name'].upper()}"):
+        model_name = self.config.model['name'].upper()
+        with Timer(f"Entrainement {model_name}"):
             self.model = self.trainer.train(X_train, y_train)
         
-        logger.info(" Entraînement terminé")
+        logger.info("[OK] Entrainement termine")
         
         return self.model
     
@@ -129,7 +131,7 @@ class ModelTrainingPipeline:
         y: np.ndarray
     ) -> dict:
         """
-        Effectue une validation croisée stratifiée.
+        Effectue une validation croisee stratifiee avec barre de progression.
         
         Args:
             X: Features
@@ -138,39 +140,83 @@ class ModelTrainingPipeline:
         Returns:
             Dict avec scores, mean, std
         """
-        # Paramètres CV depuis config
+        # Parametres CV depuis config
         n_splits = self.config.get("cv.splits", 3)
         shuffle = self.config.get("cv.shuffle", True)
         cv_random_state = self.config.get("cv.random_state", self.config.random_seed)
+        show_progress = self.config.get("cv.show_progress", True)
         
-        logger.info(f"Paramètres CV: {n_splits} folds, shuffle={shuffle}, random_state={cv_random_state}")
+        logger.info(f"Parametres CV: {n_splits} folds, shuffle={shuffle}, random_state={cv_random_state}")
         
-        # Créer le StratifiedKFold
+        # Creer le StratifiedKFold
         skf = StratifiedKFold(
             n_splits=n_splits,
             shuffle=shuffle,
             random_state=cv_random_state
         )
         
-        # Créer un modèle temporaire (non entraîné)
-        temp_model = self.trainer.create_model()
-        
-        # Scorer F1 weighted
-        f1_scorer = make_scorer(f1_score, average='weighted')
-        
-        # Effectuer la CV
-        # Utiliser y encodés pour XGBoost
+        # Encoder y pour sklearn
         y_encoded = self.trainer.label_encoder.fit_transform(y)
         
-        with Timer("Validation croisée"):
-            cv_scores = cross_val_score(
-                temp_model,
-                X,
-                y_encoded,  
-                cv=skf,
-                scoring=f1_scorer,
-                n_jobs=-1  
-            )
+        # Liste pour stocker les scores
+        cv_scores = []
+        
+        # ========================================
+        # Boucle de CV avec progression
+        # ========================================
+        with Timer("Validation croisee"):
+            # Creer l'iterateur avec ou sans tqdm
+            if show_progress:
+                fold_iterator = enumerate(
+                    tqdm(
+                        skf.split(X, y_encoded),
+                        total=n_splits,
+                        desc="Cross-validation",
+                        unit="fold",
+                        ncols=80
+                    ),
+                    start=1
+                )
+            else:
+                fold_iterator = enumerate(skf.split(X, y_encoded), start=1)
+            
+            # Boucle sur les folds
+            for fold_idx, (train_idx, val_idx) in fold_iterator:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"FOLD {fold_idx}/{n_splits}")
+                logger.info(f"{'='*60}")
+                logger.info(f"Train: {len(train_idx)} echantillons")
+                logger.info(f"Val: {len(val_idx)} echantillons")
+                
+                # Splitter les donnees
+                X_train_fold = X[train_idx]
+                y_train_fold = y_encoded[train_idx]
+                X_val_fold = X[val_idx]
+                y_val_fold = y_encoded[val_idx]
+                
+                # Creer un modele pour ce fold
+                fold_model = self.trainer.create_model()
+                
+                # Entrainer
+                logger.info("Entrainement du fold...")
+                
+                # Afficher la progression pour XGBoost/LightGBM
+                if self.config.model['name'] in ['xgb', 'lgbm']:
+                    # XGBoost et LightGBM ont un verbose integre
+                    fold_model.set_params(verbose=False)  # On gere nous-memes
+                
+                fold_model.fit(X_train_fold, y_train_fold)
+                
+                # Predire sur validation
+                y_pred = fold_model.predict(X_val_fold)
+                
+                # Calculer F1
+                score = f1_score(y_val_fold, y_pred, average='weighted')
+                cv_scores.append(score)
+                
+                logger.info(f"F1 Score (fold {fold_idx}): {score:.4f}")
+        
+        cv_scores = np.array(cv_scores)
         
         return {
             'scores': [float(s) for s in cv_scores],
@@ -184,22 +230,22 @@ class ModelTrainingPipeline:
         output_path: str
     ) -> None:
         """
-        Sauvegarde le modèle.
+        Sauvegarde le modele.
         
         Args:
-            model: Modèle entraîné
+            model: Modele entraine
             output_path: Chemin de sauvegarde
         """
-        logger.info("\n--- Sauvegarde du modèle ---")
+        logger.info("\n--- Sauvegarde du modele ---")
         
-        # Créer le dossier parent si nécessaire
+        # Creer le dossier parent si necessaire
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Sauvegarder
         self.trainer.save_model(model, str(output_path))
         
-        logger.info(f"✓ Modèle sauvegardé: {output_path}")
+        logger.info(f"[OK] Modele sauvegarde: {output_path}")
     
     def save_full_pipeline(
         self,
@@ -208,12 +254,12 @@ class ModelTrainingPipeline:
         output_path: str
     ) -> None:
         """
-        Sauvegarde le pipeline complet (features + modèle).
+        Sauvegarde le pipeline complet (features + modele).
         
-        Utile pour la prédiction : on peut charger tout d'un coup.
+        Utile pour la prediction : on peut charger tout d'un coup.
         
         Args:
-            model: Modèle entraîné
+            model: Modele entraine
             feature_pipeline: Pipeline de features (sklearn)
             output_path: Chemin de sauvegarde
         """
@@ -222,7 +268,7 @@ class ModelTrainingPipeline:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Créer un dict avec tout
+        # Creer un dict avec tout
         full_pipeline = {
             "feature_pipeline": feature_pipeline,
             "model": model,
@@ -237,7 +283,7 @@ class ModelTrainingPipeline:
         joblib.dump(full_pipeline, output_path)
         
         size_mb = output_path.stat().st_size / (1024 * 1024)
-        logger.info(f" Pipeline complet sauvegardé: {output_path}")
+        logger.info(f"[OK] Pipeline complet sauvegarde: {output_path}")
         logger.info(f"  Taille: {size_mb:.2f} MB")
     
     def run(
@@ -247,25 +293,25 @@ class ModelTrainingPipeline:
         feature_pipeline: Any = None
     ) -> Any:
         """
-        Exécute le pipeline d'entraînement complet.
+        Execute le pipeline d'entrainement complet.
         
         Args:
-            X_train: Features transformées
+            X_train: Features transformees
             y_train: Labels
-            feature_pipeline: Pipeline de features (optionnel, pour sauvegarde complète)
+            feature_pipeline: Pipeline de features (optionnel, pour sauvegarde complete)
             
         Returns:
-            Modèle entraîné
+            Modele entraine
         """
-        with Timer("Entraînement du modèle"):
+        with Timer("Entrainement du modele"):
             
             # ========================================
-            # 1. Entraîner le modèle
+            # 1. Entrainer le modele
             # ========================================
             self.model = self.train_model(X_train, y_train)
             
             # ========================================
-            # 2. Sauvegarder le modèle seul
+            # 2. Sauvegarder le modele seul
             # ========================================
             model_path = self.config.paths.get("model_out", "models/model.joblib")
             
@@ -288,16 +334,16 @@ class ModelTrainingPipeline:
                 )
             
             # ========================================
-            # 4. Résumé final
+            # 4. Resume final
             # ========================================
             logger.info("\n" + "=" * 70)
-            logger.info("RÉSUMÉ DE L'ENTRAÎNEMENT")
+            logger.info("RESUME DE L'ENTRAINEMENT")
             logger.info("=" * 70)
-            logger.info(f" Modèle: {self.config.model['name'].upper()}")
-            logger.info(f" Données: {X_train.shape}")
-            logger.info(f" Sauvegardé: {model_path}")
+            logger.info(f"[OK] Modele: {self.config.model['name'].upper()}")
+            logger.info(f"[OK] Donnees: {X_train.shape}")
+            logger.info(f"[OK] Sauvegarde: {model_path}")
             if feature_pipeline is not None:
-                logger.info(f" Pipeline complet: {full_pipeline_path}")
+                logger.info(f"[OK] Pipeline complet: {full_pipeline_path}")
             logger.info("=" * 70 + "\n")
             
             return self.model
@@ -333,11 +379,11 @@ if __name__ == "__main__":
         validation_ok = stage2.run(X_train, y_train, X_test)
         
         if not validation_ok:
-            print("\n Validation échouée - arrêt du pipeline")
+            print("\n[ERROR] Validation echouee - arret du pipeline")
         else:
             # Stage 3: Transformation
             stage3 = DataTransformationPipeline(config)
-            X_train_t, y_train_t, X_test_t, feature_pipeline = stage3.run(
+            X_train_t, y_train_t, X_test_t, feature_pipeline, feature_mapping = stage3.run(
                 X_train, y_train, X_test
             )
             
@@ -345,14 +391,42 @@ if __name__ == "__main__":
             stage4 = ModelTrainingPipeline(config)
             model = stage4.run(X_train_t, y_train_t, feature_pipeline)
             
-            print("\n Entraînement terminé avec succès!")
-            print(f"  Modèle: {type(model).__name__}")
-            print(f"  Sauvegardé dans: models/")
+            print("\n[OK] Entrainement termine avec succes!")
+            print(f"  Modele: {type(model).__name__}")
+            print(f"  Sauvegarde dans: models/")
         
     except FileNotFoundError as e:
-        print(f"\n Erreur: {e}")
+        print(f"\n[ERROR] Erreur: {e}")
         print("Assurez-vous que les fichiers CSV existent dans data/raw/")
     except Exception as e:
-        print(f"\n Erreur inattendue: {e}")
+        print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

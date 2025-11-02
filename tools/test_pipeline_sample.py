@@ -225,14 +225,14 @@ def main():
             # 🔬 ÉCHANTILLONNAGE
             logger.info(f"\n Échantillonnage à {args.sample_size} lignes...")
             sample_size_train = min(args.sample_size, len(X_train))
-            sample_size_test = min(args.sample_size // 5, len(X_test))  # 20% pour test
+            sample_size_test = min(args.sample_size // 5, X_test.shape[0])  # 20% pour test
             
             X_train = X_train.sample(n=sample_size_train, random_state=42)
             y_train = y_train.loc[X_train.index]
             X_test = X_test.sample(n=sample_size_test, random_state=42)
             
             logger.info(f" Échantillon train: {len(X_train)} lignes")
-            logger.info(f" Échantillon test: {len(X_test)} lignes")
+            logger.info(f" Échantillon test: {X_test.shape[0]} lignes")
             
             # ========================================
             # ÉTAPE 2 : Data Validation
@@ -293,7 +293,7 @@ def main():
             stage5 = ModelEvaluationPipeline(config)
             
             # Évaluation sur train
-            logger.info(f"\n Évaluation sur train ({len(X_train_t)} échantillons)...")
+            logger.info(f"\n Évaluation sur train ({X_train_t.shape[0]} échantillons)...")
             train_results = stage5.run(
                 model, X_train_t, y_train_t,
                 dataset_name="train_sample",
@@ -301,7 +301,7 @@ def main():
             )
             
             # Prédictions sur test
-            logger.info(f"\n Prédictions sur test ({len(X_test_t)} échantillons)...")
+            logger.info(f"\n Prédictions sur test ({X_test_t.shape[0]} échantillons)...")
             test_results = stage5.run(
                 model, X_test_t, y_true=None,
                 dataset_name="test_sample",
@@ -314,8 +314,8 @@ def main():
             logger.info("\n" + "=" * 70)
             logger.info(" TEST TERMINÉ AVEC SUCCÈS !")
             logger.info("=" * 70)
-            logger.info(f" Échantillon train: {len(X_train)} → {len(X_train_t)} lignes")
-            logger.info(f" Échantillon test: {len(X_test)} → {len(X_test_t)} lignes")
+            logger.info(f" Échantillon train: {len(X_train)} → {X_train_t.shape[0]} lignes")
+            logger.info(f" Échantillon test: {X_test.shape[0]} → {X_test_t.shape[0]} lignes")
             logger.info(f" Features: {X_train_t.shape[1]} colonnes")
             logger.info(f" Modèle: {config.model['name'].upper()}")
             

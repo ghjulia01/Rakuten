@@ -9,12 +9,13 @@ Responsabilites :
 - Construction des pipelines de features (texte + image + CNN)
 - Fusion ponderee des branches
 - Transformation des donnees train et test
+- Creation du mapping des features pour SHAP decompose
 
 Utilisation:
     from src.pipeline_steps.stage03_data_transformation import DataTransformationPipeline
     
     pipeline = DataTransformationPipeline(config)
-    X_train_t, y_train_t, X_test_t, feature_pipeline = pipeline.run(
+    X_train_t, y_train_t, X_test_t, feature_pipeline, feature_mapping = pipeline.run(
         X_train, y_train, X_test
     )
 
@@ -22,7 +23,7 @@ Utilisation:
 from __future__ import annotations
 
 import logging
-from typing import Tuple, Any
+from typing import Tuple, Any, Dict
 
 import pandas as pd
 import numpy as np
@@ -46,12 +47,13 @@ class DataTransformationPipeline:
     Attributes:
         config: Configuration complete du projet
         feature_pipeline: Pipeline sklearn de features (apres fit)
+        feature_mapping: Mapping des ranges de colonnes par composante
         
     Exemple:
         >>> from src.utils.config import load_config
         >>> config = load_config()
         >>> pipeline = DataTransformationPipeline(config)
-        >>> X_train_t, y_train_t, X_test_t, pipe = pipeline.run(
+        >>> X_train_t, y_train_t, X_test_t, pipe, mapping = pipeline.run(
         ...     X_train, y_train, X_test
         ... )
     """
@@ -65,6 +67,8 @@ class DataTransformationPipeline:
         """
         self.config = config
         self.feature_pipeline = None
+        self.feature_mapping = {}
+        self._original_X_train = None  # Pour creer le mapping
         
         logger.info("=" * 70)
         logger.info("ETAPE 3 : TRANSFORMATION DES DONNEES")
@@ -264,6 +268,78 @@ class DataTransformationPipeline:
         
         return feature_pipeline
     
+    def create_feature_mapping(
+        self,
+        X_transformed: np.ndarray
+    ) -> Dict[str, Tuple[int, int]]:
+        """
+        Cree un mapping des ranges de colonnes pour chaque transformateur.
+        
+        Ceci est essentiel pour l'analyse SHAP decomposee par composante.
+        
+        Args:
+            X_transformed: Matrice de features transformees
+            
+        Returns:
+            Dict avec ranges : {'text': (0, 15000), 'image_cnn': (15000, 17048), ...}
+        """
+        logger.info("\n--- Creation du mapping des features ---")
+        
+        mapping = {}
+        start_idx = 0
+        
+        # Parcourir les transformateurs du FeatureUnion
+        for name, transformer in self.feature_pipeline.transformer_list:
+            try:
+                # Methode 1 : get_feature_names_out (sklearn >= 1.0)
+                if hasattr(transformer, 'get_feature_names_out'):
+                    feature_names = transformer.get_feature_names_out()
+                    n_features = len(feature_names)
+                
+                # Methode 2 : Transformer un echantillon
+                elif hasattr(transformer, 'transform') and self._original_X_train is not None:
+                    sample = self._original_X_train.iloc[:1]
+                    transformed = transformer.transform(sample)
+                    
+                    if hasattr(transformed, 'shape'):
+                        n_features = transformed.shape[1]
+                    else:
+                        n_features = 1
+                
+                # Methode 3 : Par defaut
+                else:
+                    n_features = 1
+                    logger.warning(f"  Impossible de determiner n_features pour {name}, utilisation de 1")
+                
+                end_idx = start_idx + n_features
+                mapping[name] = (start_idx, end_idx)
+                
+                logger.info(f"  {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
+                
+                start_idx = end_idx
+                
+            except Exception as e:
+                logger.error(f"  Erreur lors du mapping de {name}: {e}")
+                # Utiliser la shape totale comme fallback
+                if start_idx < X_transformed.shape[1]:
+                    end_idx = X_transformed.shape[1]
+                    mapping[name] = (start_idx, end_idx)
+                    n_features = end_idx - start_idx
+                    logger.warning(f"  Fallback pour {name}: ({start_idx}, {end_idx}) - {n_features} features")
+                    start_idx = end_idx
+        
+        # Verification finale
+        total_mapped = sum(end - start for start, end in mapping.values())
+        if total_mapped != X_transformed.shape[1]:
+            logger.warning(
+                f"  ATTENTION: Mapping incomplet ! "
+                f"Total mappe: {total_mapped}, attendu: {X_transformed.shape[1]}"
+            )
+        else:
+            logger.info(f"[OK] Mapping complet: {total_mapped} features")
+        
+        return mapping
+    
     def transform_data(
         self,
         X_train: pd.DataFrame,
@@ -286,6 +362,9 @@ class DataTransformationPipeline:
         logger.info("\n--- Transformation des donnees ---")
         logger.info(f"[INFO] Train: {len(X_train)} echantillons a transformer")
         logger.info(f"[INFO] Test: {len(X_test)} echantillons a transformer")
+        
+        # Sauvegarder X_train pour le mapping
+        self._original_X_train = X_train.copy()
         
         # ========================================
         # Fit + Transform sur train
@@ -319,7 +398,7 @@ class DataTransformationPipeline:
         X_train: pd.DataFrame,
         y_train: pd.Series,
         X_test: pd.DataFrame
-    ) -> Tuple[np.ndarray, pd.Series, np.ndarray, FeatureUnion]:
+    ) -> Tuple[np.ndarray, pd.Series, np.ndarray, FeatureUnion, Dict[str, Tuple[int, int]]]:
         """
         Execute le pipeline de transformation complet.
         
@@ -330,7 +409,7 @@ class DataTransformationPipeline:
             
         Returns:
             Tuple (X_train_transformed, y_train_resampled, 
-                   X_test_transformed, feature_pipeline)
+                   X_test_transformed, feature_pipeline, feature_mapping)
         """
         with Timer("Transformation des donnees"):
             
@@ -357,7 +436,12 @@ class DataTransformationPipeline:
             )
             
             # ========================================
-            # 4. Resume final
+            # 4. Creation du mapping des features
+            # ========================================
+            self.feature_mapping = self.create_feature_mapping(X_train_transformed)
+            
+            # ========================================
+            # 5. Resume final
             # ========================================
             logger.info("\n" + "=" * 70)
             logger.info("RESUME DE LA TRANSFORMATION")
@@ -366,13 +450,15 @@ class DataTransformationPipeline:
             logger.info(f"[INFO] y_train : {y_train.shape} -> {y_train_resampled.shape}")
             logger.info(f"[INFO] X_test  : {X_test.shape} -> {X_test_transformed.shape}")
             logger.info(f"[INFO] Pipeline sauvegarde : {self.feature_pipeline is not None}")
+            logger.info(f"[INFO] Feature mapping cree : {len(self.feature_mapping)} composantes")
             logger.info("=" * 70 + "\n")
             
             return (
                 X_train_transformed,
                 y_train_resampled,
                 X_test_transformed,
-                self.feature_pipeline
+                self.feature_pipeline,
+                self.feature_mapping
             )
 
 
@@ -409,7 +495,7 @@ if __name__ == "__main__":
         else:
             # Stage 3: Transformation
             stage3 = DataTransformationPipeline(config)
-            X_train_t, y_train_t, X_test_t, pipeline = stage3.run(
+            X_train_t, y_train_t, X_test_t, pipeline, mapping = stage3.run(
                 X_train, y_train, X_test
             )
             
@@ -417,6 +503,9 @@ if __name__ == "__main__":
             print(f"  X_train transforme: {X_train_t.shape}")
             print(f"  y_train reechantillonne: {y_train_t.shape}")
             print(f"  X_test transforme: {X_test_t.shape}")
+            print(f"  Feature mapping: {len(mapping)} composantes")
+            for comp, (start, end) in mapping.items():
+                print(f"    {comp}: colonnes {start}-{end}")
         
     except FileNotFoundError as e:
         print(f"\n[ERROR] Erreur: {e}")
@@ -425,3 +514,31 @@ if __name__ == "__main__":
         print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -60,9 +60,11 @@ debug_sample_size = 5
 # ========================================
 [explainability]
 enable_shap = true
-samples = 10000       # max
 use_svd_features = false  # IMPORTANT: shap sur les tfidf bruts
 save_dir = "results/shap"
+enable_shap_decomposed = true  
+shap_samples = 10000
+shap_decomposed_samples = 1000  # Moins pour eviter OOM
 
 # ========================================
 # FEATURES TEXTE
@@ -148,7 +150,7 @@ random_state = 42
 # --- CNN ResNet/ViT ---
 [features.image.cnn]
 # IMPORTANT : Activer CNN ici
-enabled = true  # true pour utiliser CNN, false pour désactiver
+enabled = false  # true pour utiliser CNN, false pour désactiver
 
 # Architecture
 arch = "resnet50"  # Options: "resnet18", "resnet50", "resnet101"
@@ -159,7 +161,7 @@ device = "auto"  # "auto", "cpu", "cuda"
 use_imagenet_norm = true
 fallback_zero = true  # Vecteur zéro si image manquante
 dtype = "float32"
-num_workers = 0
+num_workers = 0  
 
 # Fine-tuning (optionnel)
 finetune_epochs = 5  # 0 = pas de FT, 3-5 pour FT léger
@@ -187,7 +189,7 @@ foreach = true
 
 # SVD post-CNN (optionnel)
 [features.image.cnn.svd]
-enabled = false  # true pour réduire dimension après CNN
+enabled = true  # true pour réduire dimension après CNN
 n_components = 300
 random_state = 42
 
@@ -235,7 +237,7 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 [sampling]
 major_class = 2583
 major_cap = 2000
-tail_min = 1500
+tail_min = 0        
 
 # ========================================
 # MODÈLE
@@ -307,6 +309,8 @@ enabled = true
 splits = 3
 shuffle = true
 random_state = 42
+verbose_progress = true  
+progress_every_n = 500 
 
 # ========================================
 # NOTES ET RECOMMANDATIONS

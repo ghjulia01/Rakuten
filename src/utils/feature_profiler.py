@@ -19,6 +19,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 import numpy as np
 from scipy import sparse
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,8 @@ class FeatureProfiler:
             ProfileResults
         """
         self.results = []
+        # Sauvegarder X original pour éviter les problèmes avec sparse matrices
+        self._original_X = X
         self._profile_recursive(pipeline, X, y, depth=0, max_depth=max_depth, prefix="")
         return ProfileResults(self.results)
     
@@ -143,35 +146,38 @@ class FeatureProfiler:
         if depth > max_depth:
             return
         
+        # IMPORTANT: Utiliser X original pour éviter les problèmes
+        # avec les sparse matrices dans les sous-pipelines
+        X_to_use = self._original_X if depth > 0 else X
+        
         # Pipeline sklearn
         if hasattr(obj, 'steps'):
             for name, transformer in obj.steps:
                 full_name = f"{prefix}{name}" if prefix else name
-                logger.info(f"{'  ' * depth}📊 Profiling: {full_name}")
+                logger.info(f"{'  ' * depth}  Profiling: {full_name}")
                 
-                profile = self.profile_transformer(full_name, transformer, X, y)
+                profile = self.profile_transformer(full_name, transformer, X_to_use, y)
                 self.results.append(profile)
                 
-                # Récursion
-                if hasattr(transformer, 'steps') or hasattr(transformer, 'transformer_list'):
-                    X_temp = transformer.transform(X)
+                # Récursion (limiter la profondeur pour éviter les problèmes)
+                if depth < 5 and (hasattr(transformer, 'steps') or hasattr(transformer, 'transformer_list')):
                     self._profile_recursive(
-                        transformer, X_temp, y, depth + 1, max_depth, f"{full_name}."
+                        transformer, X_to_use, y, depth + 1, max_depth, f"{full_name}."
                     )
         
         # FeatureUnion
         elif hasattr(obj, 'transformer_list'):
             for name, transformer in obj.transformer_list:
                 full_name = f"{prefix}{name}" if prefix else name
-                logger.info(f"{'  ' * depth}📊 Profiling: {full_name}")
+                logger.info(f"{'  ' * depth}  Profiling: {full_name}")
                 
-                profile = self.profile_transformer(full_name, transformer, X, y)
+                profile = self.profile_transformer(full_name, transformer, X_to_use, y)
                 self.results.append(profile)
                 
-                # Récursion
-                if hasattr(transformer, 'steps') or hasattr(transformer, 'transformer_list'):
+                # Récursion (limiter la profondeur)
+                if depth < 5 and (hasattr(transformer, 'steps') or hasattr(transformer, 'transformer_list')):
                     self._profile_recursive(
-                        transformer, X, y, depth + 1, max_depth, f"{full_name}."
+                        transformer, X_to_use, y, depth + 1, max_depth, f"{full_name}."
                     )
 
 
@@ -184,7 +190,7 @@ class ProfileResults:
     def print_summary(self):
         """Affiche un résumé formaté."""
         print("\n" + "=" * 100)
-        print("📊 PROFILING DES FEATURES - RÉSUMÉ DÉTAILLÉ")
+        print(" PROFILING DES FEATURES - RESUME DETAILLE")
         print("=" * 100)
         
         # Trier par temps de transform
@@ -221,21 +227,21 @@ class ProfileResults:
             f"{'TOTAL':<35} "
             f"{total_fit:<10.2f} "
             f"{total_transform:<13.2f} "
-            f"{'—':<18} "
+            f"{'--':<18} "
             f"{total_mem:<10.1f} "
-            f"{'—':<10}"
+            f"{'--':<10}"
         )
         print("=" * 100)
         
         # Top 3 goulots
-        print("\n🔥 TOP 3 GOULOTS D'ÉTRANGLEMENT:")
+        print("\n TOP 3 GOULOTS D'ETRANGLEMENT:")
         for i, profile in enumerate(sorted_profiles[:3], 1):
             pct = (profile.transform_time / total_transform * 100) if total_transform > 0 else 0
             print(f"  {i}. {profile.name}: {profile.transform_time:.2f}s ({pct:.1f}%)")
         
-        print("\n💾 MÉMOIRE TOTALE:", f"{total_mem:.1f} MB")
-        print("⏱️  TEMPS TOTAL FIT:", f"{total_fit:.2f}s")
-        print("⏱️  TEMPS TOTAL TRANSFORM:", f"{total_transform:.2f}s")
+        print("\n MEMOIRE TOTALE:", f"{total_mem:.1f} MB")
+        print(" TEMPS TOTAL FIT:", f"{total_fit:.2f}s")
+        print(" TEMPS TOTAL TRANSFORM:", f"{total_transform:.2f}s")
         print()
     
     def get_bottlenecks(self, top_n: int = 5) -> List[TransformerProfile]:
@@ -321,3 +327,42 @@ if __name__ == "__main__":
     # Profiling
     results = profile_pipeline(pipeline, X['text'])
     results.print_summary()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
