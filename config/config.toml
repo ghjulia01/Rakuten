@@ -12,8 +12,15 @@ y_train_csv = "data/raw/Y_train_CVw08PX.csv"
 x_test_csv  = "data/raw/X_test_update.csv"
 
 # Images (renommé pour clarté)
-image_train_dir = "data/images/images/image_train"
-image_test_dir  = "data/images/images/image_test"
+#image_train_dir = "data/images/images/image_train"
+#image_test_dir  = "data/images/images/image_test"
+# ========================================
+# IMAGES (Configuration pour pipelines)
+# ========================================
+[images]
+# Chemins des images
+train_dir = "data/images/images/image_train"
+test_dir  = "data/images/images/image_test"
 
 # ========================================
 # SORTIES
@@ -31,6 +38,7 @@ log_dir = "C:/Users/colle/Desktop/rakuten-logs"
 
 # Export features intermédiaires
 export_features = true
+
 
 # ========================================
 # REPRODUCTIBILITÉ
@@ -139,18 +147,26 @@ max_new = 800
 # --- Pixels bruts (optionnel, désactiver si CNN) ---
 [features.image.pixels]
 enabled = false  # Mettre false si CNN activé
-size = [64, 64]  # Taille réduite
 flatten = true
+# Taille pour pixels bruts
+size = [250, 250]
 
-[features.image.pixels.pca]
+# Réduction de dimension pour pixels
+[images.dim_reduction]
 enabled = false
-n_components = 100
+method = "pca"
+n_components = 500
 random_state = 42
+
+#[features.image.pixels.pca]
+#enabled = true
+#n_components = 500
+#random_state = 42
 
 # --- CNN ResNet/ViT ---
 [features.image.cnn]
 # IMPORTANT : Activer CNN ici
-enabled = false  # true pour utiliser CNN, false pour désactiver
+enabled = true  # true pour utiliser CNN, false pour désactiver
 
 # Architecture
 arch = "resnet50"  # Options: "resnet18", "resnet50", "resnet101"
@@ -168,7 +184,7 @@ finetune_epochs = 5  # 0 = pas de FT, 3-5 pour FT léger
 finetune_lr = 0.0003
 finetune_weight_decay = 0.01
 finetune_max_n = 8000
-trainable_last_n = 0  # Défiger dernières couches
+trainable_last_n = 2  # Défiger dernières couches
 ft_patience = 3
 label_smoothing = 0.0
 
@@ -190,7 +206,7 @@ foreach = true
 # SVD post-CNN (optionnel)
 [features.image.cnn.svd]
 enabled = true  # true pour réduire dimension après CNN
-n_components = 300
+n_components = 500
 random_state = 42
 
 # --- ViT (Vision Transformer, optionnel) ---
@@ -227,7 +243,7 @@ n_jobs = 4
 # RÈGLE : Si features.image.cnn.enabled = true → image_cnn > 0
 text = 1.0
 image_pixels = 0.0     # 0 si CNN activé, 1.0 si pixels seuls
-image_cnn = 0.0        # 1.0 si CNN activé, 0 sinon
+image_cnn = 1.0        # 1.0 si CNN activé, 0 sinon
 image_cnn_vit = 0.0    # 1.0 si ViT activé
 image_stats = 0.0      # 0.5-1.0 si stats activées
 
@@ -237,7 +253,7 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 [sampling]
 major_class = 2583
 major_cap = 2000
-tail_min = 1500        
+tail_min = 0       
 
 # ========================================
 # MODÈLE

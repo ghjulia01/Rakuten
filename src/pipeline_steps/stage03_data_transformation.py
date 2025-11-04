@@ -71,7 +71,7 @@ class DataTransformationPipeline:
         self._original_X_train = None  # Pour creer le mapping
         
         # ========================================
-        # NOUVEAU : Système de cache
+        # Système de cache
         # ========================================
         from pathlib import Path
         self.cache_dir = Path("artifacts/cache/features")
@@ -425,7 +425,7 @@ class DataTransformationPipeline:
         
         # Hash de la config importante
         config_dict = {
-            "text": self.config.features.get("text", {}),
+            "text": self.config.get("text", {}),
             "sampling": self.config.sampling,
             "random_seed": self.config.random_seed
         }
@@ -512,13 +512,13 @@ class DataTransformationPipeline:
                 try:
                     return self._load_from_cache(cache_file)
                 except Exception as e:
-                    logger.warning(f" Erreur lors du chargement du cache: {e}")
+                    logger.warning(f"  Erreur lors du chargement du cache: {e}")
                     logger.warning("   Recalcul des features...")
         
         # ========================================
         # CALCUL NORMAL (si pas de cache)
         # ========================================
-        logger.info(" Calcul des features (pas de cache valide)...")
+        logger.info("  Calcul des features (pas de cache valide)...")
         
         with Timer("Transformation des donnees"):
             
@@ -577,7 +577,7 @@ class DataTransformationPipeline:
                         self.feature_mapping
                     )
                 except Exception as e:
-                    logger.warning(f" Erreur lors de la sauvegarde du cache: {e}")
+                    logger.warning(f"  Erreur lors de la sauvegarde du cache: {e}")
             
             return (
                 X_train_transformed,
@@ -640,7 +640,6 @@ if __name__ == "__main__":
         print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
-
 
 
 

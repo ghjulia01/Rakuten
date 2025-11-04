@@ -200,37 +200,46 @@ class ModelTrainingPipeline:
                 # Entrainer
                 logger.info("Entrainement du fold...")
                 
-                # Afficher la progression pour XGBoost/LightGBM
-                if self.config.model['name'] in ['xgb', 'lgbm']:
-                    # XGBoost et LightGBM ont un verbose integre
-                    fold_model.set_params(verbose=False)  # On gere nous-memes
-                
-                fold_model.fit(X_train_fold, y_train_fold)
-
                 # ========================================
                 # EARLY STOPPING PAR FOLD
                 # ========================================
                 if self.config.model['name'] in ['xgb', 'lgbm']:
-                    logger.info("🛑 Activation early stopping pour ce fold")
-                
+                    # Vérifier si early_stopping_rounds est configuré
+                    early_stopping_rounds = None
                     if self.config.model['name'] == 'xgb':
-                        fold_model.fit(
-                            X_train_fold, y_train_fold,
-                            eval_set=[(X_val_fold, y_val_fold)],
-                            verbose=False  # Pas de spam
-                        )
-                        logger.info(f"  Arrêt à l'itération {fold_model.best_iteration}")
-                
+                        early_stopping_rounds = self.config.model.get('xgb', {}).get('early_stopping_rounds')
                     elif self.config.model['name'] == 'lgbm':
-                        fold_model.fit(
-                            X_train_fold, y_train_fold,
-                            eval_set=[(X_val_fold, y_val_fold)],
-                            callbacks=[
-                                __import__('lightgbm').early_stopping(stopping_rounds=50, verbose=False)
-                            ]
-                        )
-                        logger.info(f"  Arrêt à l'itération {fold_model.best_iteration_}")
+                        early_stopping_rounds = self.config.model.get('lgbm', {}).get('early_stopping_rounds')
+                    
+                    if early_stopping_rounds:
+                        # AVEC early stopping
+                        logger.info(f" Early stopping activé pour ce fold (rounds={early_stopping_rounds})")
+                        
+                        if self.config.model['name'] == 'xgb':
+                            fold_model.fit(
+                                X_train_fold, y_train_fold,
+                                eval_set=[(X_val_fold, y_val_fold)],
+                                verbose=False
+                            )
+                            if hasattr(fold_model, 'best_iteration'):
+                                logger.info(f"  Arrêt à l'itération {fold_model.best_iteration}")
+                        
+                        elif self.config.model['name'] == 'lgbm':
+                            import lightgbm as lgb
+                            fold_model.fit(
+                                X_train_fold, y_train_fold,
+                                eval_set=[(X_val_fold, y_val_fold)],
+                                callbacks=[
+                                    lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False)
+                                ]
+                            )
+                            if hasattr(fold_model, 'best_iteration_'):
+                                logger.info(f"  Arrêt à l'itération {fold_model.best_iteration_}")
+                    else:
+                        # SANS early stopping
+                        fold_model.fit(X_train_fold, y_train_fold)
                 else:
+                    # LR, SVC : pas d'early stopping
                     fold_model.fit(X_train_fold, y_train_fold)
                 
                 # Predire sur validation
