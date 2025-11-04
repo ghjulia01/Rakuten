@@ -164,16 +164,19 @@ class ModelTrainer:
         self,
         X_train: np.ndarray,
         y_train: np.ndarray,
+        X_val: np.ndarray = None,
+        y_val: np.ndarray = None,
         **fit_params
     ) -> Any:
         """
-        Entraîne le modèle sur les données fournies.
+        Entraîne le modèle sur les données fournies avec early stopping optionnel.
         
         Args:
             X_train: Features d'entraînement (n_samples, n_features)
             y_train: Labels d'entraînement (n_samples,)
+            X_val: Features de validation (optionnel, pour early stopping)
+            y_val: Labels de validation (optionnel, pour early stopping)
             **fit_params: Paramètres supplémentaires pour fit()
-                         (ex: sample_weight, eval_set, etc.)
         
         Returns:
             Modèle entraîné
@@ -181,9 +184,8 @@ class ModelTrainer:
         Exemple:
             >>> trainer = ModelTrainer(config)
             >>> model = trainer.train(X_train, y_train)
-            >>> # Avec poids de classe
-            >>> model = trainer.train(X_train, y_train, 
-            ...                       sample_weight=weights)
+            >>> # Avec early stopping
+            >>> model = trainer.train(X_train, y_train, X_val, y_val)
         """
         with Timer(f"Entraînement du modèle {self.config['name']}"):
             # Créer le modèle
@@ -204,8 +206,79 @@ class ModelTrainer:
             logger.info(f"Classes après encodage: {np.unique(y_train_encoded)}")
             logger.info(f"Nombre de classes: {len(unique_classes)}")
             
-            # Entraîner avec les labels encodés
-            self.model.fit(X_train, y_train_encoded, **fit_params)
+            # ========================================
+            # EARLY STOPPING pour XGB et LGBM
+            # ========================================
+            model_name = self.config['name'].lower()
+            
+            if model_name in ['xgb', 'lgbm']:
+                # Vérifier si early_stopping_rounds est configuré
+                early_stopping_rounds = None
+                if model_name == 'xgb':
+                    early_stopping_rounds = self.config.get('xgb', {}).get('early_stopping_rounds')
+                elif model_name == 'lgbm':
+                    early_stopping_rounds = self.config.get('lgbm', {}).get('early_stopping_rounds')
+                
+                # Si early stopping activé
+                if early_stopping_rounds:
+                    # Si pas de validation fournie, créer un split
+                    if X_val is None or y_val is None:
+                        from sklearn.model_selection import train_test_split
+                        logger.info(f" Early stopping activé (rounds={early_stopping_rounds})")
+                        logger.info("   Création d'un split validation (20% des données)")
+                        
+                        X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
+                            X_train, y_train_encoded,
+                            test_size=0.2,
+                            random_state=self.random_state,
+                            stratify=y_train_encoded
+                        )
+                    else:
+                        logger.info(f" Early stopping activé (rounds={early_stopping_rounds})")
+                        X_train_split = X_train
+                        y_train_split = y_train_encoded
+                        X_val_split = X_val
+                        y_val_split = self.label_encoder.transform(y_val)
+                    
+                    # ========================================
+                    # XGBoost Early Stopping
+                    # ========================================
+                    if model_name == 'xgb':
+                        self.model.fit(
+                            X_train_split, y_train_split,
+                            eval_set=[(X_val_split, y_val_split)],
+                            verbose=50,  # Log tous les 50 rounds
+                            **fit_params
+                        )
+                        
+                        best_iteration = self.model.best_iteration
+                        logger.info(f" Early stopping à l'itération {best_iteration}/{self.config['xgb']['n_estimators']}")
+                    
+                    # ========================================
+                    # LightGBM Early Stopping
+                    # ========================================
+                    elif model_name == 'lgbm':
+                        import lightgbm as lgb
+                        
+                        self.model.fit(
+                            X_train_split, y_train_split,
+                            eval_set=[(X_val_split, y_val_split)],
+                            callbacks=[
+                                lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False),
+                                lgb.log_evaluation(period=50)
+                            ],
+                            **fit_params
+                        )
+                        
+                        logger.info(f" Early stopping à l'itération {self.model.best_iteration_}/{self.config['lgbm']['n_estimators']}")
+                
+                else:
+                    # Pas d'early stopping
+                    self.model.fit(X_train, y_train_encoded, **fit_params)
+            
+            else:
+                # LR, SVC : pas d'early stopping
+                self.model.fit(X_train, y_train_encoded, **fit_params)
             
             logger.info("✓ Entraînement terminé")
         

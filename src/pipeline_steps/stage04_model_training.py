@@ -206,6 +206,32 @@ class ModelTrainingPipeline:
                     fold_model.set_params(verbose=False)  # On gere nous-memes
                 
                 fold_model.fit(X_train_fold, y_train_fold)
+
+                # ========================================
+                # EARLY STOPPING PAR FOLD
+                # ========================================
+                if self.config.model['name'] in ['xgb', 'lgbm']:
+                    logger.info("🛑 Activation early stopping pour ce fold")
+                
+                    if self.config.model['name'] == 'xgb':
+                        fold_model.fit(
+                            X_train_fold, y_train_fold,
+                            eval_set=[(X_val_fold, y_val_fold)],
+                            verbose=False  # Pas de spam
+                        )
+                        logger.info(f"  Arrêt à l'itération {fold_model.best_iteration}")
+                
+                    elif self.config.model['name'] == 'lgbm':
+                        fold_model.fit(
+                            X_train_fold, y_train_fold,
+                            eval_set=[(X_val_fold, y_val_fold)],
+                            callbacks=[
+                                __import__('lightgbm').early_stopping(stopping_rounds=50, verbose=False)
+                            ]
+                        )
+                        logger.info(f"  Arrêt à l'itération {fold_model.best_iteration_}")
+                else:
+                    fold_model.fit(X_train_fold, y_train_fold)
                 
                 # Predire sur validation
                 y_pred = fold_model.predict(X_val_fold)

@@ -70,9 +70,20 @@ class DataTransformationPipeline:
         self.feature_mapping = {}
         self._original_X_train = None  # Pour creer le mapping
         
+        # ========================================
+        # NOUVEAU : Système de cache
+        # ========================================
+        from pathlib import Path
+        self.cache_dir = Path("artifacts/cache/features")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.use_cache = config.get("compute.use_cache", True)
+        
         logger.info("=" * 70)
         logger.info("ETAPE 3 : TRANSFORMATION DES DONNEES")
         logger.info("=" * 70)
+        if self.use_cache:
+            logger.info(f" Cache activé: {self.cache_dir}")
+
     
     def apply_resampling(
         self,
@@ -393,6 +404,86 @@ class DataTransformationPipeline:
         
         return X_train_transformed, X_test_transformed
     
+    def _get_cache_key(self, X_train: pd.DataFrame, y_train: pd.Series) -> str:
+        """
+        Génère une clé de cache basée sur les données et la config.
+        
+        Args:
+            X_train: DataFrame d'entraînement
+            y_train: Labels d'entraînement
+            
+        Returns:
+            Nom du fichier de cache
+        """
+        import hashlib
+        import json
+        
+        # Hash des index (représente les données)
+        data_hash = hashlib.md5(
+            str(sorted(X_train.index)).encode()
+        ).hexdigest()[:8]
+        
+        # Hash de la config importante
+        config_dict = {
+            "text": self.config.features.get("text", {}),
+            "sampling": self.config.sampling,
+            "random_seed": self.config.random_seed
+        }
+        config_hash = hashlib.md5(
+            json.dumps(config_dict, sort_keys=True).encode()
+        ).hexdigest()[:8]
+        
+        return f"features_d{data_hash}_c{config_hash}.joblib"
+    
+    def _load_from_cache(self, cache_file) -> Tuple:
+        """Charge les features depuis le cache."""
+        import joblib
+        
+        logger.info(f" Chargement des features depuis le cache...")
+        logger.info(f"   Fichier: {cache_file.name}")
+        
+        with Timer("Chargement du cache"):
+            cached = joblib.load(cache_file)
+        
+        logger.info(f" Cache chargé avec succès!")
+        logger.info(f"   X_train: {cached['X_train_t'].shape}")
+        logger.info(f"   X_test: {cached['X_test_t'].shape}")
+        
+        return (
+            cached["X_train_t"],
+            cached["y_train_t"],
+            cached["X_test_t"],
+            cached["feature_pipeline"],
+            cached["feature_mapping"]
+        )
+    
+    def _save_to_cache(
+        self, 
+        cache_file,
+        X_train_t,
+        y_train_t,
+        X_test_t,
+        feature_pipeline,
+        feature_mapping
+    ):
+        """Sauvegarde les features dans le cache."""
+        import joblib
+        
+        logger.info(f" Sauvegarde dans le cache...")
+        logger.info(f"   Fichier: {cache_file.name}")
+        
+        with Timer("Sauvegarde du cache"):
+            joblib.dump({
+                "X_train_t": X_train_t,
+                "y_train_t": y_train_t,
+                "X_test_t": X_test_t,
+                "feature_pipeline": feature_pipeline,
+                "feature_mapping": feature_mapping
+            }, cache_file)
+        
+        size_mb = cache_file.stat().st_size / (1024 * 1024)
+        logger.info(f" Cache sauvegardé ({size_mb:.1f} MB)")
+    
     def run(
         self,
         X_train: pd.DataFrame,
@@ -400,7 +491,7 @@ class DataTransformationPipeline:
         X_test: pd.DataFrame
     ) -> Tuple[np.ndarray, pd.Series, np.ndarray, FeatureUnion, Dict[str, Tuple[int, int]]]:
         """
-        Execute le pipeline de transformation complet.
+        Execute le pipeline de transformation complet avec cache.
         
         Args:
             X_train: Features d'entrainement (brutes)
@@ -411,6 +502,24 @@ class DataTransformationPipeline:
             Tuple (X_train_transformed, y_train_resampled, 
                    X_test_transformed, feature_pipeline, feature_mapping)
         """
+        # ========================================
+        # ESSAYER DE CHARGER LE CACHE
+        # ========================================
+        if self.use_cache:
+            cache_file = self.cache_dir / self._get_cache_key(X_train, y_train)
+            
+            if cache_file.exists():
+                try:
+                    return self._load_from_cache(cache_file)
+                except Exception as e:
+                    logger.warning(f" Erreur lors du chargement du cache: {e}")
+                    logger.warning("   Recalcul des features...")
+        
+        # ========================================
+        # CALCUL NORMAL (si pas de cache)
+        # ========================================
+        logger.info(" Calcul des features (pas de cache valide)...")
+        
         with Timer("Transformation des donnees"):
             
             # ========================================
@@ -452,6 +561,23 @@ class DataTransformationPipeline:
             logger.info(f"[INFO] Pipeline sauvegarde : {self.feature_pipeline is not None}")
             logger.info(f"[INFO] Feature mapping cree : {len(self.feature_mapping)} composantes")
             logger.info("=" * 70 + "\n")
+            
+            # ========================================
+            # 6. Sauvegarder dans le cache
+            # ========================================
+            if self.use_cache:
+                cache_file = self.cache_dir / self._get_cache_key(X_train, y_train)
+                try:
+                    self._save_to_cache(
+                        cache_file,
+                        X_train_transformed,
+                        y_train_resampled,
+                        X_test_transformed,
+                        self.feature_pipeline,
+                        self.feature_mapping
+                    )
+                except Exception as e:
+                    logger.warning(f" Erreur lors de la sauvegarde du cache: {e}")
             
             return (
                 X_train_transformed,
@@ -514,7 +640,6 @@ if __name__ == "__main__":
         print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
-
 
 
 

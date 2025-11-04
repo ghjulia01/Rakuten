@@ -166,7 +166,7 @@ def create_text_pipeline(
             norm=str(norm),
             strip_accents=strip_accents,
             lowercase=False,  # Déjà fait par TextCleaner
-            dtype=np.float64,
+            dtype=np.float32,
             stop_words=None  
         ),
     )
@@ -261,7 +261,7 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Pipeline:
                 max_df=char_cfg.get("max_df", 0.95),
                 sublinear_tf=bool(char_cfg.get("sublinear_tf", True)),
                 strip_accents=char_cfg.get("strip_accents", None),  # souvent None côté char
-                dtype=np.float64,
+                dtype=np.float32,
             ),
         )
         transformers.append(("tfidf_char", char_pipeline))

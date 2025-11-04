@@ -42,7 +42,7 @@ seed = 42
 # COMPUTE
 # ========================================
 [compute]
-n_jobs = 2  # Parallélisme
+n_jobs = -1  # Parallélisme
 use_cache = true
 cache_verbose = 3
 
@@ -70,7 +70,7 @@ shap_decomposed_samples = 1000  # Moins pour eviter OOM
 # FEATURES TEXTE
 # ========================================
 [features.text]
-max_features = 40000
+max_features = 30000
 ngram_min = 1
 ngram_max = 2
 min_df = 5
@@ -95,13 +95,13 @@ use_language_detection = false  # Coûteux
 # --- Lexiques (chi2) ---
 [features.text.lexicon]
 enabled = true
-top_k = 80
+top_k = 60
 min_df = 3
 max_df = 0.98
 
 # --- TF-IDF Char ---
 [features.text.char]
-enabled = true
+enabled = false
 analyzer = "char_wb"
 ngram_min = 2
 ngram_max = 3
@@ -283,6 +283,7 @@ reg_alpha = 0.0
 reg_lambda = 1.0
 tree_method = "hist"
 verbosity = 2            #0=silent, 1=warning, 2=info, 3=debug
+early_stopping_rounds = 50
 
 # --- LightGBM ---
 [model.lgbm]
@@ -301,6 +302,7 @@ min_sum_hessian_in_leaf = 0.001
 max_bin = 511
 force_row_wise = true
 verbosity = -1
+early_stopping_rounds = 50
 
 # ========================================
 # VALIDATION CROISÉE
