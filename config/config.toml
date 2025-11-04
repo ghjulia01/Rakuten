@@ -243,7 +243,7 @@ n_jobs = 4
 # RÈGLE : Si features.image.cnn.enabled = true → image_cnn > 0
 text = 1.0
 image_pixels = 0.0     # 0 si CNN activé, 1.0 si pixels seuls
-image_cnn = 1.0        # 1.0 si CNN activé, 0 sinon
+image_cnn = 0.8        # 1.0 si CNN activé, 0 sinon
 image_cnn_vit = 0.0    # 1.0 si ViT activé
 image_stats = 0.0      # 0.5-1.0 si stats activées
 
@@ -252,8 +252,8 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 # ========================================
 [sampling]
 major_class = 2583
-major_cap = 2000
-tail_min = 0       
+major_cap = 3000
+tail_min = 1500       
 
 # ========================================
 # MODÈLE
