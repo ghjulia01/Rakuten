@@ -299,6 +299,10 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Pipeline:
     svd_cfg = cfg_text.get("svd", {})
     svd_enabled = bool(svd_cfg.get("enabled", False))
     
+    # DEBUG: Afficher la config SVD
+    logger.info(f"[DEBUG] Config SVD reçue: {svd_cfg}")
+    logger.info(f"[DEBUG] SVD enabled: {svd_enabled}")
+    
     if svd_enabled:
         n_components = int(svd_cfg.get("n_components", 500))
         random_state = int(svd_cfg.get("random_state", 42))
@@ -319,4 +323,5 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Pipeline:
         return Pipeline(steps)
     else:
         # Pas de SVD, retourner juste le FeatureUnion dans un Pipeline
+        logger.info(" SVD désactivée - Pipeline sans réduction dimensionnelle")
         return Pipeline([("features", feature_union)])

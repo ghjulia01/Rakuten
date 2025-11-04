@@ -317,11 +317,14 @@ class Chi2LexiconFeatures(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X) -> np.ndarray:
-        if self.vectorizer_ is None or self.classes_ is None:
+        if self.classes_ is None:
             raise RuntimeError("Transformer non fit().")
         s = _to_text_series(X)
-        # tokenisation simple compatible avec vectorizer (lower déjà fait)
-        docs_tokens = [set(self._analyzer_(txt)) for txt in s]
+        
+        # CORRECTION: Tokenisation manuelle pour éviter FutureWarning sklearn
+        # On ne dépend plus de self._analyzer_ qui utilise le vectorizer interne
+        docs_tokens = [set(txt.lower().split()) for txt in s]
+        
         out = np.zeros((len(s), len(self.classes_)), dtype=np.float32)
         for j, c in enumerate(self.classes_):
             lex = self.lexicons_.get(int(c), set())

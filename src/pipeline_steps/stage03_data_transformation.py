@@ -286,13 +286,14 @@ class DataTransformationPipeline:
         """
         Cree un mapping des ranges de colonnes pour chaque transformateur.
         
+        Gère correctement les Pipelines et FeatureUnions imbriqués.
         Ceci est essentiel pour l'analyse SHAP decomposee par composante.
         
         Args:
             X_transformed: Matrice de features transformees
             
         Returns:
-            Dict avec ranges : {'text': (0, 15000), 'image_cnn': (15000, 17048), ...}
+            Dict avec ranges : {'text_tfidf': (0, 100000), 'text_has_desc': (100000, 100001), ...}
         """
         logger.info("\n--- Creation du mapping des features ---")
         
@@ -302,13 +303,72 @@ class DataTransformationPipeline:
         # Parcourir les transformateurs du FeatureUnion
         for name, transformer in self.feature_pipeline.transformer_list:
             try:
-                # Methode 1 : get_feature_names_out (sklearn >= 1.0)
-                if hasattr(transformer, 'get_feature_names_out'):
+                # Cas 1: Pipeline sklearn (ex: Pipeline([TextCleaner, TfidfVectorizer]))
+                if hasattr(transformer, 'steps'):
+                    logger.info(f"  Traitement du Pipeline '{name}'...")
+                    # Prendre le dernier step qui génère les features
+                    last_step_name, last_step = transformer.steps[-1]
+                    
+                    if hasattr(last_step, 'get_feature_names_out'):
+                        feature_names = last_step.get_feature_names_out()
+                        n_features = len(feature_names)
+                    else:
+                        # Fallback: transformer un échantillon
+                        sample = self._original_X_train.iloc[:1]
+                        transformed = transformer.transform(sample)
+                        n_features = transformed.shape[1]
+                    
+                    end_idx = start_idx + n_features
+                    mapping[name] = (start_idx, end_idx)
+                    logger.info(f"    {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
+                    start_idx = end_idx
+                
+                # Cas 2: FeatureUnion imbriqué (ex: word_branch qui contient tfidf, has_desc, etc.)
+                elif hasattr(transformer, 'transformer_list'):
+                    logger.info(f"  Traitement du FeatureUnion imbriqué '{name}'...")
+                    sub_start = start_idx
+                    
+                    for sub_name, sub_trans in transformer.transformer_list:
+                        # Gérer les sous-pipelines
+                        if hasattr(sub_trans, 'steps'):
+                            last_step_name, last_step = sub_trans.steps[-1]
+                            if hasattr(last_step, 'get_feature_names_out'):
+                                sub_names = last_step.get_feature_names_out()
+                                sub_n = len(sub_names)
+                            else:
+                                sample = self._original_X_train.iloc[:1]
+                                transformed = sub_trans.transform(sample)
+                                sub_n = transformed.shape[1]
+                        # Gérer les transformers simples
+                        elif hasattr(sub_trans, 'get_feature_names_out'):
+                            sub_names = sub_trans.get_feature_names_out()
+                            sub_n = len(sub_names)
+                        else:
+                            sample = self._original_X_train.iloc[:1]
+                            transformed = sub_trans.transform(sample)
+                            sub_n = transformed.shape[1]
+                        
+                        # Créer un nom composite
+                        composite_name = f"{name}_{sub_name}"
+                        mapping[composite_name] = (sub_start, sub_start + sub_n)
+                        logger.info(f"    {composite_name:20s}: colonnes {sub_start:6d} - {sub_start + sub_n:6d}  ({sub_n:6d} features)")
+                        sub_start += sub_n
+                    
+                    n_features = sub_start - start_idx
+                    start_idx = sub_start
+                
+                # Cas 3: Transformer simple (ex: CNNFeaturizer)
+                elif hasattr(transformer, 'get_feature_names_out'):
                     feature_names = transformer.get_feature_names_out()
                     n_features = len(feature_names)
+                    
+                    end_idx = start_idx + n_features
+                    mapping[name] = (start_idx, end_idx)
+                    logger.info(f"  {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
+                    start_idx = end_idx
                 
-                # Methode 2 : Transformer un echantillon
-                elif hasattr(transformer, 'transform') and self._original_X_train is not None:
+                # Cas 4: Fallback - transformer un échantillon
+                else:
                     sample = self._original_X_train.iloc[:1]
                     transformed = transformer.transform(sample)
                     
@@ -316,18 +376,11 @@ class DataTransformationPipeline:
                         n_features = transformed.shape[1]
                     else:
                         n_features = 1
-                
-                # Methode 3 : Par defaut
-                else:
-                    n_features = 1
-                    logger.warning(f"  Impossible de determiner n_features pour {name}, utilisation de 1")
-                
-                end_idx = start_idx + n_features
-                mapping[name] = (start_idx, end_idx)
-                
-                logger.info(f"  {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
-                
-                start_idx = end_idx
+                    
+                    end_idx = start_idx + n_features
+                    mapping[name] = (start_idx, end_idx)
+                    logger.info(f"  {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
+                    start_idx = end_idx
                 
             except Exception as e:
                 logger.error(f"  Erreur lors du mapping de {name}: {e}")
@@ -640,6 +693,9 @@ if __name__ == "__main__":
         print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
+
+
+
 
 
 
