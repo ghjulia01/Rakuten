@@ -253,7 +253,7 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 [sampling]
 major_class = 2583
 major_cap = 3000
-tail_min = 1500       
+tail_min = 0      
 
 # ========================================
 # MODÈLE
