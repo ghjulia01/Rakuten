@@ -18,7 +18,7 @@ This project is part of the **DataScientest – Mines Paris** training program a
 ---
 ##  A) Technical Highlights & Challenges Overcome
 
-### 1️ **Multimodal Architecture Design**
+#### 1 **Multimodal Architecture Design**
 
 **Challenge:** Fuse heterogeneous modalities (sparse text, dense CNN features) while maintaining interpretability.
 
@@ -42,7 +42,7 @@ Fusion → XGBoost(2000 trees) → 27 classes
 
 ---
 
-### 2️ **Severe Class Imbalance Handling**
+#### 2 **Severe Class Imbalance Handling**
 
 **Challenge:** Class 2583 represents 12% of dataset while minority classes have <1% samples (10:1 ratio).
 
@@ -67,7 +67,7 @@ for fold in StratifiedKFold(X, y):
 
 ---
 
-### 3️ **Missing Data & Multilingual Text Processing**
+#### 3 **Missing Data & Multilingual Text Processing**
 
 **Challenge:** 35% missing descriptions, mixed FR/EN/DE text, noisy user-generated content.
 
@@ -107,7 +107,7 @@ analyzer='char_wb', ngram_range=(2, 6)
 
 ## B) Technical Highlights & Challenges Overcome
 
-### 1️ **Multimodal Architecture Design**
+#### 1 **Multimodal Architecture Design**
 
 **Challenge:** Fuse heterogeneous modalities (sparse text, dense CNN features) while maintaining interpretability.
 
@@ -131,7 +131,7 @@ Fusion → XGBoost(2000 trees) → 27 classes
 
 ---
 
-### 2️ **Severe Class Imbalance Handling**
+#### 2 **Severe Class Imbalance Handling**
 
 **Challenge:** Class 2583 represents 12% of dataset while minority classes have <1% samples (10:1 ratio).
 
@@ -156,7 +156,7 @@ for fold in StratifiedKFold(X, y):
 
 ---
 
-### 3️ **Missing Data & Multilingual Text Processing**
+#### 3 **Missing Data & Multilingual Text Processing**
 
 **Challenge:** 35% missing descriptions, mixed FR/EN/DE text, noisy user-generated content.
 
