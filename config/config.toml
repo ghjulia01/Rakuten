@@ -131,7 +131,7 @@ language = 0.0  # 0 si use_language_detection = false
 # --- SVD post-texte ---
 [features.text.svd]
 enabled = true
-n_components = 600
+n_components = 700
 random_state = 42
 l2norm = true
 
@@ -172,7 +172,7 @@ enabled = true  # true pour utiliser CNN, false pour désactiver
 arch = "resnet50"  # Options: "resnet18", "resnet50", "resnet101"
 
 # Chargement
-batch_size = 16  # 16-32 recommandé, réduire si OOM
+batch_size = 20  # 16-32 recommandé, réduire si OOM
 device = "auto"  # "auto", "cpu", "cuda"
 use_imagenet_norm = true
 fallback_zero = true  # Vecteur zéro si image manquante
@@ -180,7 +180,7 @@ dtype = "float32"
 num_workers = 0  
 
 # Fine-tuning (optionnel)
-finetune_epochs = 5  # 0 = pas de FT, 3-5 pour FT léger
+finetune_epochs = 8  # 0 = pas de FT, 3-5 pour FT léger
 finetune_lr = 0.0003
 finetune_weight_decay = 0.01
 finetune_max_n = 8000
@@ -241,9 +241,9 @@ n_jobs = 4
 # ========================================
 [fusion.weights]
 # RÈGLE : Si features.image.cnn.enabled = true → image_cnn > 0
-text = 1.0
+text = 1.5
 image_pixels = 0.0     # 0 si CNN activé, 1.0 si pixels seuls
-image_cnn = 0.8        # 1.0 si CNN activé, 0 sinon
+image_cnn = 0.5        # 1.0 si CNN activé, 0 sinon
 image_cnn_vit = 0.0    # 1.0 si ViT activé
 image_stats = 0.0      # 0.5-1.0 si stats activées
 
@@ -253,7 +253,7 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 [sampling]
 major_class = 2583
 major_cap = 3000
-tail_min = 0      
+tail_min = 1500      
 
 # ========================================
 # MODÈLE

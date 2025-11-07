@@ -39,8 +39,8 @@ def load_data(data_dir: str = "data") -> Tuple[pd.DataFrame, pd.DataFrame]:
     train_df = pd.read_csv(data_path / "X_train.csv")
     test_df = pd.read_csv(data_path / "X_test.csv")
     
-    print(f"  ✓ Train: {len(train_df):,} échantillons")
-    print(f"  ✓ Test:  {len(test_df):,} échantillons")
+    print(f"   Train: {len(train_df):,} échantillons")
+    print(f"   Test:  {len(test_df):,} échantillons")
     
     return train_df, test_df
 
@@ -150,9 +150,11 @@ def extract_image_features(
     Returns:
         X_train_img, X_test_img, updated_feature_mapping
     """
-    from tensorflow.keras.applications import ResNet50
-    from tensorflow.keras.applications.resnet50 import preprocess_input
-    from tensorflow.keras.preprocessing import image
+    # IMPORTS KERAS 3 COMPATIBLES
+    import keras
+    from keras.applications import ResNet50
+    from keras.applications.resnet50 import preprocess_input
+    from keras.utils import load_img, img_to_array
     import cv2
     
     print("\n[3/6] Extraction des features images...")
@@ -171,13 +173,15 @@ def extract_image_features(
             
             if img_file.exists():
                 try:
-                    img = image.load_img(img_file, target_size=(224, 224))
-                    img_array = image.img_to_array(img)
+                    # KERAS 3: utiliser load_img et img_to_array
+                    img = load_img(img_file, target_size=(224, 224))
+                    img_array = img_to_array(img)
                     img_array = np.expand_dims(img_array, axis=0)
                     img_array = preprocess_input(img_array)
                     feat = model.predict(img_array, verbose=0)
                     features.append(feat.flatten())
                 except Exception as e:
+                    print(f"    Erreur image {img_id}: {e}")
                     features.append(np.zeros(2048))
             else:
                 features.append(np.zeros(2048))
@@ -251,7 +255,7 @@ def train_model(
     print("\n[4/6] Entraînement du modèle...")
     
     if test_mode:
-        print("  MODE TEST: paramètres réduits")
+        print("   MODE TEST: paramètres réduits")
         model = RandomForestClassifier(
             n_estimators=10,
             max_depth=10,
@@ -367,7 +371,7 @@ def save_artifacts(
     print(f"  ✓ Features test: {artifacts_dir}/features_test.npz")
     
     # Résumé du mapping
-    print("\n   Résumé du feature mapping:")
+    print("\n  Résumé du feature mapping:")
     total_features = 0
     for block_name, (start, end) in feature_mapping.items():
         n_features = end - start
@@ -392,7 +396,7 @@ def main():
     args = parser.parse_args()
     
     print("=" * 80)
-    print(" PRODUCTION COMPLÈTE - RAKUTEN CLASSIFICATION")
+    print("PRODUCTION COMPLÈTE - RAKUTEN CLASSIFICATION")
     print("=" * 80)
     
     if args.test_mode:
@@ -438,7 +442,7 @@ def main():
     print(f"  - Feature mapping: {args.artifacts_dir}/feature_mapping.json")
     print(f"  - Métriques:       {args.output_dir}/metrics.json")
     print(f"  - Prédictions:     {args.output_dir}/y_pred.npy")
-    print(f"\nProchaine étape:")
+    print(f"\n Prochaine étape:")
     print(f"  python tools/compute_shap.py \\")
     print(f"      --model {args.artifacts_dir}/model_final.pkl \\")
     print(f"      --features {args.artifacts_dir}/features_test.npz \\")
@@ -447,3 +451,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+

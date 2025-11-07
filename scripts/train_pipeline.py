@@ -190,8 +190,8 @@ def main():
                     model, X_train_t, y_train_t, 
                     dataset_name="train",
                     trainer=stage4.trainer,  # IMPORTANT : pour décodage
-                    feature_mapping=feature_mapping, # passe le mapping
-                    feature_pipeline=feature_pipeline  # pour SHAP
+                    feature_mapping=feature_mapping # passe le mapping
+                    # feature_pipeline=feature_pipeline  # pour SHAP
                 )
             
             # Prédictions sur test (pas de labels)
@@ -200,8 +200,8 @@ def main():
                 model, X_test_t, y_true=None,
                 dataset_name="test",
                 trainer=stage4.trainer,  # pour décodage
-                feature_mapping=feature_mapping, # passe le mapping
-                feature_pipeline=feature_pipeline  # pour SHAP
+                feature_mapping=feature_mapping # passe le mapping
+                # feature_pipeline=feature_pipeline  # pour SHAP
             )
             logger.info(f" Prédictions générées: {len(test_results['predictions'])} échantillons")
         
@@ -213,7 +213,7 @@ def main():
             
             import pandas as pd
             predictions_df = pd.DataFrame({
-                "prediction": test_results["predictions"]
+                "prdtypecode": test_results["predictions"]
             }, index=X_test.index)
             
             pred_output_path = Path(pred_output)
