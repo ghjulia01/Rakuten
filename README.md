@@ -18,7 +18,7 @@ This project is part of the **DataScientest – Mines Paris** training program a
 ---
 ##  A) Technical Highlights & Challenges Overcome
 
-#### 1 **Multimodal Architecture Design**
+#### 1: **Multimodal Architecture Design**
 
 **Challenge:** Fuse heterogeneous modalities (sparse text, dense CNN features) while maintaining interpretability.
 
@@ -42,7 +42,7 @@ Fusion → XGBoost(2000 trees) → 27 classes
 
 ---
 
-#### 2 **Severe Class Imbalance Handling**
+#### 2: **Severe Class Imbalance Handling**
 
 **Challenge:** Class 2583 represents 12% of dataset while minority classes have <1% samples (10:1 ratio).
 
@@ -67,7 +67,7 @@ for fold in StratifiedKFold(X, y):
 
 ---
 
-#### 3 **Missing Data & Multilingual Text Processing**
+#### 3: **Missing Data & Multilingual Text Processing**
 
 **Challenge:** 35% missing descriptions, mixed FR/EN/DE text, noisy user-generated content.
 
@@ -107,7 +107,7 @@ analyzer='char_wb', ngram_range=(2, 6)
 
 ## B) Technical Highlights & Challenges Overcome
 
-#### 1 **Multimodal Architecture Design**
+#### 1: **Multimodal Architecture Design**
 
 **Challenge:** Fuse heterogeneous modalities (sparse text, dense CNN features) while maintaining interpretability.
 
@@ -131,7 +131,7 @@ Fusion → XGBoost(2000 trees) → 27 classes
 
 ---
 
-#### 2 **Severe Class Imbalance Handling**
+#### 2: **Severe Class Imbalance Handling**
 
 **Challenge:** Class 2583 represents 12% of dataset while minority classes have <1% samples (10:1 ratio).
 
@@ -156,7 +156,7 @@ for fold in StratifiedKFold(X, y):
 
 ---
 
-#### 3 **Missing Data & Multilingual Text Processing**
+#### 3: **Missing Data & Multilingual Text Processing**
 
 **Challenge:** 35% missing descriptions, mixed FR/EN/DE text, noisy user-generated content.
 
@@ -194,7 +194,7 @@ analyzer='char_wb', ngram_range=(2, 6)
 ```
 
 ---
-### C) Models & Hyperparameter Search
+## C) Models & Hyperparameter Search
 
 **Linear SVC (One-Vs-Rest) — GridSearchCV**
 - Solid on high-dimension TF-IDF, fast and **noise-resistant**.
@@ -217,7 +217,7 @@ analyzer='char_wb', ngram_range=(2, 6)
 
 ## D) Explainability & Interpretability
 
-### **SHAP **
+####  **SHAP **
 
 **Key Findings:**
 1. **Text dominates** (87%) - Expected for e-commerce (titles/descriptions)
@@ -228,7 +228,7 @@ analyzer='char_wb', ngram_range=(2, 6)
 
 ##  E) Results & Performance
 
-### **Final Metrics**
+#### **Final Metrics**
 
 | Dataset | Accuracy | F1-Weighted | F1-Macro | Precision | Recall |
 |---------|----------|-------------|----------|-----------|--------|
@@ -244,7 +244,7 @@ Std Dev: 0.0021  ← Very low variance = Robust model
 ```
 
 ---
-## E) Project Structure
+## F) Project Structure
 
 ```
 rakuten-main/
@@ -289,7 +289,7 @@ rakuten-main/
 ```
 ---
 
-### Diagramme
+## G) Diagramme
 
 ```mermaid
 flowchart TB
@@ -397,7 +397,7 @@ end
 ```
 ##  Quick Start
 
-### **1. Installation**
+#### **1. Installation**
 
 ```bash
 
@@ -409,7 +409,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### **2. Data Setup**
+#### **2. Data Setup**
 
 Download data from [Rakuten Challenge] (registration required):
 - `X_train.csv`, `Y_train.csv`, `X_test.csv`
@@ -426,7 +426,7 @@ data/
     └── image_test/
 ```
 
-### **3. Training**
+#### **3. Training**
 
 ```bash
 # Full pipeline (5 stages)
@@ -444,7 +444,7 @@ python scripts/train_pipeline.py --config config/custom.toml
 
 **Training Time:** ~2h  / ~4h (CPU)
 
-### **4. Inference**
+#### **4. Inference**
 
 ```bash
 # Generate predictions
