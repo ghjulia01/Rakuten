@@ -11,9 +11,7 @@ x_train_csv = "data/raw/X_train_update.csv"
 y_train_csv = "data/raw/Y_train_CVw08PX.csv"
 x_test_csv  = "data/raw/X_test_update.csv"
 
-# Images (renommé pour clarté)
-#image_train_dir = "data/images/images/image_train"
-#image_test_dir  = "data/images/images/image_test"
+
 # ========================================
 # IMAGES (Configuration pour pipelines)
 # ========================================
@@ -78,9 +76,12 @@ shap_decomposed_samples = 1000  # Moins pour eviter OOM
 # FEATURES TEXTE
 # ========================================
 [features.text]
-max_features = 30000
+# Activer/désactiver tout le pipeline texte
+enabled = true  # false pour désactiver complètement le texte
+
+max_features = 50000
 ngram_min = 1
-ngram_max = 2
+ngram_max = 4
 min_df = 5
 max_df = 0.95
 sublinear_tf = true
@@ -103,7 +104,7 @@ use_language_detection = false  # Coûteux
 # --- Lexiques (chi2) ---
 [features.text.lexicon]
 enabled = true
-top_k = 60
+top_k = 80
 min_df = 3
 max_df = 0.98
 
@@ -117,21 +118,29 @@ min_df = 5
 max_df = 0.95
 sublinear_tf = true
 
+[features.text.bert]
+enabled = true
+model_name = "camembert-base"  # Meilleur pour français
+max_length = 128               # Suffisant pour Rakuten
+batch_size = 32                # Optimal pour GPU
+use_cache = true               # IMPORTANT !
+
 # --- Pondération branches texte ---
 [features.text.weights]
-tfidf_word = 1.0
-tfidf_char = 0.6
+tfidf_word = 1.2
+tfidf_char = 0.0
 has_desc = 0.2
 title_len = 0.1
 text_stats = 0.25
 text_stats_pro = 0.35
-lexicon = 0.6
+lexicon = 0.8
+bert = 1.0 
 language = 0.0  # 0 si use_language_detection = false
 
 # --- SVD post-texte ---
 [features.text.svd]
 enabled = true
-n_components = 700
+n_components = 1000
 random_state = 42
 l2norm = true
 
@@ -180,16 +189,16 @@ dtype = "float32"
 num_workers = 0  
 
 # Fine-tuning (optionnel)
-finetune_epochs = 8  # 0 = pas de FT, 3-5 pour FT léger
+finetune_epochs = 20  # 0 = pas de FT, 3-5 pour FT léger
 finetune_lr = 0.0003
 finetune_weight_decay = 0.01
 finetune_max_n = 8000
-trainable_last_n = 2  # Défiger dernières couches
+trainable_last_n = 3  # Défiger dernières couches
 ft_patience = 3
 label_smoothing = 0.0
 
 # Augmentation (actif pendant FT uniquement)
-aug_hflip_p = 0.2
+aug_hflip_p = 0.5
 aug_color_jitter = 0.0
 random_resized_crop_scale = [0.9, 1.0]
 random_resized_crop_ratio = [0.95, 1.05]
@@ -206,7 +215,7 @@ foreach = true
 # SVD post-CNN (optionnel)
 [features.image.cnn.svd]
 enabled = true  # true pour réduire dimension après CNN
-n_components = 500
+n_components = 700
 random_state = 42
 
 # --- ViT (Vision Transformer, optionnel) ---
@@ -252,7 +261,7 @@ image_stats = 0.0      # 0.5-1.0 si stats activées
 # ========================================
 [sampling]
 major_class = 2583
-major_cap = 3000
+major_cap = 4000
 tail_min = 1500      
 
 # ========================================
@@ -299,7 +308,7 @@ reg_alpha = 0.0
 reg_lambda = 1.0
 tree_method = "hist"
 verbosity = 2            #0=silent, 1=warning, 2=info, 3=debug
-early_stopping_rounds = 50
+early_stopping_rounds = 70
 
 # --- LightGBM ---
 [model.lgbm]

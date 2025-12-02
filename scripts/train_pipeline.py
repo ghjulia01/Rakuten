@@ -23,6 +23,9 @@ Utilisation:
     # Mode verbeux
     python scripts/train_pipeline.py --verbose
 
+    # Test complet
+    python scripts/train_pipeline.py --evaluate-on-train
+
 """
 import argparse
 import logging

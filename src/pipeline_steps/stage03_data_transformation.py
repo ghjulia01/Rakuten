@@ -158,6 +158,8 @@ class DataTransformationPipeline:
             # Fallback: construire depuis features.text
             text_config = self.config.get("features.text", {})
         
+
+        
         # CRITIQUE: S'assurer que la section SVD est incluse
         if "svd" not in text_config:
             svd_config = self.config.get("features.text.svd", {})
@@ -330,126 +332,215 @@ class DataTransformationPipeline:
     
     def create_feature_mapping(
         self,
-        X_transformed: np.ndarray
+        X_transformed: np.ndarray,
+        max_depth: int = 5
     ) -> Dict[str, Tuple[int, int]]:
         """
-        Cree un mapping des ranges de colonnes pour chaque transformateur.
+        Crée un mapping COMPLET et RÉCURSIF des features.
         
-        Gère correctement les Pipelines et FeatureUnions imbriqués.
-        Ceci est essentiel pour l'analyse SHAP decomposee par composante.
+        Explore tous les niveaux de FeatureUnion/Pipeline imbriqués pour créer
+        un mapping détaillé de toutes les sous-composantes.
+        
+        Exemples de noms générés:
+            - 'text_tfidf_word' au lieu de juste 'text'
+            - 'text_has_desc'
+            - 'text_text_stats'
+            - 'text_lexicon'
+            - 'image_cnn'
         
         Args:
-            X_transformed: Matrice de features transformees
+            X_transformed: Matrice de features transformées
+            max_depth: Profondeur maximale d'exploration (sécurité)
             
         Returns:
-            Dict avec ranges : {'text_tfidf': (0, 100000), 'text_has_desc': (100000, 100001), ...}
+            Dict avec ranges détaillés : 
+            {
+                'text_tfidf_word': (0, 50000),
+                'text_has_desc': (50000, 50001),
+                'text_title_len': (50001, 50002),
+                'text_text_stats': (50002, 50007),
+                'text_language': (50007, 50010),
+                'text_lexicon': (50010, 50037),
+                'image_cnn': (50037, 50537)
+            }
         """
-        logger.info("\n--- Creation du mapping des features ---")
-        
         mapping = {}
-        start_idx = 0
+        start_idx = [0]  # Utiliser une liste pour mutabilité dans la fonction imbriquée
         
-        # Parcourir les transformateurs du FeatureUnion
-        for name, transformer in self.feature_pipeline.transformer_list:
-            try:
-                # Cas 1: Pipeline sklearn (ex: Pipeline([TextCleaner, TfidfVectorizer]))
-                if hasattr(transformer, 'steps'):
-                    logger.info(f"  Traitement du Pipeline '{name}'...")
-                    # Prendre le dernier step qui génère les features
-                    last_step_name, last_step = transformer.steps[-1]
+        def explore_transformer(name_prefix: str, transformer, current_depth: int = 0) -> int:
+            """
+            Explore récursivement un transformer.
+            
+            Returns:
+                Nombre de features de ce transformer
+            """
+            nonlocal mapping
+            
+            if current_depth > max_depth:
+                logger.warning(f"⚠ Profondeur max ({max_depth}) atteinte pour {name_prefix}")
+                return 0
+            
+            indent = "  " * current_depth
+            
+            # ========================================
+            # Cas 1: Pipeline sklearn
+            # ========================================
+            if hasattr(transformer, 'steps'):
+                logger.debug(f"{indent}📦 Pipeline: {name_prefix}")
+                
+                # Chercher un FeatureUnion dans les steps
+                for step_name, step in transformer.steps:
+                    if hasattr(step, 'transformer_list'):
+                        # C'est un FeatureUnion → l'explorer
+                        logger.debug(f"{indent}  └─ Contient FeatureUnion '{step_name}'")
+                        return explore_transformer(
+                            name_prefix,  # Garder le même préfixe
+                            step,
+                            current_depth + 1
+                        )
+                    elif step_name in ('svd', 'pca', 'l2norm', 'scaler', 'normalizer'):
+                        # Ignorer les étapes de post-processing (elles ne changent pas le nombre de features)
+                        logger.debug(f"{indent}  └─ Skip post-processing: {step_name}")
+                        continue
+                
+                # Pas de FeatureUnion trouvé → c'est une feature finale
+                try:
+                    # Prendre le premier step "productif" (pas un cleaner)
+                    productive_step = None
+                    for step_name, step in transformer.steps:
+                        if step_name not in ('cleaner', 'text_cleaner'):
+                            productive_step = step
+                            break
                     
-                    if hasattr(last_step, 'get_feature_names_out'):
-                        feature_names = last_step.get_feature_names_out()
-                        n_features = len(feature_names)
+                    if productive_step is None:
+                        productive_step = transformer.steps[-1][1]
+                    
+                    # Calculer le nombre de features
+                    if hasattr(productive_step, 'get_feature_names_out'):
+                        n_features = len(productive_step.get_feature_names_out())
+                    elif hasattr(productive_step, 'n_features_'):
+                        n_features = productive_step.n_features_
+                    elif hasattr(productive_step, 'n_components'):
+                        n_features = productive_step.n_components
+                    elif hasattr(productive_step, 'n_components_'):
+                        n_features = productive_step.n_components_
                     else:
                         # Fallback: transformer un échantillon
                         sample = self._original_X_train.iloc[:1]
                         transformed = transformer.transform(sample)
                         n_features = transformed.shape[1]
                     
-                    end_idx = start_idx + n_features
-                    mapping[name] = (start_idx, end_idx)
-                    logger.info(f"    {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
-                    start_idx = end_idx
+                    end_idx = start_idx[0] + n_features
+                    mapping[name_prefix] = (start_idx[0], end_idx)
+                    logger.info(
+                        f"{indent}✓ {name_prefix:35s}: "
+                        f"cols {start_idx[0]:6d} - {end_idx:6d}  ({n_features:7,d} features)"
+                    )
+                    start_idx[0] = end_idx
+                    return n_features
+                    
+                except Exception as e:
+                    logger.error(f"{indent}✗ Erreur sur {name_prefix}: {e}")
+                    return 0
+            
+            # ========================================
+            # Cas 2: FeatureUnion → explorer chaque transformer
+            # ========================================
+            elif hasattr(transformer, 'transformer_list'):
+                logger.debug(f"{indent}🔀 FeatureUnion: {name_prefix} ({len(transformer.transformer_list)} transformers)")
                 
-                # Cas 2: FeatureUnion imbriqué (ex: word_branch qui contient tfidf, has_desc, etc.)
-                elif hasattr(transformer, 'transformer_list'):
-                    logger.info(f"  Traitement du FeatureUnion imbriqué '{name}'...")
-                    sub_start = start_idx
-                    
-                    for sub_name, sub_trans in transformer.transformer_list:
-                        # Gérer les sous-pipelines
-                        if hasattr(sub_trans, 'steps'):
-                            last_step_name, last_step = sub_trans.steps[-1]
-                            if hasattr(last_step, 'get_feature_names_out'):
-                                sub_names = last_step.get_feature_names_out()
-                                sub_n = len(sub_names)
-                            else:
-                                sample = self._original_X_train.iloc[:1]
-                                transformed = sub_trans.transform(sample)
-                                sub_n = transformed.shape[1]
-                        # Gérer les transformers simples
-                        elif hasattr(sub_trans, 'get_feature_names_out'):
-                            sub_names = sub_trans.get_feature_names_out()
-                            sub_n = len(sub_names)
-                        else:
-                            sample = self._original_X_train.iloc[:1]
-                            transformed = sub_trans.transform(sample)
-                            sub_n = transformed.shape[1]
-                        
-                        # Créer un nom composite
-                        composite_name = f"{name}_{sub_name}"
-                        mapping[composite_name] = (sub_start, sub_start + sub_n)
-                        logger.info(f"    {composite_name:20s}: colonnes {sub_start:6d} - {sub_start + sub_n:6d}  ({sub_n:6d} features)")
-                        sub_start += sub_n
-                    
-                    n_features = sub_start - start_idx
-                    start_idx = sub_start
-                
-                # Cas 3: Transformer simple (ex: CNNFeaturizer)
-                elif hasattr(transformer, 'get_feature_names_out'):
-                    feature_names = transformer.get_feature_names_out()
-                    n_features = len(feature_names)
-                    
-                    end_idx = start_idx + n_features
-                    mapping[name] = (start_idx, end_idx)
-                    logger.info(f"  {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
-                    start_idx = end_idx
-                
-                # Cas 4: Fallback - transformer un échantillon
-                else:
-                    sample = self._original_X_train.iloc[:1]
-                    transformed = transformer.transform(sample)
-                    
-                    if hasattr(transformed, 'shape'):
-                        n_features = transformed.shape[1]
+                total_features = 0
+                for sub_name, sub_transformer in transformer.transformer_list:
+                    # Créer un nom composite
+                    if name_prefix:
+                        composite_name = f"{name_prefix}_{sub_name}"
                     else:
-                        n_features = 1
+                        composite_name = sub_name
                     
-                    end_idx = start_idx + n_features
-                    mapping[name] = (start_idx, end_idx)
-                    logger.info(f"  {name:20s}: colonnes {start_idx:6d} - {end_idx:6d}  ({n_features:6d} features)")
-                    start_idx = end_idx
+                    n = explore_transformer(composite_name, sub_transformer, current_depth + 1)
+                    total_features += n
                 
-            except Exception as e:
-                logger.error(f"  Erreur lors du mapping de {name}: {e}")
-                # Utiliser la shape totale comme fallback
-                if start_idx < X_transformed.shape[1]:
-                    end_idx = X_transformed.shape[1]
-                    mapping[name] = (start_idx, end_idx)
-                    n_features = end_idx - start_idx
-                    logger.warning(f"  Fallback pour {name}: ({start_idx}, {end_idx}) - {n_features} features")
-                    start_idx = end_idx
+                logger.debug(f"{indent}  └─ Total: {total_features:,} features")
+                return total_features
+            
+            # ========================================
+            # Cas 3: Transformer simple (final)
+            # ========================================
+            else:
+                try:
+                    if hasattr(transformer, 'get_feature_names_out'):
+                        n_features = len(transformer.get_feature_names_out())
+                    elif hasattr(transformer, 'n_features_'):
+                        n_features = transformer.n_features_
+                    elif hasattr(transformer, 'n_components'):
+                        n_features = transformer.n_components
+                    elif hasattr(transformer, 'n_components_'):
+                        n_features = transformer.n_components_
+                    else:
+                        # Fallback: transformer un échantillon
+                        sample = self._original_X_train.iloc[:1]
+                        transformed = transformer.transform(sample)
+                        n_features = transformed.shape[1] if hasattr(transformed, 'shape') else 1
+                    
+                    end_idx = start_idx[0] + n_features
+                    mapping[name_prefix] = (start_idx[0], end_idx)
+                    logger.info(
+                        f"{indent}✓ {name_prefix:35s}: "
+                        f"cols {start_idx[0]:6d} - {end_idx:6d}  ({n_features:7,d} features)"
+                    )
+                    start_idx[0] = end_idx
+                    return n_features
+                    
+                except Exception as e:
+                    logger.error(f"{indent}✗ Erreur sur {name_prefix}: {e}")
+                    return 0
         
-        # Verification finale
+        # ========================================
+        # Démarrer l'exploration
+        # ========================================
+        logger.info("\n" + "=" * 80)
+        logger.info("CRÉATION DU MAPPING DÉTAILLÉ DES FEATURES (RÉCURSIF)")
+        logger.info("=" * 80)
+        
+        explore_transformer("", self.feature_pipeline, 0)
+        
+        # ========================================
+        # Vérification finale
+        # ========================================
         total_mapped = sum(end - start for start, end in mapping.values())
-        if total_mapped != X_transformed.shape[1]:
-            logger.warning(
-                f"  ATTENTION: Mapping incomplet ! "
-                f"Total mappe: {total_mapped}, attendu: {X_transformed.shape[1]}"
-            )
+        expected = X_transformed.shape[1]
+        
+        logger.info("\n" + "-" * 80)
+        logger.info("VÉRIFICATION DU MAPPING")
+        logger.info("-" * 80)
+        logger.info(f"Nombre de composantes : {len(mapping)}")
+        logger.info(f"Features mappées      : {total_mapped:,}")
+        logger.info(f"Features attendues    : {expected:,}")
+        
+        if total_mapped != expected:
+            diff = abs(total_mapped - expected)
+            logger.warning(f"⚠ ATTENTION: Différence de {diff:,} features !")
+            logger.warning("  Cela peut causer des problèmes avec SHAP.")
         else:
-            logger.info(f"[OK] Mapping complet: {total_mapped} features")
+            logger.info("✓ Mapping complet et cohérent !")
+        
+        logger.info("-" * 80 + "\n")
+        
+        # Afficher un résumé par groupe
+        logger.info("Résumé par groupe principal:")
+        groups = {}
+        for name, (start, end) in mapping.items():
+            # Extraire le préfixe (avant le premier _)
+            prefix = name.split('_')[0] if '_' in name else name
+            if prefix not in groups:
+                groups[prefix] = 0
+            groups[prefix] += (end - start)
+        
+        for group, count in sorted(groups.items()):
+            pct = (count / expected * 100) if expected > 0 else 0
+            logger.info(f"  {group:20s}: {count:7,d} features ({pct:5.1f}%)")
+        
+        logger.info("=" * 80 + "\n")
         
         return mapping
     
@@ -742,7 +833,6 @@ if __name__ == "__main__":
         print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
-
 
 
 

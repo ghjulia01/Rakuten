@@ -1,3 +1,4 @@
+
 """
 Etape 5 : Evaluation du modele (Model Evaluation).
 ===================================================
@@ -606,90 +607,331 @@ class ModelEvaluationPipeline:
                     self.run_shap_decomposed(model, X, feature_mapping, trainer)
                 
                 return self.results
+
+    # ============================================================================
+    # SHAP SIGNED ANALYSIS - Analyse de l'impact positif/négatif par composante
+    # ============================================================================
+
+    def analyze_shap_signed_by_component(
+        self,
+        shap_values: np.ndarray,
+        feature_mapping: Dict[str, Tuple[int, int]],
+        class_names: np.ndarray,
+        output_dir: str = "results/metrics"
+    ) -> Dict:
+        """
+        Analyse SHAP par composante avec impact signé (positif/négatif).
+    
+        Compatible avec XGBoost et modèles non-linéaires via SHAP values.
+    
+        Args:
+            shap_values: SHAP values de shape (n_samples, n_features) ou 
+                         (n_samples, n_features, n_classes)
+            feature_mapping: Dict {'component_name': (start_idx, end_idx)}
+            class_names: Array des noms de classes
+            output_dir: Dossier de sortie
+        
+        Returns:
+            Dict avec résultats détaillés incluant impact signé par classe
+        """
+        from pathlib import Path
+        import json
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+        # ========================================
+        # 1. Déterminer la structure de shap_values
+        # ========================================
+        if shap_values.ndim == 2:
+            # Binary classification ou régression
+            is_multiclass = False
+            n_samples, n_features = shap_values.shape
+            n_classes = 1
+            logger.info("SHAP values 2D détectées (binary/regression)")
+        elif shap_values.ndim == 3:
+            # Multiclass classification
+            is_multiclass = True
+            n_samples, n_features, n_classes = shap_values.shape
+            logger.info(f"SHAP values 3D détectées (multiclass, {n_classes} classes)")
+        else:
+            raise ValueError(f"Format SHAP inattendu : {shap_values.shape}")
+    
+        # ========================================
+        # 2. Calculer l'impact signé par composante et par classe
+        # ========================================
+        results = {
+            'per_class': {},
+            'global': {}
+        }
+    
+        logger.info("\n" + "=" * 80)
+        logger.info("ANALYSE SHAP SIGNÉE PAR COMPOSANTE")
+        logger.info("=" * 80)
+    
+        # Pour chaque classe
+        for class_idx in range(n_classes):
+            class_name = str(class_names[class_idx]) if class_idx < len(class_names) else f"class_{class_idx}"
+        
+            logger.info(f"\n--- Classe {class_name} ---")
+        
+            results['per_class'][class_name] = {}
+        
+            # Pour chaque composante
+            for component_name, (start, end) in feature_mapping.items():
+                # Extraire les SHAP values de cette composante
+                if is_multiclass:
+                    component_shap = shap_values[:, start:end, class_idx]
+                else:
+                    component_shap = shap_values[:, start:end]
             
-            # Decoder y_true si necessaire
-            if trainer is None:
-                raise ValueError(
-                    "Trainer requis pour decoder y_true/y_pred vers IDs originaux."
+                # Calculer les statistiques signées
+                mean_positive = component_shap[component_shap > 0].mean() if (component_shap > 0).any() else 0.0
+                mean_negative = component_shap[component_shap < 0].mean() if (component_shap < 0).any() else 0.0
+                mean_signed = component_shap.mean()  # Impact net moyen
+                mean_abs = np.abs(component_shap).mean()  # Importance absolue
+            
+                # Proportion positif/négatif
+                prop_positive = (component_shap > 0).sum() / component_shap.size
+                prop_negative = (component_shap < 0).sum() / component_shap.size
+            
+                results['per_class'][class_name][component_name] = {
+                    'mean_positive': float(mean_positive),
+                    'mean_negative': float(mean_negative),
+                    'mean_signed': float(mean_signed),
+                    'mean_abs': float(mean_abs),
+                    'prop_positive': float(prop_positive),
+                    'prop_negative': float(prop_negative)
+                }
+            
+                logger.info(
+                    f"  {component_name:30s}: "
+                    f"signed={mean_signed:+.4f}, abs={mean_abs:.4f}, "
+                    f"pos={prop_positive:.1%}, neg={prop_negative:.1%}"
                 )
-            
-            y_true_orig = _decode_to_original_ids(y_true, trainer)
-            y_pred_orig = y_pred_any  # Deja decode dans predict()
-            
-            # ========================================
-            # 3. Calcul des metriques
-            # ========================================
-            metrics = self.calculate_metrics(y_true_orig, y_pred_orig, dataset_name)
-            
-            # ========================================
-            # 4. Rapport de classification
-            # ========================================
-            report_text, ordered_ids, target_names = self.generate_classification_report(
-                y_true_orig, y_pred_orig
+    
+        # ========================================
+        # 3. Impact global (moyenne sur toutes les classes)
+        # ========================================
+        logger.info("\n--- Impact Global (toutes classes) ---")
+    
+        for component_name, (start, end) in feature_mapping.items():
+            if is_multiclass:
+                component_shap_all = shap_values[:, start:end, :]
+            else:
+                component_shap_all = shap_values[:, start:end]
+        
+            mean_signed = component_shap_all.mean()
+            mean_abs = np.abs(component_shap_all).mean()
+        
+            results['global'][component_name] = {
+                'mean_signed': float(mean_signed),
+                'mean_abs': float(mean_abs)
+            }
+        
+            logger.info(
+                f"  {component_name:30s}: signed={mean_signed:+.4f}, abs={mean_abs:.4f}"
             )
-            
-            # ========================================
-            # 5. Matrice de confusion
-            # ========================================
-            cm = confusion_matrix(y_true_orig, y_pred_orig, labels=ordered_ids)
-            self.save_confusion_matrices(cm, ordered_ids, target_names, dataset_name)
-            
-            # ========================================
-            # 6. Sauvegarder JSON et rapport
-            # ========================================
-            # Metriques JSON
-            metrics_path = self.output_dir / f"{self.model_name}_metrics.json"
-            with open(metrics_path, 'w') as f:
-                json.dump(metrics, f, indent=2)
-            logger.info(f"[OK] Metriques: {metrics_path}")
-            
-            # Rapport texte
-            report_path = self.output_dir / f"{self.model_name}_classification_report.txt"
-            with open(report_path, 'w') as f:
-                f.write(report_text)
-            logger.info(f"[OK] Rapport: {report_path}")
-            
-            # ========================================
-            # 7. SHAP standard
-            # ========================================
-            if self.shap_enabled:
-                self.maybe_run_shap(model, X, trainer)
-            
-            # ========================================
-            # 8. SHAP decompose (NOUVEAU)
-            # ========================================
-            if self.shap_decomposed_enabled and feature_mapping is not None:
-                logger.info("\n[INFO] Lancement du SHAP decompose...")
-                shap_results = self.run_shap_decomposed(model, X, feature_mapping, trainer)
-                self.results['shap_decomposed'] = shap_results
-            elif self.shap_decomposed_enabled and feature_mapping is None:
-                logger.warning("[WARNING] SHAP decompose active mais feature_mapping non fourni")
-            
-            # ========================================
-            # 9. Resume final
-            # ========================================
-            logger.info("\n" + "=" * 70)
-            logger.info("RESUME DE L'EVALUATION")
-            logger.info("=" * 70)
-            logger.info(f"[OK] Dataset: {dataset_name}")
-            logger.info(f"[OK] Predictions: {len(y_pred_orig)}")
-            logger.info(f"[OK] Accuracy: {metrics['accuracy']:.4f}")
-            logger.info(f"[OK] F1 (weighted): {metrics['f1_weighted']:.4f}")
-            logger.info(f"[OK] F1 (macro): {metrics['f1_macro']:.4f}")
-            logger.info(f"[OK] Resultats sauvegardes dans: {self.output_dir}")
-            logger.info("=" * 70 + "\n")
-            
-            # Stocker les resultats
-            self.results.update(metrics)
-            self.results['confusion_matrix'] = cm.tolist()
-            self.results['classification_report'] = report_text
-            
-            return self.results
+    
+        # ========================================
+        # 4. Sauvegarder JSON
+        # ========================================
+        json_path = f"{output_dir}/shap_signed_by_component.json"
+        with open(json_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        logger.info(f"\n✓ Résultats sauvegardés : {json_path}")
+    
+        # ========================================
+        # 5. Créer le graphique
+        # ========================================
+        plot_shap_signed_by_class(
+            results['per_class'],
+            feature_mapping,
+            output_path=f"{output_dir}/shap_signed_per_class.png"
+        )
+    
+        logger.info("=" * 80 + "\n")
+    
+        return results
 
 
-# ============================================================================
-# Exemple d'utilisation
-# ============================================================================
+    def plot_shap_signed_by_class(
+        self,
+        per_class_results: Dict,
+        feature_mapping: Dict[str, Tuple[int, int]],
+        output_path: str = "results/metrics/shap_signed_per_class.png"
+    ):
+        """
+        Créer un graphique de type 'divergent bars' montrant l'impact signé
+        par composante et par classe.
+    
+        Similaire au graphique 'block_importance_b2_per_class_signed_mag.png'.
+        """
+        import matplotlib.pyplot as plt
+    
+        # Préparer les données
+        class_names = list(per_class_results.keys())
+        component_names = list(feature_mapping.keys())
+    
+        n_classes = len(class_names)
+        n_components = len(component_names)
+    
+        # Matrice d'impacts signés : (n_classes, n_components)
+        signed_matrix = np.zeros((n_classes, n_components))
+    
+        for i, class_name in enumerate(class_names):
+            for j, comp_name in enumerate(component_names):
+                signed_matrix[i, j] = per_class_results[class_name][comp_name]['mean_signed']
+    
+        # ========================================
+        # Créer le graphique
+        # ========================================
+        fig, ax = plt.subplots(figsize=(14, max(10, n_classes * 0.35)))
+    
+        # Couleurs par composante
+        colors = plt.cm.tab10(np.linspace(0, 1, n_components))
+    
+        # Position des barres
+        y_pos = np.arange(n_classes)
+        bar_height = 0.6
+    
+        # Pour chaque classe
+        for i, class_name in enumerate(class_names):
+            left_pos = 0  # Position cumulative pour positif
+            right_pos = 0  # Position cumulative pour négatif
+        
+            for j, comp_name in enumerate(component_names):
+                value = signed_matrix[i, j]
+            
+                if value > 0:
+                    # Barre positive (à droite de 0)
+                    ax.barh(
+                        y_pos[i],
+                        value,
+                        left=left_pos,
+                        height=bar_height,
+                        color=colors[j],
+                        label=comp_name if i == 0 else "",
+                        edgecolor='white',
+                        linewidth=0.5
+                    )
+                    left_pos += value
+                else:
+                    # Barre négative (à gauche de 0)
+                    ax.barh(
+                        y_pos[i],
+                        abs(value),
+                        left=right_pos + value,  # Commencer à gauche
+                        height=bar_height,
+                        color=colors[j],
+                        alpha=0.6,  # Plus transparent pour négatif
+                        label=comp_name if i == 0 else "",
+                        edgecolor='white',
+                        linewidth=0.5
+                    )
+                    right_pos += value
+    
+        # Ligne verticale à x=0
+        ax.axvline(x=0, color='black', linewidth=1.5, linestyle='-')
+    
+        # Configuration
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(class_names, fontsize=9)
+        ax.set_xlabel("Contribution moyenne au score SHAP (impact signé)", fontsize=12)
+        ax.set_title("Impact SHAP par Composante et par Classe (Signé)", fontsize=14, fontweight='bold')
+    
+        # Légende
+        ax.legend(
+            loc='center left',
+            bbox_to_anchor=(1, 0.5),
+            frameon=True,
+            fontsize=10,
+            title="Composantes"
+        )
+    
+        # Grille
+        ax.grid(axis='x', alpha=0.3, linestyle='--')
+        ax.set_axisbelow(True)
+    
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    
+        logger.info(f"✓ Graphique sauvegardé : {output_path}")
+
+
+    def run_shap_decomposed_with_signed(
+        self,
+        model,
+        X: np.ndarray,
+        feature_mapping: Dict[str, Tuple[int, int]],
+        trainer
+    ) -> Dict:
+        """
+        Version étendue de run_shap_decomposed qui inclut l'analyse signée.
+    
+        Combine:
+        1. Analyse SHAP décomposée standard (importance absolue)
+        2. Analyse signée (impact positif/négatif par classe)
+    
+        Args:
+            model: Modèle entraîné
+            X: Matrice de features transformées
+            feature_mapping: Mapping des ranges de colonnes
+            trainer: Objet trainer avec label_encoder
+        
+        Returns:
+            Dict avec résultats SHAP + analyse signée
+        """
+        # 1. Calcul SHAP standard (déjà existant)
+        shap_results = self.run_shap_decomposed(model, X, feature_mapping, trainer)
+    
+        # 2. Analyse signée (nouveau)
+        logger.info("\n" + "=" * 80)
+        logger.info("ANALYSE SHAP SIGNÉE (POSITIF/NÉGATIF)")
+        logger.info("=" * 80)
+    
+        # Récupérer ou recalculer les SHAP values
+        import shap
+    
+        # Sample pour SHAP
+        n_shap = min(self.shap_decomposed_samples, len(X))
+        X_sample = X[:n_shap]
+    
+        logger.info(f"Calcul SHAP values pour analyse signée ({n_shap} échantillons)...")
+    
+        # Créer explainer
+        try:
+            explainer = shap.Explainer(model, X_sample)
+            shap_values_obj = explainer(X_sample)
+        
+            # Extraire les valeurs
+            if hasattr(shap_values_obj, 'values'):
+                shap_values_array = shap_values_obj.values
+            else:
+                shap_values_array = shap_values_obj
+        except Exception as e:
+            logger.warning(f"Impossible de calculer SHAP values pour analyse signée: {e}")
+            return shap_results
+    
+        # 3. Analyser avec signe
+        try:
+            signed_results = analyze_shap_signed_by_component(
+                shap_values=shap_values_array,
+                feature_mapping=feature_mapping,
+                class_names=trainer.label_encoder.classes_,
+                output_dir=self.output_dir
+            )
+        
+            # 4. Fusionner les résultats
+            shap_results['signed_analysis'] = signed_results
+            logger.info("✓ Analyse signée ajoutée aux résultats SHAP")
+        
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse signée: {e}")
+            import traceback
+            traceback.print_exc()
+    
+        return shap_results
+
 
 if __name__ == "__main__":
     from src.utils.logging_config import setup_logging
@@ -748,7 +990,6 @@ if __name__ == "__main__":
         print(f"\n[ERROR] Erreur inattendue: {e}")
         import traceback
         traceback.print_exc()
-
 
 
 

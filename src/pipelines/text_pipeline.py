@@ -31,6 +31,16 @@ from src.utils.profiling import profile_func
 # Configuration du logging
 logger = logging.getLogger(__name__)
 
+# Import BERT (optionnel, géré dynamiquement)
+try:
+    from src.features.text.bert_features import BertFeaturizer
+    BERT_AVAILABLE = True
+except ImportError:
+    BERT_AVAILABLE = False
+    logger.warning("BertFeaturizer non disponible")
+
+
+
 # -----------------------------------------------------------------------------
 # Utilitaires de configuration
 # -----------------------------------------------------------------------------
@@ -127,6 +137,13 @@ def create_text_pipeline(
     lexicon_top_k: int = 20,               
     lexicon_min_df: int | float = 3,
     lexicon_max_df: int | float = 0.95,
+    
+    # 4) BERT 
+    use_bert: bool = False,
+    bert_model_name: str = 'camembert-base',
+    bert_max_length: int = 128,
+    bert_batch_size: int = 32,
+    bert_use_cache: bool = True,
 ) -> FeatureUnion:
     """
     Crée le pipeline complet de traitement textuel.
@@ -192,17 +209,46 @@ def create_text_pipeline(
             "lexicon",
             Chi2LexiconFeatures(top_k=lexicon_top_k, binary=True, min_df=lexicon_min_df, max_df=lexicon_max_df)
         ))
+    
+    # ========================================
+    # BERT Embeddings 
+    # ========================================
+    if use_bert:
+        if not BERT_AVAILABLE:
+            logger.error(" BERT activé mais transformers non installé!")
+            logger.error("   Installer avec: pip install transformers torch")
+            raise ImportError("transformers requis pour BERT")
+        
+        logger.info(f"Activation de BERT: {bert_model_name}")
+        transformers.append((
+            "bert",
+            BertFeaturizer(
+                model_name=bert_model_name,
+                max_length=bert_max_length,
+                batch_size=bert_batch_size,
+                use_cache=bert_use_cache
+            )
+        ))
 
     return FeatureUnion(transformers)
 
 
 @profile_func
-def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Pipeline:
+def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Optional[Pipeline]:
     """
     Construit le pipeline texte depuis la config avec SVD optionnelle.
     
     Ajoute automatiquement la réduction SVD si activée dans config.
+    Retourne None si le pipeline texte est désactivé.
     """
+    # ========================================
+    # Vérifier si le pipeline texte est activé
+    # ========================================
+    text_enabled = cfg_text.get("enabled", True)
+    if not text_enabled:
+        logger.info("  Pipeline texte DÉSACTIVÉ (enabled=false)")
+        return None
+    
     tmap_path = cfg_text.get("translate_map_path", None)
     n_map = len(_load_translate_map(tmap_path)) if tmap_path else 0
     logger.info(
@@ -237,7 +283,14 @@ def create_text_pipeline_from_cfg(cfg_text: Dict[str, Any]) -> Pipeline:
         use_lexicon=cfg_text.get("lexicon", {}).get("enabled", False),
         lexicon_top_k=cfg_text.get("lexicon", {}).get("top_k", 20),
         lexicon_min_df=cfg_text.get("lexicon", {}).get("min_df", 3),
-        lexicon_max_df=cfg_text.get("lexicon", {}).get("max_df", 0.95)
+        lexicon_max_df=cfg_text.get("lexicon", {}).get("max_df", 0.95),
+        
+        # BERT (NOUVEAU)
+        use_bert=cfg_text.get("bert", {}).get("enabled", False),
+        bert_model_name=cfg_text.get("bert", {}).get("model_name", "camembert-base"),
+        bert_max_length=cfg_text.get("bert", {}).get("max_length", 128),
+        bert_batch_size=cfg_text.get("bert", {}).get("batch_size", 32),
+        bert_use_cache=cfg_text.get("bert", {}).get("use_cache", True),
     )
 
     # 2) Optionnel : ajouter la branche caractères
