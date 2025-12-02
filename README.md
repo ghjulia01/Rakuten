@@ -3,7 +3,7 @@
 
 ## Presentation  
 
-This project is part of the **DataScientest – Mines Paris** training program and the challenge proposed by the **Rakuten Institute of Technology** via the Challenge Data platform in partnership with the Collège de France. It aims to **automate the classification of products sold** on the **Rakuten France marketplace** using both textual data (titles, descriptions) and visual data (product images). The project employs a multimodal text and image pipeline, centralized configuration via TOML, CV-safe rebalancing.
+This project is part of the **DataScientest – Mines Paris** training program and the challenge proposed by the **Rakuten Institute of Technology** via the Challenge Data platform in partnership with the **Collège de France**. It aims to **automate the classification of products sold** on the **Rakuten France marketplace** using both textual data (titles, descriptions) and visual data (product images). The project employs a multimodal text and image pipeline, centralized configuration via TOML, CV-safe rebalancing.
 
 ---
 
